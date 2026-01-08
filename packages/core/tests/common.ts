@@ -35,8 +35,8 @@ export function setupSurrealTests() {
       DEFINE FIELD OVERWRITE ${field.name} ON TABLE ${table} TYPE ${field.type}${
         field.default
           ? field.default.always
-            ? ` DEFAULT ALWAYS ${JSON.stringify(field.default.value)}`
-            : ` DEFAULT ${JSON.stringify(field.default.value)}`
+            ? ` DEFAULT ALWAYS ${field.default.value}`
+            : ` DEFAULT ${field.default.value}`
           : ""
       }${
         field.transforms?.length
@@ -244,9 +244,5 @@ export function setupSurrealTests() {
     });
   }
 
-  return {
-    // surreal,
-    // testInstance,
-    defineTest,
-  };
+  return { defineTest };
 }

@@ -15,7 +15,6 @@ async function getSurrealVersion() {
   }
 
   const match = /(?<version>.*?) for (?<platform>.*?) on (?<arch>.*?)\n/.exec(
-    // @ts-expect-error - unknown bun typing error, but it works
     await Bun.spawn([surrealBin, "version"]).stdout.text(),
   );
 

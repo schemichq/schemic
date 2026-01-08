@@ -1,17 +1,18 @@
-// import {
-//   Surreal,
-//   DateTime,
-//   Decimal,
-//   RecordId,
-//   Uuid,
-//   surql,
-//   Table,
-//   escapeIdent,
-//   Duration,
-// } from "surrealdb";
-// import { bigint, z } from "./src";
-
-import { DateTime, Decimal, RecordId } from "surrealdb";
+import {
+  Surreal,
+  DateTime,
+  Decimal,
+  RecordId,
+  Uuid,
+  surql,
+  Table,
+  escapeIdent,
+  Duration,
+  Value,
+  applyDiagnostics,
+  createRemoteEngines,
+  Future,
+} from "surrealdb";
 import z from "./src";
 
 // // import { createNodeEngines } from "@surrealdb/node";
@@ -43,17 +44,20 @@ import z from "./src";
 // // // console.log(parsedUser);
 // // // console.log("-".repeat(80));
 
-// const surreal = new Surreal({
-//   // engines: createNodeEngines(),
-// });
-// await surreal.connect("ws://127.0.0.1:8000", {
-//   authentication: {
-//     username: "root",
-//     password: "Welc0me123.",
-//   },
-//   namespace: "main",
-//   database: "main",
-// });
+const surreal = new Surreal({
+  // engines: applyDiagnostics(createRemoteEngines(), (event) => {
+  //   console.log("event:", event);
+  // }),
+});
+
+await surreal.connect("ws://127.0.0.1:8000", {
+  authentication: {
+    username: "root",
+    password: "Welc0me123.",
+  },
+  namespace: "main",
+  database: "main",
+});
 
 // // await surreal.use({ namespace: "test", database: "test" });
 
@@ -371,23 +375,8 @@ import z from "./src";
 // // // const result = schema.parse("Hello World");
 // // // console.log(result);
 
-// Clone
-console.log(
-  z
-    .recordId()
-    // .table("client")
-    // .type(z.tuple([z.number(), z.string()]))
-    .safeDecode(new RecordId("user", "false")),
-);
-
-// Table + Id
-console.log(
-  z
-    .recordId()
-    .table("client")
-    .type(z.tuple([z.number(), z.string()]))
-    .safeFromId([123, "John Doe"]),
-);
+const date = z.date().$default(surql`time::now()`);
+console.log(date.decode(undefined));
 
 // // Id
 // console.log(

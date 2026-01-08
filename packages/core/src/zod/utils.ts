@@ -1,5 +1,5 @@
 import z, { core, globalRegistry } from "zod";
-import { SurrealZodType, type SurrealZodInternals } from "./schema";
+import { ZodSurrealType, type SurrealZodInternals } from "./schema";
 
 export type UnionToIntersection<U> = (
   U extends any
@@ -62,6 +62,7 @@ export function patch<
 >(options: {
   original: core.$constructor<ZodTrait>;
   name: string;
+  extend?: core.$constructor<ZodTrait>[];
 
   patchDef?(def: T["_zod"]["def"]): void;
 
@@ -86,7 +87,12 @@ export function patch<
   return core.$constructor<T>(options.name, (inst, def) => {
     options.original.init(inst, def);
     // @ts-expect-error - SurrealZodType overrides the type property
-    SurrealZodType.init(inst, def);
+    ZodSurrealType.init(inst, def);
+    options.extend?.forEach((extend) => {
+      // @ts-expect-error - extend is a constructor
+      extend.init(inst, def);
+    });
+
     options.patchDef?.(def);
 
     if (options.beforeCheck || options.afterCheck) {

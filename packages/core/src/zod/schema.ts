@@ -1,5 +1,3 @@
-/** biome-ignore-all lint/suspicious/noExplicitAny: needed for conversion */
-/** biome-ignore-all lint/style/noNonNullAssertion: needed for conversion */
 import {
   BoundQuery,
   Decimal,
@@ -55,7 +53,7 @@ export interface SurrealZodTypeInternals<
   def: SurrealZodTypeDef<SurrealInternals>;
 }
 
-export interface SurrealZodType<
+export interface ZodSurrealType<
   out O = unknown,
   out I = unknown,
   out Internals extends SurrealZodTypeInternals<
@@ -65,12 +63,12 @@ export interface SurrealZodType<
   > = SurrealZodTypeInternals<O, I, SurrealZodInternals>,
 > extends Omit<classic.ZodType<O, I, Internals>, "type"> {}
 
-export interface _SurrealZodType<
+export interface _ZodSurrealType<
   Internals extends SurrealZodTypeInternals = SurrealZodTypeInternals,
-> extends SurrealZodType<any, any, Internals> {}
+> extends ZodSurrealType<any, any, Internals> {}
 
-export const SurrealZodType: core.$constructor<SurrealZodType> =
-  core.$constructor("SurrealZodType", (inst, def) => {
+export const ZodSurrealType: core.$constructor<ZodSurrealType> =
+  core.$constructor("ZodSurrealType", (inst, def) => {
     // @ts-expect-error - we will be overriding the type property
     classic.ZodType.init(inst, def);
     // @ts-expect-error - we will be overriding the type property
@@ -79,6 +77,163 @@ export const SurrealZodType: core.$constructor<SurrealZodType> =
     inst._zod.def.surreal ??= {
       type: "any",
     };
+
+    return inst;
+  });
+
+///////////////////////////////////////////////
+///////////////////////////////////////////////
+//////////                           //////////
+//////////      ZodSurrealField      //////////
+//////////                           //////////
+///////////////////////////////////////////////
+///////////////////////////////////////////////
+
+export interface ZodSurrealFieldInternals<
+  out O = unknown,
+  out I = unknown,
+  out Internals extends SurrealZodTypeInternals<
+    O,
+    I,
+    SurrealZodInternals
+  > = SurrealZodTypeInternals<O, I, SurrealZodInternals>,
+> extends core.$ZodTypeInternals<O, I> {
+  def: SurrealZodTypeDef<
+    Internals["def"]["surreal"] & {
+      field: {
+        default?: BoundQuery;
+      };
+    }
+  > & {
+    innerType: core.$ZodType<O, I>;
+  };
+}
+
+export interface ZodSurrealField<
+  T extends core.$ZodType = core.$ZodType,
+  O = core.output<T>,
+  I = core.input<T>,
+> extends core.$ZodType<O, I, ZodSurrealFieldInternals<O, I>> {
+  // parsing
+  parse(
+    data: unknown,
+    params?: core.ParseContext<core.$ZodIssue>,
+  ): core.output<this>;
+  safeParse(
+    data: unknown,
+    params?: core.ParseContext<core.$ZodIssue>,
+  ): classic.ZodSafeParseResult<core.output<this>>;
+  parseAsync(
+    data: unknown,
+    params?: core.ParseContext<core.$ZodIssue>,
+  ): Promise<core.output<this>>;
+  safeParseAsync(
+    data: unknown,
+    params?: core.ParseContext<core.$ZodIssue>,
+  ): Promise<classic.ZodSafeParseResult<core.output<this>>>;
+  spa: (
+    data: unknown,
+    params?: core.ParseContext<core.$ZodIssue>,
+  ) => Promise<classic.ZodSafeParseResult<core.output<this>>>;
+
+  // encoding/decoding
+  encode(
+    data: core.output<this>,
+    params?: core.ParseContext<core.$ZodIssue>,
+  ): core.input<this>;
+  decode(
+    data: core.input<this>,
+    params?: core.ParseContext<core.$ZodIssue>,
+  ): core.output<this>;
+  encodeAsync(
+    data: core.output<this>,
+    params?: core.ParseContext<core.$ZodIssue>,
+  ): Promise<core.input<this>>;
+  decodeAsync(
+    data: core.input<this>,
+    params?: core.ParseContext<core.$ZodIssue>,
+  ): Promise<core.output<this>>;
+  safeEncode(
+    data: core.output<this>,
+    params?: core.ParseContext<core.$ZodIssue>,
+  ): classic.ZodSafeParseResult<core.input<this>>;
+  safeDecode(
+    data: core.input<this>,
+    params?: core.ParseContext<core.$ZodIssue>,
+  ): classic.ZodSafeParseResult<core.output<this>>;
+  safeEncodeAsync(
+    data: core.output<this>,
+    params?: core.ParseContext<core.$ZodIssue>,
+  ): Promise<classic.ZodSafeParseResult<core.input<this>>>;
+  safeDecodeAsync(
+    data: core.input<this>,
+    params?: core.ParseContext<core.$ZodIssue>,
+  ): Promise<classic.ZodSafeParseResult<core.output<this>>>;
+
+  $default(
+    value: core.util.NoUndefined<core.output<T>> | BoundQuery,
+  ): ZodSurrealField<T>;
+}
+
+export type WithZodSurrealFieldMethods<
+  T extends core.$ZodType = core.$ZodType,
+> = T & {
+  $default(
+    value: core.util.NoUndefined<core.output<T>> | BoundQuery,
+  ): ZodSurrealField<T, core.output<T>, core.input<T> | undefined>;
+};
+
+export const ZodSurrealField: core.$constructor<ZodSurrealField> =
+  core.$constructor("ZodSurrealField", (inst, def) => {
+    // @ts-expect-error
+    core.$ZodType.init(inst, def);
+    def.surreal.field ??= {};
+
+    // parsing
+    inst.parse = (data, params) =>
+      classic.parse(inst, data, params, { callee: inst.parse });
+    inst.safeParse = (data, params) => classic.safeParse(inst, data, params);
+    inst.parseAsync = async (data, params) =>
+      classic.parseAsync(inst, data, params, { callee: inst.parseAsync });
+    inst.safeParseAsync = async (data, params) =>
+      classic.safeParseAsync(inst, data, params);
+    inst.spa = inst.safeParseAsync;
+
+    // encoding/decoding
+    inst.encode = (data, params) => classic.encode(inst, data, params);
+    inst.decode = (data, params) => classic.decode(inst, data, params);
+    inst.encodeAsync = async (data, params) =>
+      classic.encodeAsync(inst, data, params);
+    inst.decodeAsync = async (data, params) =>
+      classic.decodeAsync(inst, data, params);
+    inst.safeEncode = (data, params) => classic.safeEncode(inst, data, params);
+    inst.safeDecode = (data, params) => classic.safeDecode(inst, data, params);
+    inst.safeEncodeAsync = async (data, params) =>
+      classic.safeEncodeAsync(inst, data, params);
+    inst.safeDecodeAsync = async (data, params) =>
+      classic.safeDecodeAsync(inst, data, params);
+
+    // ----------- Database Only Methods -----------
+    inst.$default = (value) => {
+      return new ZodSurrealField({
+        ...inst._zod.def,
+        innerType: classic.optional(inst),
+        surreal: {
+          ...inst._zod.def.surreal,
+          field: {
+            ...inst._zod.def.surreal.field,
+            default: value instanceof BoundQuery ? value : undefined,
+          },
+        },
+      });
+    };
+
+    if (inst._zod.traits.size === 2 && inst._zod.def.innerType) {
+      inst._zod.parse = inst._zod.def.innerType._zod.parse;
+      // @ts-expect-error
+      inst._zod.check = inst._zod.def.innerType._zod.check;
+      inst._zod.run = inst._zod.def.innerType._zod.run;
+    }
 
     return inst;
   });
@@ -126,17 +281,6 @@ export interface SurrealZodRecordIdInternals<
   > {
   def: SurrealZodRecordIdDef<Table, Id>;
 }
-
-// type ParseParams = core.ParseContext<core.$ZodIssue>;
-
-// type DecodeResult<Tb extends string, Id extends RecordIdValue> =
-//   RecordId<Tb, Id>;
-
-// type SafeDecodeResult<Tb extends string, Id extends RecordIdValue> =
-//   classic.ZodSafeParseResult<RecordId<Tb, Id>>;
-
-// type MaybeAsync<T, IsAsync extends boolean> =
-//   IsAsync extends true ? Promise<T> : T;
 
 type SurrealZodRecordIdTrait<
   Tb extends string,
@@ -1123,7 +1267,7 @@ export type SurrealZodRecordId<
   Table extends string = string,
   Id extends SurrealZodRecordIdValue = SurrealZodRecordIdValue,
 > = Omit<
-  _SurrealZodType<SurrealZodRecordIdInternals<Table, Id>>,
+  _ZodSurrealType<SurrealZodRecordIdInternals<Table, Id>>,
   | "parse"
   | "parseAsync"
   | "safeParse"
@@ -1302,7 +1446,7 @@ function parseSurrealValue(str: string) {
 
 export const SurrealZodRecordId: core.$constructor<SurrealZodRecordId> =
   core.$constructor("SurrealZodRecordId", (inst, def) => {
-    SurrealZodType.init(inst as any, def);
+    ZodSurrealType.init(inst as any, def);
 
     // surreal internals
     inst._zod.def.surreal.type = "record_id";
@@ -1667,7 +1811,7 @@ export type SurrealZodTable<
     SurrealZodTableConfigSchemaless
   >,
   Kind extends TableKind = "any",
-> = _SurrealZodType<
+> = _ZodSurrealType<
   SurrealZodTableInternals<
     Name,
     ApplyDtoToFields<NormalizedFields<Name, Fields>, Config["dto"]>,
@@ -2031,7 +2175,7 @@ function normalizeTableDef(def: SurrealZodTableDef) {
 
 export const SurrealZodTable: core.$constructor<SurrealZodTable> =
   core.$constructor("SurrealZodTable", (inst, def) => {
-    SurrealZodType.init(inst, def);
+    ZodSurrealType.init(inst, def);
 
     const normalized = normalizeTableDef(def);
     // @ts-expect-error - through normalization id is always present
@@ -2493,11 +2637,11 @@ export interface SurrealZodDurationInternals
 }
 
 export interface SurrealZodDuration
-  extends _SurrealZodType<SurrealZodDurationInternals> {}
+  extends _ZodSurrealType<SurrealZodDurationInternals> {}
 
 export const SurrealZodDuration: core.$constructor<SurrealZodDuration> =
   core.$constructor("SurrealZodDuration", (inst, def) => {
-    SurrealZodType.init(inst, def);
+    ZodSurrealType.init(inst, def);
 
     // surreal internals
     inst._zod.def.surreal.type = "duration";

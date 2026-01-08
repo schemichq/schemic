@@ -6,6 +6,7 @@ import {
   ZodUUID as OriginalZodUUID,
 } from "zod/v4";
 import { type OverrideOutputInput, patch } from "./utils";
+import { ZodSurrealField, type WithZodSurrealFieldMethods } from "./schema";
 
 // guid
 export type ZodGUID = SurrealZodGUID;
@@ -146,19 +147,22 @@ export interface SurrealZodDate
     { type: "datetime" }
   > {}
 
-export const SurrealZodDate = patch<SurrealZodDate>({
-  original: OriginalZodDate,
-  name: "SurrealZodDate",
-  patchDef(def) {
-    def.surreal.type = "datetime";
+export const SurrealZodDate = patch<WithZodSurrealFieldMethods<SurrealZodDate>>(
+  {
+    original: OriginalZodDate,
+    name: "SurrealZodDate",
+    extend: [ZodSurrealField],
+    patchDef(def) {
+      def.surreal.type = "datetime";
+    },
+    beforeParse(payload) {
+      if (payload.value instanceof DateTime) {
+        payload.value = payload.value.toDate();
+        return payload;
+      }
+    },
   },
-  beforeParse(payload) {
-    if (payload.value instanceof DateTime) {
-      payload.value = payload.value.toDate();
-      return payload;
-    }
-  },
-});
+);
 
 export function date(params?: string | core.$ZodDateParams) {
   return new SurrealZodDate({

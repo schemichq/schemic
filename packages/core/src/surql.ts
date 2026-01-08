@@ -11,12 +11,12 @@ import {
   SurrealZodTable,
   type SurrealZodRecordId,
   type SurrealZodTableConfig,
-  type SurrealZodType,
+  type ZodSurrealType,
   type SurrealZodTypeDef,
 } from "./zod/schema";
 
 export type ZodTypeName = core.$ZodType["_zod"]["def"]["type"];
-export type SurrealZodTypeName = SurrealZodType["_zod"]["def"]["type"];
+export type SurrealZodTypeName = ZodSurrealType["_zod"]["def"]["type"];
 
 const OPEN_ISSUE_FOR_SUPPORT =
   " If you need this, please open an issue on the repository so we can look into your use case and possible implementation. https://github.com/msanchezdev/surreal-zod/issues";
@@ -340,7 +340,7 @@ export function defineField(
         defineField(
           `${escapeIdent(name)}.${childName === "*" ? childName : escapeIdent(childName)}`,
           table,
-          childType as SurrealZodType,
+          childType as ZodSurrealType,
           {
             exists: options?.exists,
             // @ts-expect-error - @internal
@@ -385,7 +385,7 @@ function createContext(
   };
 }
 export function inferSurrealType(
-  type: core.$ZodType | SurrealZodType,
+  type: core.$ZodType | ZodSurrealType,
   context?: ZodSurrealTypeContext,
 ): { type: string; context: ZodSurrealTypeContext } {
   context ??= createContext();

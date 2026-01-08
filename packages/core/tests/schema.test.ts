@@ -1,9 +1,9 @@
 import {
-  type AsymmetricMatcher,
   describe,
   expect,
   expectTypeOf,
   test,
+  type AsymmetricMatcher,
 } from "bun:test";
 import {
   Duration,
