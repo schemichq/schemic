@@ -3,14 +3,14 @@ import { surql } from "surrealdb";
 import { sz, table, relation, type App, type Wire } from "./src/pure";
 
 /**
- * Showcase data model for a tiny blog / social app. Demonstrates: typed record
- * ids, record links, arrays of links, graph relations, DB-side
+ * Showcase data model for a tiny blog / social app. Demonstrates: smart record
+ * ids, record links, arrays of links, chained graph relations, DB-side
  * defaults/asserts/readonly, schemafull + comment config, and derived shapes.
  */
 
 /** Users — schemafull, with DB-managed timestamps and status. */
 export const User = table("user", {
-  id: sz.recordId("user").type(z.string()),
+  id: z.string(), // -> record<user> with a string id
   name: sz.string(),
   email: sz.email(),
   bio: sz.string().optional().$comment("Short profile blurb"),
@@ -21,14 +21,13 @@ export const User = table("user", {
 
 /** Tags — a simple lookup table with string ids. */
 export const Tag = table("tag", {
-  id: sz.recordId("tag").type(z.string()),
+  id: z.string(),
   label: sz.string(),
   slug: sz.string(),
 });
 
-/** Posts — link to one author and many tags. */
+/** Posts — id omitted (defaults to record<post>); link to one author and many tags. */
 export const Post = table("post", {
-  id: sz.recordId("post"),
   author: User.record(), // record<user>
   title: sz.string(),
   body: sz.string(),
@@ -41,7 +40,6 @@ export const Post = table("post", {
 
 /** Comments — link a post and its author. */
 export const Comment = table("comment", {
-  id: sz.recordId("comment"),
   post: Post.record(),
   author: User.record(),
   body: sz.string(),
@@ -50,20 +48,18 @@ export const Comment = table("comment", {
 
 /** Graph relation: user ->friend-> user. */
 export const Friend = relation("friend", {
-  from: "user",
-  to: "user",
-  fields: {
-    since: sz.datetime().$default(surql`time::now()`),
-    strength: sz.number().$assert(surql`$value >= 0 AND $value <= 1`),
-  },
-});
+  since: sz.datetime().$default(surql`time::now()`),
+  strength: sz.number().$assert(surql`$value >= 0 AND $value <= 1`),
+})
+  .from(User)
+  .to(User);
 
 /** Graph relation: user ->liked-> post. */
 export const Liked = relation("liked", {
-  from: "user",
-  to: "post",
-  fields: { at: sz.datetime().$default(surql`time::now()`) },
-});
+  at: sz.datetime().$default(surql`time::now()`),
+})
+  .from(User)
+  .to(Post);
 
 /** Derived shapes — same field metadata, different field sets. */
 export const PublicUser = User.omit("email", "status"); // safe to expose

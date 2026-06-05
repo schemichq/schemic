@@ -144,7 +144,7 @@ export interface TableConfig {
   schemafull: boolean;
   drop?: boolean;
   comment?: string;
-  relation?: { from: string; to: string };
+  relation?: { from: string[]; to: string[] };
 }
 
 function normalizeFields<S extends Shape>(shape: S): Fields<S> {
@@ -233,40 +233,124 @@ export class TableDef<Name extends string, S extends Shape> {
     return new TableDef(this.name, f as Fields<RequiredShape<S>>, this.config);
   }
 
-  /** Derive a `record<name>` link to this table, for use as a field elsewhere. */
-  record(): RecordIdField<Name> {
-    return new RecordIdField([this.name]);
+  /** Derive a `record<name>` link to this table (carrying its id value type). */
+  record(): S extends { id: RecordIdField<Name, infer V> }
+    ? RecordIdField<Name, V>
+    : RecordIdField<Name> {
+    const idField = (this.fields as Record<string, SField>).id as RecordIdField<Name> | undefined;
+    return new RecordIdField([this.name], idField?.valueType) as never;
   }
+}
+
+// --- Smart id: the `id` field describes the id value type; wrapped as record<thisTable, V>. ---
+type IdValue<Id> = Id extends RecordIdField<string, infer V>
+  ? V
+  : Id extends SField<infer Sc>
+    ? z.output<Sc> extends RecordIdValue
+      ? z.output<Sc>
+      : RecordIdValue
+    : Id extends z.ZodType
+      ? z.output<Id> extends RecordIdValue
+        ? z.output<Id>
+        : RecordIdValue
+      : RecordIdValue;
+type WithSmartId<Name extends string, S extends Shape> = Omit<S, "id"> & {
+  id: RecordIdField<Name, "id" extends keyof S ? IdValue<S["id"]> : RecordIdValue>;
+};
+
+/** Build a table's `id` field: a `record<name>` whose value type comes from `given`. */
+function buildIdField(name: string, given: SField | z.ZodType | undefined): RecordIdField<string> {
+  if (given === undefined) return new RecordIdField([name]);
+  if (given instanceof RecordIdField) return new RecordIdField([name], given.valueType);
+  const valueSchema = given instanceof SField ? given.schema : given;
+  return new RecordIdField([name], valueSchema as z.ZodType<RecordIdValue>);
+}
+
+/** Normalize a shape, replacing/adding the special `id` field via buildIdField. */
+function applySmartId(name: string, shape: Shape): Record<string, SField> {
+  const out: Record<string, SField> = {};
+  for (const [k, v] of Object.entries(shape)) {
+    if (k === "id") continue;
+    out[k] = v instanceof SField ? v : new SField(v);
+  }
+  out.id = buildIdField(name, (shape as Record<string, SField | z.ZodType>).id);
+  return out;
 }
 
 /** Define a normal table (schemafull by default). */
 export function table<Name extends string, S extends Shape>(
   name: Name,
   shape: S,
-): TableDef<Name, S> {
-  return new TableDef(name, normalizeFields(shape), { schemafull: true });
+): TableDef<Name, WithSmartId<Name, S>> {
+  return new TableDef(name, applySmartId(name, shape) as Fields<WithSmartId<Name, S>>, {
+    schemafull: true,
+  });
 }
 
-/** Define a graph relation (edge table) with implicit id/in/out record links. */
-export function relation<
+// biome-ignore lint/suspicious/noExplicitAny: shape-agnostic table reference for relation endpoints
+type AnyTable = TableDef<string, any>;
+type TableRef = AnyTable | readonly AnyTable[];
+type NamesOf<T> = T extends TableDef<infer N extends string, infer _>
+  ? N
+  : T extends readonly (infer E)[]
+    ? E extends TableDef<infer N extends string, infer _>
+      ? N
+      : never
+    : never;
+
+type RelationShape<
   Name extends string,
-  From extends string,
-  To extends string,
-  S extends Shape = {},
->(
+  S extends Shape,
+  From extends TableRef,
+  To extends TableRef,
+> = Omit<WithSmartId<Name, S>, "in" | "out"> & {
+  in: RecordIdField<NamesOf<From>>;
+  out: RecordIdField<NamesOf<To>>;
+};
+
+function tableNames(ref: TableRef): string[] {
+  return (Array.isArray(ref) ? ref : [ref as AnyTable]).map((t) => t.name);
+}
+
+/** Staged relation builder — set the source endpoint with `.from(...)`. */
+class RelationFrom<Name extends string, S extends Shape> {
+  constructor(
+    readonly name: Name,
+    readonly fields: S,
+  ) {}
+  from<From extends TableRef>(from: From): RelationTo<Name, S, From> {
+    return new RelationTo(this.name, this.fields, from);
+  }
+}
+
+/** Staged relation builder — set the target endpoint with `.to(...)`, producing the table. */
+class RelationTo<Name extends string, S extends Shape, From extends TableRef> {
+  constructor(
+    readonly name: Name,
+    readonly fields: S,
+    readonly from: From,
+  ) {}
+  to<To extends TableRef>(to: To): TableDef<Name, RelationShape<Name, S, From, To>> {
+    const fromNames = tableNames(this.from);
+    const toNames = tableNames(to);
+    const fields: Record<string, SField> = {
+      ...applySmartId(this.name, this.fields),
+      in: sz.recordId(fromNames),
+      out: sz.recordId(toNames),
+    };
+    return new TableDef(this.name, fields as Fields<RelationShape<Name, S, From, To>>, {
+      schemafull: true,
+      relation: { from: fromNames, to: toNames },
+    });
+  }
+}
+
+/** Define a graph relation (edge table). Chain `.from(X).to(Y)` to set endpoints. */
+export function relation<Name extends string, S extends Shape = {}>(
   name: Name,
-  opts: { from: From; to: To; fields?: S },
-): TableDef<Name, S & { id: SField; in: SField; out: SField }> {
-  const shape = {
-    id: sz.recordId(name),
-    in: sz.recordId(opts.from),
-    out: sz.recordId(opts.to),
-    ...(opts.fields ?? {}),
-  } as unknown as S & { id: SField; in: SField; out: SField };
-  return new TableDef(name, normalizeFields(shape), {
-    schemafull: true,
-    relation: { from: opts.from, to: opts.to },
-  });
+  fields?: S,
+): RelationFrom<Name, S> {
+  return new RelationFrom(name, (fields ?? {}) as S);
 }
 
 /** The app-facing type (what your code reads). */

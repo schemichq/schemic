@@ -96,7 +96,7 @@ export function defineTable(
   // Surreal manages id (and in/out for relations) implicitly.
   const implicit = rel ? new Set(["id", "in", "out"]) : new Set(["id"]);
   const type = rel
-    ? `RELATION FROM ${escapeIdent(rel.from)} TO ${escapeIdent(rel.to)}`
+    ? `RELATION FROM ${rel.from.map(escapeIdent).join(" | ")} TO ${rel.to.map(escapeIdent).join(" | ")}`
     : "NORMAL";
 
   const head = [
