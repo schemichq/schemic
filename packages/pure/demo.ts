@@ -13,7 +13,7 @@ const rule = (t: string) => console.log(`\n─── ${t} ${"─".repeat(Math.ma
 
 rule("Generated schema (DDL)");
 const ddl = [User, Tag, Post, Comment, Friend, Liked]
-  .map((t) => defineTable(t, { overwrite: true }))
+  .map((t) => defineTable(t, { exists: "overwrite" }))
   .join("\n");
 console.log(ddl);
 

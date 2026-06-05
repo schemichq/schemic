@@ -12,7 +12,7 @@ import { Friend, User } from "./schema";
 const db = await connect();
 // Ensure the schema exists (idempotent).
 await db.query(
-  [defineTable(User, { overwrite: true }), defineTable(Friend, { overwrite: true })].join("\n"),
+  [defineTable(User, { exists: "overwrite" }), defineTable(Friend, { exists: "overwrite" })].join("\n"),
 );
 
 const json = (data: unknown, status = 200) =>

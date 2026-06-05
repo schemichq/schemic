@@ -24,6 +24,7 @@ export const objectFieldsRegistry = new WeakMap<z.ZodType, Record<string, SField
 /** SurrealQL DDL metadata — the `$`-prefixed field options. */
 export interface SurrealMeta {
   default?: BoundQuery;
+  defaultAlways?: boolean;
   value?: BoundQuery;
   assert?: BoundQuery;
   readonly?: boolean;
@@ -53,7 +54,10 @@ export class SField<S extends z.ZodType = z.ZodType> {
 
   // SurrealQL DDL metadata (mirrors surreal-zod's $-prefixed methods).
   $default(expr: BoundQuery) {
-    return new SField(this.schema, { ...this.surreal, default: expr });
+    return new SField(this.schema, { ...this.surreal, default: expr, defaultAlways: false });
+  }
+  $defaultAlways(expr: BoundQuery) {
+    return new SField(this.schema, { ...this.surreal, default: expr, defaultAlways: true });
   }
   $value(expr: BoundQuery) {
     return new SField(this.schema, { ...this.surreal, value: expr });
