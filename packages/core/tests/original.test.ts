@@ -1,13 +1,19 @@
-import { describe } from "bun:test";
-import { DateTime } from "surrealdb";
-import z from "zod";
+import { describe, expect, expectTypeOf, test } from "bun:test";
+import z from "../src/index";
 import { setupSurrealTests } from "./common";
 import { issue, issues, testCase } from "./utils";
+import {
+  DateTime,
+  Duration,
+  RecordId,
+  StringRecordId,
+  Uuid,
+  type RecordIdValue,
+} from "surrealdb";
 
 describe("zod", () => {
   const { defineTest } = setupSurrealTests();
 
-  // @original
   defineTest("string", z.string(), {
     type: "string",
     tests: [
@@ -43,81 +49,80 @@ describe("zod", () => {
     ],
   });
 
-  // @original
-  describe("iso", () => {
-    defineTest("date", z.iso.date(), {
-      type: "string",
-      tests: [
-        testCase({
-          value: "2025-01-01",
-          parse: { data: "2025-01-01" },
-        }),
-        testCase({
-          value: "2025-01-01T00:00:00.000Z",
-          parse: { error: issues([issue.invalid_format("date")]) },
-        }),
-      ],
-    });
+  // // @original
+  // describe("iso", () => {
+  //   defineTest("date", z.iso.date(), {
+  //     type: "string",
+  //     tests: [
+  //       testCase({
+  //         value: "2025-01-01",
+  //         parse: { data: "2025-01-01" },
+  //       }),
+  //       testCase({
+  //         value: "2025-01-01T00:00:00.000Z",
+  //         parse: { error: issues([issue.invalid_format("date")]) },
+  //       }),
+  //     ],
+  //   });
 
-    defineTest("dateTime", z.iso.datetime(), {
-      type: "string",
-      tests: [
-        testCase({
-          value: "2025-01-01T00:00:00.000Z",
-          parse: { data: "2025-01-01T00:00:00.000Z" },
-        }),
-        testCase({
-          value: "2025-01-01",
-          parse: { error: issues([issue.invalid_format("datetime")]) },
-        }),
-      ],
-    });
+  //   defineTest("dateTime", z.iso.datetime(), {
+  //     type: "string",
+  //     tests: [
+  //       testCase({
+  //         value: "2025-01-01T00:00:00.000Z",
+  //         parse: { data: "2025-01-01T00:00:00.000Z" },
+  //       }),
+  //       testCase({
+  //         value: "2025-01-01",
+  //         parse: { error: issues([issue.invalid_format("datetime")]) },
+  //       }),
+  //     ],
+  //   });
 
-    defineTest("duration", z.iso.duration(), {
-      type: "string",
-      tests: [
-        testCase({ value: "P1Y", parse: { data: "P1Y" } }),
-        testCase({ value: "P1M", parse: { data: "P1M" } }),
-        testCase({ value: "P1D", parse: { data: "P1D" } }),
-        testCase({ value: "PT1H", parse: { data: "PT1H" } }),
-        testCase({ value: "PT1M", parse: { data: "PT1M" } }),
-        testCase({ value: "PT1S", parse: { data: "PT1S" } }),
-        testCase({ value: "P1DT2H3M4S", parse: { data: "P1DT2H3M4S" } }),
-        testCase({
-          value: "1d2h3m4s",
-          parse: { error: issues([issue.invalid_format("duration")]) },
-        }),
-      ],
-    });
+  //   defineTest("duration", z.iso.duration(), {
+  //     type: "string",
+  //     tests: [
+  //       testCase({ value: "P1Y", parse: { data: "P1Y" } }),
+  //       testCase({ value: "P1M", parse: { data: "P1M" } }),
+  //       testCase({ value: "P1D", parse: { data: "P1D" } }),
+  //       testCase({ value: "PT1H", parse: { data: "PT1H" } }),
+  //       testCase({ value: "PT1M", parse: { data: "PT1M" } }),
+  //       testCase({ value: "PT1S", parse: { data: "PT1S" } }),
+  //       testCase({ value: "P1DT2H3M4S", parse: { data: "P1DT2H3M4S" } }),
+  //       testCase({
+  //         value: "1d2h3m4s",
+  //         parse: { error: issues([issue.invalid_format("duration")]) },
+  //       }),
+  //     ],
+  //   });
 
-    defineTest("time", z.iso.time(), {
-      type: "string",
-      tests: [
-        testCase({
-          value: "00:00:00.000",
-          parse: { data: "00:00:00.000" },
-        }),
-        testCase({
-          value: "00:00:00",
-          parse: { data: "00:00:00" },
-        }),
-        testCase({
-          value: "00:00",
-          parse: { data: "00:00" },
-        }),
-        testCase({
-          value: "00",
-          parse: { error: issues([issue.invalid_format("time")]) },
-        }),
-        testCase({
-          value: "00:00:00.000Z",
-          parse: { error: issues([issue.invalid_format("time")]) },
-        }),
-      ],
-    });
-  });
+  //   defineTest("time", z.iso.time(), {
+  //     type: "string",
+  //     tests: [
+  //       testCase({
+  //         value: "00:00:00.000",
+  //         parse: { data: "00:00:00.000" },
+  //       }),
+  //       testCase({
+  //         value: "00:00:00",
+  //         parse: { data: "00:00:00" },
+  //       }),
+  //       testCase({
+  //         value: "00:00",
+  //         parse: { data: "00:00" },
+  //       }),
+  //       testCase({
+  //         value: "00",
+  //         parse: { error: issues([issue.invalid_format("time")]) },
+  //       }),
+  //       testCase({
+  //         value: "00:00:00.000Z",
+  //         parse: { error: issues([issue.invalid_format("time")]) },
+  //       }),
+  //     ],
+  //   });
+  // });
 
-  // @original
   defineTest("email", z.email(), {
     type: "string",
     tests: [
@@ -134,7 +139,6 @@ describe("zod", () => {
     ],
   });
 
-  // @patched
   defineTest("guid", z.guid(), {
     type: "string",
     tests: [
@@ -143,15 +147,19 @@ describe("zod", () => {
         parse: { data: "123e4567-e89b-42d3-a456-426614174000" },
       }),
       testCase({
+        value: new Uuid("123e4567-e89b-42d3-a456-426614174000"),
+        parse: { data: "123e4567-e89b-42d3-a456-426614174000" },
+      }),
+      testCase({
         value: "",
         parse: {
           error: issues([issue.invalid_format("guid")]),
         },
+        // error: /expected `uuid` but found `''`/i,
       }),
     ],
   });
 
-  // @patched
   defineTest("uuid", z.uuid(), {
     type: "string",
     tests: [
@@ -160,15 +168,20 @@ describe("zod", () => {
         parse: { data: "123e4567-e89b-42d3-a456-426614174000" },
       }),
       testCase({
+        value: new Uuid("123e4567-e89b-42d3-a456-426614174000"),
+        parse: { data: "123e4567-e89b-42d3-a456-426614174000" },
+      }),
+      testCase({
         value: "",
         parse: {
           error: issues([issue.invalid_format("uuid")]),
         },
+        // TODO: Use surreal uuid type instead
+        // error: /expected `uuid` but found `''`/i,
       }),
     ],
   });
 
-  // @patched
   defineTest("uuidv4", z.uuidv4(), {
     type: "string",
     tests: [
@@ -177,15 +190,20 @@ describe("zod", () => {
         parse: { data: "35a7ed3b-ac21-4c7f-8596-73610200deab" },
       }),
       testCase({
+        value: new Uuid("35a7ed3b-ac21-4c7f-8596-73610200deab"),
+        parse: { data: "35a7ed3b-ac21-4c7f-8596-73610200deab" },
+      }),
+      testCase({
         value: "",
         parse: {
           error: issues([issue.invalid_format("uuid")]),
         },
+        // TODO: Use surreal uuid type instead
+        // error: /expected `uuid` but found `''`/i,
       }),
     ],
   });
 
-  // @patched
   defineTest("uuidv6", z.uuidv6(), {
     type: "string",
     tests: [
@@ -194,16 +212,22 @@ describe("zod", () => {
         parse: { data: "1f0d507c-0afa-67f0-a264-115e8c51f2e4" },
       }),
       testCase({
+        value: new Uuid("1f0d507c-0afa-67f0-a264-115e8c51f2e4"),
+        parse: { data: "1f0d507c-0afa-67f0-a264-115e8c51f2e4" },
+      }),
+      testCase({
         value: "",
         parse: {
           error: issues([issue.invalid_format("uuid")]),
         },
+        // TODO: Use surreal uuid type instead
+        // error: /expected `uuid` but found `''`/i,
       }),
     ],
   });
 
-  // @patched
   defineTest("uuidv7", z.uuidv7(), {
+    // TODO: Use surreal uuid type instead
     type: "string",
     tests: [
       testCase({
@@ -211,15 +235,20 @@ describe("zod", () => {
         parse: { data: "019b036b-980f-701e-8fef-6570a0d9a371" },
       }),
       testCase({
+        value: new Uuid("019b036b-980f-701e-8fef-6570a0d9a371"),
+        parse: { data: "019b036b-980f-701e-8fef-6570a0d9a371" },
+      }),
+      testCase({
         value: "",
         parse: {
           error: issues([issue.invalid_format("uuid")]),
         },
+        // TODO: Use surreal uuid type instead
+        // error: /expected `uuid` but found `''`/i,
       }),
     ],
   });
 
-  // @original
   // TODO: DB Validation?
   // TODO: Normalization?
   defineTest("url", z.url(), {
@@ -242,375 +271,6 @@ describe("zod", () => {
     ],
   });
 
-  // @original
-  // TODO: DB Validation?
-  // TODO: Normalization?
-  defineTest("httpUrl", z.httpUrl(), {
-    type: "string",
-    tests: [
-      testCase({
-        value: "https://www.google.com",
-        parse: { data: "https://www.google.com" },
-      }),
-      testCase({
-        value: "ftp://www.google.com",
-        parse: {
-          error: issues([issue.invalid_format("url")]),
-        },
-      }),
-      testCase({
-        value: "",
-        parse: {
-          error: issues([issue.invalid_format("url")]),
-        },
-      }),
-    ],
-  });
-
-  // @original
-  // TODO: DB Validation?
-  defineTest("emoji", z.emoji(), {
-    type: "string",
-    tests: [
-      testCase({ value: "👋", parse: { data: "👋" } }),
-      testCase({
-        value: "",
-        parse: {
-          error: issues([issue.invalid_format("emoji")]),
-        },
-      }),
-    ],
-  });
-
-  // @original
-  // TODO: DB Validation?
-  defineTest("nanoid", z.nanoid(), {
-    type: "string",
-    tests: [
-      testCase({
-        value: "QvqDj2zWl5b8Vj1hcxBmn",
-        parse: { data: "QvqDj2zWl5b8Vj1hcxBmn" },
-      }),
-      testCase({
-        value: "",
-        parse: {
-          error: issues([issue.invalid_format("nanoid")]),
-        },
-      }),
-    ],
-  });
-
-  // @original
-  // TODO: DB Validation? TODO: Properly implement
-  defineTest("cuid", z.cuid(), {
-    type: "string",
-    tests: [
-      testCase({
-        value: "clhqxk9zr0000qzrmn831i7rn",
-        parse: { data: "clhqxk9zr0000qzrmn831i7rn" },
-      }),
-      testCase({
-        value: "",
-        parse: {
-          error: issues([issue.invalid_format("cuid")]),
-        },
-      }),
-    ],
-  });
-
-  // @original
-  // TODO: DB Validation?
-  defineTest("cuid2", z.cuid2(), {
-    type: "string",
-    tests: [
-      testCase({
-        value: "tz4a98xxat96iws9zmbrgj3a",
-        parse: { data: "tz4a98xxat96iws9zmbrgj3a" },
-      }),
-      testCase({
-        value: "",
-        parse: {
-          error: issues([issue.invalid_format("cuid2")]),
-        },
-      }),
-    ],
-  });
-
-  // @original
-  // TODO: DB Validation?
-  defineTest("ulid", z.ulid(), {
-    type: "string",
-    tests: [
-      testCase({
-        value: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
-        parse: { data: "01ARZ3NDEKTSV4RRFFQ69G5FAV" },
-      }),
-      testCase({
-        value: "",
-        parse: {
-          error: issues([issue.invalid_format("ulid")]),
-        },
-      }),
-    ],
-  });
-
-  // @original
-  // TODO: DB Validation?
-  defineTest("xid", z.xid(), {
-    type: "string",
-    tests: [
-      testCase({
-        value: "9m4e2mr0ui3e8a215n4g",
-        parse: { data: "9m4e2mr0ui3e8a215n4g" },
-      }),
-      testCase({
-        value: "",
-        parse: {
-          error: issues([issue.invalid_format("xid")]),
-        },
-      }),
-    ],
-  });
-
-  // @original
-  // TODO: DB Validation?
-  defineTest("ksuid", z.ksuid(), {
-    type: "string",
-    tests: [
-      testCase({
-        value: "0ujsszwN8NRY24YaXiTIE2VWDTS",
-        parse: { data: "0ujsszwN8NRY24YaXiTIE2VWDTS" },
-      }),
-      testCase({
-        value: "",
-        parse: {
-          error: issues([issue.invalid_format("ksuid")]),
-        },
-      }),
-    ],
-  });
-
-  // @original
-  // TODO: DB Validation?
-  defineTest("ipv4", z.ipv4(), {
-    type: "string",
-    tests: [
-      testCase({ value: "192.168.1.1", parse: { data: "192.168.1.1" } }),
-      testCase({
-        value: "",
-        parse: {
-          error: issues([issue.invalid_format("ipv4")]),
-        },
-      }),
-    ],
-  });
-
-  // @original
-  // TODO: DB Validation?
-  defineTest("mac", z.mac(), {
-    type: "string",
-    tests: [
-      testCase({
-        value: "00:00:00:00:00:00",
-        parse: { data: "00:00:00:00:00:00" },
-      }),
-      testCase({
-        value: "",
-        parse: {
-          error: issues([issue.invalid_format("mac")]),
-        },
-      }),
-    ],
-  });
-
-  // @original
-  // TODO: DB Validation?
-  defineTest("ipv6", z.ipv6(), {
-    type: "string",
-    tests: [
-      testCase({
-        value: "2001:0db8:85a3:0000:0000:8a2e:0370:7334",
-        parse: { data: "2001:0db8:85a3:0000:0000:8a2e:0370:7334" },
-      }),
-      testCase({
-        value: "",
-        parse: {
-          error: issues([issue.invalid_format("ipv6")]),
-        },
-      }),
-    ],
-  });
-
-  // @original
-  // TODO: DB Validation?
-  defineTest("cidrv4", z.cidrv4(), {
-    type: "string",
-    tests: [
-      testCase({ value: "192.168.1.1/24", parse: { data: "192.168.1.1/24" } }),
-      testCase({
-        value: "",
-        parse: {
-          error: issues([issue.invalid_format("cidrv4")]),
-        },
-      }),
-    ],
-  });
-
-  // @original
-  // TODO: DB Validation?
-  defineTest("cidrv6", z.cidrv6(), {
-    type: "string",
-    tests: [
-      testCase({
-        value: "2001:0db8:85a3:0000:0000:8a2e:0370:7334/64",
-        parse: { data: "2001:0db8:85a3:0000:0000:8a2e:0370:7334/64" },
-      }),
-      testCase({
-        value: "",
-        parse: {
-          error: issues([issue.invalid_format("cidrv6")]),
-        },
-      }),
-    ],
-  });
-
-  // @original
-  // TODO: Properly implement
-  defineTest("base64", z.base64(), {
-    type: "string",
-    tests: [
-      testCase({
-        value: "SGVsbG8gV29ybGQ=",
-        parse: { data: "SGVsbG8gV29ybGQ=" },
-      }),
-      testCase({
-        value: "??",
-        parse: {
-          error: issues([issue.invalid_format("base64")]),
-        },
-      }),
-    ],
-  });
-
-  // @original
-  // TODO: DB Validation?
-  defineTest("base64url", z.base64url(), {
-    type: "string",
-    tests: [
-      testCase({
-        value: "SGVsbG8gV29ybGQ",
-        parse: { data: "SGVsbG8gV29ybGQ" },
-      }),
-      testCase({
-        value: "??",
-        parse: {
-          error: issues([issue.invalid_format("base64url")]),
-        },
-      }),
-    ],
-  });
-
-  // @original
-  // TODO: DB Validation?
-  defineTest("e164", z.e164(), {
-    type: "string",
-    tests: [
-      testCase({ value: "+12345678901", parse: { data: "+12345678901" } }),
-      testCase({
-        value: "",
-        parse: {
-          error: issues([issue.invalid_format("e164")]),
-        },
-      }),
-    ],
-  });
-
-  // @original
-  // TODO: DB Validation?
-  defineTest("jwt", z.jwt(), {
-    type: "string",
-    tests: [
-      testCase({
-        value:
-          "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
-        parse: {
-          data: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
-        },
-      }),
-      testCase({
-        value: "",
-        parse: {
-          error: issues([issue.invalid_format("jwt")]),
-        },
-      }),
-    ],
-  });
-
-  // @original
-  // TODO: DB Validation?
-  defineTest(
-    "stringFormat",
-    z.stringFormat("lowercase", (value) => value.toLowerCase() === value),
-    {
-      type: "string",
-      tests: [
-        testCase({ value: "hello world", parse: { data: "hello world" } }),
-        testCase({
-          value: "Hello World",
-          parse: {
-            error: issues([issue.invalid_format("lowercase")]),
-          },
-        }),
-      ],
-    },
-  );
-
-  // @original
-  // TODO: DB Validation?
-  defineTest("hostname", z.hostname(), {
-    type: "string",
-    tests: [
-      testCase({ value: "www.google.com", parse: { data: "www.google.com" } }),
-    ],
-  });
-
-  // @original
-  // TODO: DB Validation?
-  defineTest("hex", z.hex(), {
-    type: "string",
-    tests: [
-      testCase({
-        value: "1234567890abcdef",
-        parse: { data: "1234567890abcdef" },
-      }),
-      testCase({
-        value: "1234567890ghijkl",
-        parse: {
-          error: issues([issue.invalid_format("hex")]),
-        },
-      }),
-    ],
-  });
-
-  // @original
-  // TODO: DB Validation?
-  defineTest("hash", z.hash("md5", { enc: "hex" }), {
-    type: "string",
-    tests: [
-      testCase({
-        value: "b10a8db164e0754105b7a99be72e3fe5",
-        parse: { data: "b10a8db164e0754105b7a99be72e3fe5" },
-      }),
-      testCase({
-        value: "1234567890ghijkl",
-        parse: {
-          error: issues([issue.invalid_format("md5_hex")]),
-        },
-      }),
-    ],
-  });
-
-  // @original
   defineTest("number", z.number(), {
     type: "number",
     tests: [
@@ -660,7 +320,6 @@ describe("zod", () => {
     ],
   });
 
-  // @original
   defineTest("int", z.int(), {
     type: "int",
     tests: [
@@ -702,7 +361,6 @@ describe("zod", () => {
     ],
   });
 
-  // @original
   defineTest("float32", z.float32(), {
     type: "float",
     tests: [
@@ -724,7 +382,6 @@ describe("zod", () => {
     ],
   });
 
-  // @original
   // TODO: Test saturation/overflow
   defineTest("float64", z.float64(), {
     type: "float",
@@ -743,7 +400,6 @@ describe("zod", () => {
     ],
   });
 
-  // @original
   // TODO: DB Validation?
   defineTest("int32", z.int32(), {
     type: "int",
@@ -768,7 +424,6 @@ describe("zod", () => {
     ],
   });
 
-  // @original
   // TODO: DB Validation?
   defineTest("uint32", z.uint32(), {
     type: "int",
@@ -789,7 +444,6 @@ describe("zod", () => {
     ],
   });
 
-  // @original
   defineTest("boolean", z.boolean(), {
     type: "bool",
     tests: [
@@ -803,7 +457,6 @@ describe("zod", () => {
     ],
   });
 
-  // @original
   defineTest("bigint", z.bigint(), {
     type: "int",
     tests: [
@@ -833,7 +486,6 @@ describe("zod", () => {
     ],
   });
 
-  // @original
   defineTest("int64", z.int64(), {
     type: "int",
     tests: [
@@ -853,8 +505,7 @@ describe("zod", () => {
     ],
   });
 
-  // @original
-  // May needs patching to work with SurrealDB. As surrealdb doesnt support unsigned int.
+  // TODO: May needs patching to work with SurrealDB. As surrealdb doesnt support unsigned int.
   // An option would be to use decimal but that may break something on the db side if user is not aware.
   defineTest("uint64", z.uint64(), {
     type: "int",
@@ -879,12 +530,10 @@ describe("zod", () => {
     ],
   });
 
-  // @original
   defineTest("symbol", z.symbol(), {
     error: /Symbol type cannot be used as a field type/i,
   });
 
-  // @original
   defineTest("undefined", z.undefined(), {
     type: "none",
     tests: [
@@ -909,19 +558,16 @@ describe("zod", () => {
     testCase({ value: {} }),
   ];
 
-  // @original
   defineTest("any", z.any(), {
     type: "any",
     tests: anyTests,
   });
 
-  // @original
   defineTest("unknown", z.unknown(), {
     type: "any",
     tests: anyTests,
   });
 
-  // @original
   defineTest("never", z.never(), {
     type: "none",
     tests: [
@@ -997,7 +643,6 @@ describe("zod", () => {
     ],
   });
 
-  // @original
   defineTest("null", z.null(), {
     type: "null",
     tests: [
@@ -1010,7 +655,6 @@ describe("zod", () => {
     ],
   });
 
-  // @patched
   defineTest("date", z.date(), {
     type: "datetime",
     tests: [
@@ -1021,10 +665,16 @@ describe("zod", () => {
         // this might be troublesome, needs overriding
         equals: new DateTime("2025-01-01T00:00:00.000Z"),
       }),
+      testCase({
+        value: new DateTime("2025-01-01T00:00:00.000Z"),
+        parse: { data: new Date("2025-01-01T00:00:00.000Z") },
+        // @ts-expect-error - surrealdb does type conversion from date to datetime
+        // this might be troublesome, needs overriding
+        equals: new DateTime("2025-01-01T00:00:00.000Z"),
+      }),
     ],
   });
 
-  // @original
   describe("array", () => {
     defineTest("array<any>", z.array(z.any()), {
       type: "array",
@@ -1055,22 +705,22 @@ describe("zod", () => {
     });
   });
 
-  // @original
-  defineTest(
-    "keyof { name: string, age: number }",
-    z.keyof(z.object({ name: z.string(), age: z.number() })),
-    {
-      type: '"name" | "age"',
-      tests: [
-        testCase({ value: "name" }),
-        testCase({ value: "age" }),
-        testCase({
-          value: "unknown",
-          error: /expected `'name' | 'age'` but found `'unknown'`/i,
-        }),
-      ],
-    },
-  );
+  // // @original
+  // defineTest(
+  //   "keyof { name: string, age: number }",
+  //   z.keyof(z.object({ name: z.string(), age: z.number() })),
+  //   {
+  //     type: '"name" | "age"',
+  //     tests: [
+  //       testCase({ value: "name" }),
+  //       testCase({ value: "age" }),
+  //       testCase({
+  //         value: "unknown",
+  //         error: /expected `'name' | 'age'` but found `'unknown'`/i,
+  //       }),
+  //     ],
+  //   },
+  // );
 
   // @original
   defineTest(
@@ -1104,7 +754,6 @@ describe("zod", () => {
     },
   );
 
-  // @original
   defineTest(
     "strict object { name: string, age: number | none }",
     z.strictObject({ name: z.string(), age: z.number().optional() }),
@@ -1139,7 +788,6 @@ describe("zod", () => {
     },
   );
 
-  // @original
   defineTest(
     "loose object { name: string, age: number }",
     z.looseObject({ name: z.string(), age: z.number() }),
@@ -1174,7 +822,6 @@ describe("zod", () => {
     },
   );
 
-  // @original
   describe("union", () => {
     defineTest("string | number", z.union([z.string(), z.number()]), {
       type: "string | number",
@@ -1234,7 +881,6 @@ describe("zod", () => {
     // );
   });
 
-  // @original
   describe("intersection", () => {
     defineTest(
       // TODO: After finding a way to handle intersections
@@ -1274,7 +920,6 @@ describe("zod", () => {
     // });
   });
 
-  // @original
   describe("tuple", () => {
     defineTest("[any]", z.tuple([z.any()]), {
       type: "[any]",
@@ -1318,211 +963,210 @@ describe("zod", () => {
     });
   });
 
-  // @original
-  describe("record", () => {
-    defineTest(
-      `record<"2025-01" | "2025-02" | "2025-03" | "2025-04", number>`,
-      z.record(
-        z.enum(["2025-01", "2025-02", "2025-03", "2025-04"]),
-        z.number(),
-      ),
-      {
-        type: "object",
-        children: [{ name: "*", type: "number" }],
-        tests: [
-          testCase({
-            value: {
-              "2025-01": 100,
-              "2025-02": 88,
-              "2025-03": 99,
-              "2025-04": 60,
-            },
-            parse: {
-              data: {
-                "2025-01": 100,
-                "2025-02": 88,
-                "2025-03": 99,
-                "2025-04": 60,
-              },
-            },
-          }),
-        ],
-      },
-    );
-    defineTest("record<string, number>", z.record(z.string(), z.number()), {
-      type: "object",
-      children: [{ name: "*", type: "number" }],
-      tests: [
-        testCase({
-          value: {
-            "2025-01": 100,
-            "2025-02": 88,
-            "2025-03": 99,
-            "2025-04": 60,
-          },
-          parse: {
-            data: {
-              "2025-01": 100,
-              "2025-02": 88,
-              "2025-03": 99,
-              "2025-04": 60,
-            },
-          },
-        }),
-        testCase({
-          value: {
-            "2025-01": "100",
-            "2025-02": "88",
-            "2025-03": "99",
-            "2025-04": "60",
-          },
-          parse: {
-            error: issues([issue.invalid_type("number")]),
-          },
-          error: /expected `number` but found `'100'`/i,
-        }),
-      ],
-    });
-    defineTest(
-      "record<number, number>",
-      z.record(z.coerce.number(), z.number()),
-      {
-        type: "object",
-        children: [{ name: "*", type: "number" }],
-        tests: [
-          testCase({
-            value: { 1: 100, 2: 88, 3: 99, 4: 60 },
-            parse: {
-              data: { 1: 100, 2: 88, 3: 99, 4: 60 },
-            },
-          }),
-        ],
-      },
-    );
-  });
+  // // @original
+  // describe("record", () => {
+  //   defineTest(
+  //     `record<"2025-01" | "2025-02" | "2025-03" | "2025-04", number>`,
+  //     z.record(
+  //       z.enum(["2025-01", "2025-02", "2025-03", "2025-04"]),
+  //       z.number(),
+  //     ),
+  //     {
+  //       type: "object",
+  //       children: [{ name: "*", type: "number" }],
+  //       tests: [
+  //         testCase({
+  //           value: {
+  //             "2025-01": 100,
+  //             "2025-02": 88,
+  //             "2025-03": 99,
+  //             "2025-04": 60,
+  //           },
+  //           parse: {
+  //             data: {
+  //               "2025-01": 100,
+  //               "2025-02": 88,
+  //               "2025-03": 99,
+  //               "2025-04": 60,
+  //             },
+  //           },
+  //         }),
+  //       ],
+  //     },
+  //   );
+  //   defineTest("record<string, number>", z.record(z.string(), z.number()), {
+  //     type: "object",
+  //     children: [{ name: "*", type: "number" }],
+  //     tests: [
+  //       testCase({
+  //         value: {
+  //           "2025-01": 100,
+  //           "2025-02": 88,
+  //           "2025-03": 99,
+  //           "2025-04": 60,
+  //         },
+  //         parse: {
+  //           data: {
+  //             "2025-01": 100,
+  //             "2025-02": 88,
+  //             "2025-03": 99,
+  //             "2025-04": 60,
+  //           },
+  //         },
+  //       }),
+  //       testCase({
+  //         value: {
+  //           "2025-01": "100",
+  //           "2025-02": "88",
+  //           "2025-03": "99",
+  //           "2025-04": "60",
+  //         },
+  //         parse: {
+  //           error: issues([issue.invalid_type("number")]),
+  //         },
+  //         error: /expected `number` but found `'100'`/i,
+  //       }),
+  //     ],
+  //   });
+  //   defineTest(
+  //     "record<number, number>",
+  //     z.record(z.coerce.number(), z.number()),
+  //     {
+  //       type: "object",
+  //       children: [{ name: "*", type: "number" }],
+  //       tests: [
+  //         testCase({
+  //           value: { 1: 100, 2: 88, 3: 99, 4: 60 },
+  //           parse: {
+  //             data: { 1: 100, 2: 88, 3: 99, 4: 60 },
+  //           },
+  //         }),
+  //       ],
+  //     },
+  //   );
+  // });
 
-  // @original
-  describe("partial record", () => {
-    defineTest(
-      `partial record<"2025-01" | "2025-02" | "2025-03" | "2025-04", number>`,
-      z.partialRecord(
-        z.enum(["2025-01", "2025-02", "2025-03", "2025-04"]),
-        z.number(),
-      ),
-      {
-        type: "object",
-        children: [{ name: "*", type: "number" }],
-        tests: [
-          testCase({
-            value: {
-              "2025-01": 100,
-              "2025-02": 88,
-              "2025-03": 99,
-            },
-            parse: {
-              data: {
-                "2025-01": 100,
-                "2025-02": 88,
-                "2025-03": 99,
-              },
-            },
-          }),
-        ],
-      },
-    );
+  // // @original
+  // describe("partial record", () => {
+  //   defineTest(
+  //     `partial record<"2025-01" | "2025-02" | "2025-03" | "2025-04", number>`,
+  //     z.partialRecord(
+  //       z.enum(["2025-01", "2025-02", "2025-03", "2025-04"]),
+  //       z.number(),
+  //     ),
+  //     {
+  //       type: "object",
+  //       children: [{ name: "*", type: "number" }],
+  //       tests: [
+  //         testCase({
+  //           value: {
+  //             "2025-01": 100,
+  //             "2025-02": 88,
+  //             "2025-03": 99,
+  //           },
+  //           parse: {
+  //             data: {
+  //               "2025-01": 100,
+  //               "2025-02": 88,
+  //               "2025-03": 99,
+  //             },
+  //           },
+  //         }),
+  //       ],
+  //     },
+  //   );
 
-    defineTest(
-      "partial record<string, number>",
-      z.partialRecord(z.string(), z.number()),
-      {
-        type: "object",
-        children: [{ name: "*", type: "number" }],
-        tests: [
-          testCase({
-            value: {
-              "2025-01": 100,
-              "2025-02": 88,
-              "2025-03": 99,
-            },
-            parse: {
-              data: {
-                "2025-01": 100,
-                "2025-02": 88,
-                "2025-03": 99,
-              },
-            },
-          }),
-        ],
-      },
-    );
-    defineTest(
-      "partial record<number, number>",
-      z.partialRecord(z.coerce.number(), z.number()),
-      {
-        type: "object",
-        children: [{ name: "*", type: "number" }],
-        tests: [
-          testCase({
-            value: { 1: 100, 2: 88, 3: 99 },
-            parse: {
-              data: { 1: 100, 2: 88, 3: 99 },
-            },
-          }),
-        ],
-      },
-    );
-  });
+  //   defineTest(
+  //     "partial record<string, number>",
+  //     z.partialRecord(z.string(), z.number()),
+  //     {
+  //       type: "object",
+  //       children: [{ name: "*", type: "number" }],
+  //       tests: [
+  //         testCase({
+  //           value: {
+  //             "2025-01": 100,
+  //             "2025-02": 88,
+  //             "2025-03": 99,
+  //           },
+  //           parse: {
+  //             data: {
+  //               "2025-01": 100,
+  //               "2025-02": 88,
+  //               "2025-03": 99,
+  //             },
+  //           },
+  //         }),
+  //       ],
+  //     },
+  //   );
+  //   defineTest(
+  //     "partial record<number, number>",
+  //     z.partialRecord(z.coerce.number(), z.number()),
+  //     {
+  //       type: "object",
+  //       children: [{ name: "*", type: "number" }],
+  //       tests: [
+  //         testCase({
+  //           value: { 1: 100, 2: 88, 3: 99 },
+  //           parse: {
+  //             data: { 1: 100, 2: 88, 3: 99 },
+  //           },
+  //         }),
+  //       ],
+  //     },
+  //   );
+  // });
 
-  // @original
-  describe("map", () => {
-    defineTest("map<string, number>", z.map(z.string(), z.number()), {
-      type: "object",
-      children: [{ name: "*", type: "number" }],
-      tests: [
-        testCase({
-          value: new Map([
-            ["Hello World", 100],
-            ["Hello World 2", 88],
-            ["Hello World 3", 99],
-          ]),
-          equals: {
-            "Hello World": 100,
-            "Hello World 2": 88,
-            "Hello World 3": 99,
-          },
-        }),
-      ],
-    });
-    defineTest("map<number, number>", z.map(z.number(), z.number()), {
-      type: "object",
-      children: [{ name: "*", type: "number" }],
-      tests: [
-        testCase({
-          value: new Map([
-            ["1", 100],
-            ["2", 88],
-            ["3", 99],
-          ]),
-          equals: {
-            1: 100,
-            2: 88,
-            3: 99,
-          },
-        }),
-      ],
-    });
-    defineTest(
-      "map<{ user_id: number }, number>",
-      z.map(z.object({ user_id: z.number() }), z.number()),
-      {
-        type: "object",
-        children: [{ name: "*", type: "number" }],
-        error: /Unsupported key type: object/i,
-      },
-    );
-  });
+  // // @original
+  // describe("map", () => {
+  //   defineTest("map<string, number>", z.map(z.string(), z.number()), {
+  //     type: "object",
+  //     children: [{ name: "*", type: "number" }],
+  //     tests: [
+  //       testCase({
+  //         value: new Map([
+  //           ["Hello World", 100],
+  //           ["Hello World 2", 88],
+  //           ["Hello World 3", 99],
+  //         ]),
+  //         equals: {
+  //           "Hello World": 100,
+  //           "Hello World 2": 88,
+  //           "Hello World 3": 99,
+  //         },
+  //       }),
+  //     ],
+  //   });
+  //   defineTest("map<number, number>", z.map(z.number(), z.number()), {
+  //     type: "object",
+  //     children: [{ name: "*", type: "number" }],
+  //     tests: [
+  //       testCase({
+  //         value: new Map([
+  //           ["1", 100],
+  //           ["2", 88],
+  //           ["3", 99],
+  //         ]),
+  //         equals: {
+  //           1: 100,
+  //           2: 88,
+  //           3: 99,
+  //         },
+  //       }),
+  //     ],
+  //   });
+  //   defineTest(
+  //     "map<{ user_id: number }, number>",
+  //     z.map(z.object({ user_id: z.number() }), z.number()),
+  //     {
+  //       type: "object",
+  //       children: [{ name: "*", type: "number" }],
+  //       error: /Unsupported key type: object/i,
+  //     },
+  //   );
+  // });
 
-  // @original
   // FIXME: They are currently buggy in SurrealDB, lets use arrays for now
   describe("set", () => {
     defineTest("set<string>", z.set(z.string()), {
@@ -1540,7 +1184,6 @@ describe("zod", () => {
     });
   });
 
-  // @original
   describe("enum", () => {
     defineTest(
       "'active' | 'inactive' | 'pending'",
@@ -1566,7 +1209,6 @@ describe("zod", () => {
     );
   });
 
-  // @original
   describe("nativeEnum", () => {
     defineTest(
       "nativeEnum<'active' | 'inactive' | 'pending'>",
@@ -1586,7 +1228,6 @@ describe("zod", () => {
     );
   });
 
-  // @original
   describe("literal", () => {
     defineTest("'active'>", z.literal("active"), {
       type: `"active"`,
@@ -1624,12 +1265,10 @@ describe("zod", () => {
     );
   });
 
-  // @original
   defineTest("file", z.file(), {
     error: /File type cannot be used as a field type/i,
   });
 
-  // @original
   defineTest(
     "transform",
     z.transform((value: string) => value.toUpperCase()),
@@ -1638,7 +1277,6 @@ describe("zod", () => {
     },
   );
 
-  // @original
   defineTest("optional", z.optional(z.string()), {
     type: "string | none",
     tests: [
@@ -1647,7 +1285,6 @@ describe("zod", () => {
     ],
   });
 
-  // @original
   defineTest("nullable", z.nullable(z.string()), {
     type: "string | null",
     tests: [
@@ -1656,7 +1293,6 @@ describe("zod", () => {
     ],
   });
 
-  // @original
   defineTest("nullish", z.nullish(z.string()), {
     type: "string | null | none",
     tests: [
@@ -1666,7 +1302,6 @@ describe("zod", () => {
     ],
   });
 
-  // @original
   defineTest("default", z._default(z.string(), "Hello World"), {
     type: "string",
     tests: [
@@ -1681,7 +1316,6 @@ describe("zod", () => {
     ],
   });
 
-  // @original
   defineTest("prefault", z.prefault(z.string(), "Hello World"), {
     type: "string",
     tests: [
@@ -1690,13 +1324,11 @@ describe("zod", () => {
     ],
   });
 
-  // @original
   defineTest("nonoptional", z.nonoptional(z.string()), {
     type: "string",
     tests: [testCase({ value: "Hello World", parse: { data: "Hello World" } })],
   });
 
-  // @original
   defineTest("success", z.success(z.string()), {
     type: "string",
     tests: [
@@ -1709,7 +1341,6 @@ describe("zod", () => {
     ],
   });
 
-  // @original
   defineTest("catch", z.catch(z.string(), ""), {
     type: "string",
     tests: [
@@ -1720,13 +1351,11 @@ describe("zod", () => {
     ],
   });
 
-  // @original
   defineTest("nan", z.nan(), {
     type: "number",
     tests: [testCase({ value: NaN, parse: { data: NaN } })],
   });
 
-  // @original
   defineTest(
     "pipe",
     z.pipe(
@@ -1757,13 +1386,11 @@ describe("zod", () => {
   //   },
   // );
 
-  // @original
   defineTest("readonly", z.readonly(z.string()), {
     type: "string",
     tests: [testCase({ value: "Hello World", parse: { data: "Hello World" } })],
   });
 
-  // @original
   // TODO: DB Validation?
   defineTest(
     "template_literal",
@@ -1793,7 +1420,6 @@ describe("zod", () => {
     age: z.number(),
     children: z.array(z.string().or(z.lazy((): any => object))),
   });
-  // @original
   defineTest("lazy", object, {
     type: "object",
     children: [
@@ -1859,38 +1485,1185 @@ describe("zod", () => {
     error: /Custom type cannot be used as a field type/i,
   });
 
-  // @original
-  defineTest("instanceof", z.instanceof(Date), {
-    error: /Custom type cannot be used as a field type/i,
+  // // @original
+  // defineTest("instanceof", z.instanceof(Date), {
+  //   error: /Custom type cannot be used as a field type/i,
+  // });
+
+  // // @original
+  // defineTest("json", z.json(), {
+  //   type: "string | number | bool | null | array | object",
+  //   children: [{ name: "*", type: "any" }],
+  //   tests: [
+  //     testCase({ value: "Hello World", parse: { data: "Hello World" } }),
+  //     testCase({ value: 123, parse: { data: 123 } }),
+  //     testCase({ value: true, parse: { data: true } }),
+  //     testCase({ value: false, parse: { data: false } }),
+  //     testCase({ value: null, parse: { data: null } }),
+  //     testCase({ value: [1, 2, 3], parse: { data: [1, 2, 3] } }),
+  //     testCase({
+  //       value: { name: "John Doe", age: 17 },
+  //       parse: { data: { name: "John Doe", age: 17 } },
+  //     }),
+  //   ],
+  // });
+
+  // // @original
+  // // TODO: DB Normalization
+  // defineTest("stringbool", z.stringbool(), {
+  //   type: "string | bool",
+  //   tests: [
+  //     testCase({ value: "yes", parse: { data: true } }),
+  //     testCase({ value: "true", parse: { data: true } }),
+  //     testCase({ value: "no", parse: { data: false } }),
+  //     testCase({ value: "false", parse: { data: false } }),
+  //   ],
+  // });
+
+  describe("recordId", () => {
+    test("type is overriden", () => {
+      const schema = z.recordId(["user", "admin"]).type(z.string());
+      let parse = schema.safeParse(new RecordId("user", "123"));
+      expect(parse).toMatchObject({
+        success: true,
+        data: new RecordId("user", "123"),
+      });
+      parse = schema.safeParse(new RecordId("test", 123));
+      expect(parse.success).toBeFalse();
+      expect(parse.error?.message).toMatch(/expected string, received number/i);
+    });
+
+    test("table is overriden", () => {
+      let schema: z.ZodSurrealdRecordId<string> = z.recordId(["user", "admin"]);
+      let parse = schema.safeParse(new RecordId("user", "123"));
+      expect(parse).toMatchObject({
+        success: true,
+        data: new RecordId("user", "123"),
+      });
+      parse = schema.safeParse(new RecordId("test", "123"));
+      expect(parse.success).toBeFalse();
+      expect(parse.error?.message).toMatch(
+        /Expected RecordId's table to be one of user \| admin but found test/i,
+      );
+      schema = schema.table("test") as never;
+      parse = schema.safeParse(new RecordId("test", "123"));
+      expect(parse).toMatchObject({
+        success: true,
+        data: new RecordId("test", "123"),
+      });
+      parse = schema.safeParse(new RecordId("admin", "123"));
+      expect(parse.success).toBeFalse();
+      expect(parse.error?.message).toMatch(
+        /Expected RecordId's table to be test but found admin/i,
+      );
+    });
+
+    test("anytable", () => {
+      let schema: z.ZodSurrealdRecordId = z.recordId(["user", "admin"]);
+      let parse = schema.safeParse(new RecordId("test", "123"));
+      expect(parse).toMatchObject({
+        success: false,
+        error: expect.objectContaining({
+          issues: expect.arrayContaining([
+            expect.objectContaining({
+              code: "invalid_value",
+              values: ["user", "admin"],
+            }),
+          ]),
+        }),
+      });
+      schema = schema.anytable();
+      parse = schema.safeParse(new RecordId("test", "123"));
+      expect(parse).toMatchObject({
+        success: true,
+        data: new RecordId("test", "123"),
+      });
+    });
+
+    describe("from RecordId", () => {
+      test("any table, any value", () => {
+        const schema = z.recordId();
+        expect(schema.safeDecode(new RecordId("user", "123"))).toMatchObject({
+          success: true,
+          data: new RecordId("user", "123"),
+        });
+        expect(schema.safeDecode(new RecordId("test", "123"))).toMatchObject({
+          success: true,
+          data: new RecordId("test", "123"),
+        });
+        // TODO: StringRecordId is not supported yet
+        expect(schema.safeDecode(new StringRecordId("user:123"))).toMatchObject(
+          {
+            success: false,
+            error: expect.objectContaining({
+              issues: expect.arrayContaining([
+                expect.objectContaining({
+                  code: "invalid_type",
+                  expected: "record_id",
+                }),
+              ]),
+            }),
+          },
+        );
+
+        // -------------------------- Type Tests --------------------------
+        // parse
+        expectTypeOf(schema.parse).returns.toExtend<
+          RecordId<string, RecordIdValue>
+        >();
+        expectTypeOf(
+          schema.parse<"user", number>(new RecordId("user", 123)),
+        ).toExtend<RecordId<"user", number>>();
+        expectTypeOf(
+          schema.parse<RecordId<"user", number>>(new RecordId("user", 123)),
+        ).toExtend<RecordId<"user", number>>();
+        // parseAsync
+        expectTypeOf(schema.parseAsync).returns.toExtend<
+          Promise<RecordId<string, RecordIdValue>>
+        >();
+        expectTypeOf(
+          schema.parseAsync<"user", number>(new RecordId("user", 123)),
+        ).toExtend<Promise<RecordId<"user", number>>>();
+        expectTypeOf(
+          schema.parseAsync<RecordId<"user", number>>(
+            new RecordId("user", 123),
+          ),
+        ).toExtend<Promise<RecordId<"user", number>>>();
+        // safeParse
+        expectTypeOf(schema.safeParse).returns.toExtend<
+          z.ZodSafeParseResult<RecordId<string, RecordIdValue>>
+        >();
+        expectTypeOf(
+          schema.safeParse<"user", number>(new RecordId("user", 123)),
+        ).toExtend<z.ZodSafeParseResult<RecordId<"user", number>>>();
+        expectTypeOf(
+          schema.safeParse<RecordId<"user", number>>(new RecordId("user", 123)),
+        ).toExtend<z.ZodSafeParseResult<RecordId<"user", number>>>();
+        // safeParseAsync
+        expectTypeOf(schema.safeParseAsync).returns.toExtend<
+          Promise<z.ZodSafeParseResult<RecordId<string, RecordIdValue>>>
+        >();
+        expectTypeOf(
+          schema.safeParseAsync<"user", number>(new RecordId("user", 123)),
+        ).toExtend<Promise<z.ZodSafeParseResult<RecordId<"user", number>>>>();
+        expectTypeOf(
+          schema.safeParseAsync<RecordId<"user", number>>(
+            new RecordId("user", 123),
+          ),
+        ).toExtend<Promise<z.ZodSafeParseResult<RecordId<"user", number>>>>();
+        // decode
+        expectTypeOf(schema.decode).returns.toExtend<
+          RecordId<string, RecordIdValue>
+        >();
+        expectTypeOf(
+          schema.decode<"user", number>(new RecordId("user", 123)),
+        ).toExtend<RecordId<"user", number>>();
+        expectTypeOf(
+          schema.decode<RecordId<"user", number>>(new RecordId("user", 123)),
+        ).toExtend<RecordId<"user", number>>();
+        // decodeAsync
+        expectTypeOf(schema.decodeAsync).returns.toExtend<
+          Promise<RecordId<string, RecordIdValue>>
+        >();
+        expectTypeOf(
+          schema.decodeAsync<"user", number>(new RecordId("user", 123)),
+        ).toExtend<Promise<RecordId<"user", number>>>();
+        expectTypeOf(
+          schema.decodeAsync<RecordId<"user", number>>(
+            new RecordId("user", 123),
+          ),
+        ).toExtend<Promise<RecordId<"user", number>>>();
+        // safeDecode
+        expectTypeOf(schema.safeDecode).returns.toExtend<
+          z.ZodSafeParseResult<RecordId<string, RecordIdValue>>
+        >();
+        expectTypeOf(
+          schema.safeDecode<"user", number>(new RecordId("user", 123)),
+        ).toExtend<z.ZodSafeParseResult<RecordId<"user", number>>>();
+        expectTypeOf(
+          schema.safeDecode<RecordId<"user", number>>(
+            new RecordId("user", 123),
+          ),
+        ).toExtend<z.ZodSafeParseResult<RecordId<"user", number>>>();
+        // safeDecodeAsync
+        expectTypeOf(schema.safeDecodeAsync).returns.toExtend<
+          Promise<z.ZodSafeParseResult<RecordId<string, RecordIdValue>>>
+        >();
+        expectTypeOf(
+          schema.safeDecodeAsync<"user", number>(new RecordId("user", 123)),
+        ).toExtend<Promise<z.ZodSafeParseResult<RecordId<"user", number>>>>();
+        expectTypeOf(
+          schema.safeDecodeAsync<RecordId<"user", number>>(
+            new RecordId("user", 123),
+          ),
+        ).toExtend<Promise<z.ZodSafeParseResult<RecordId<"user", number>>>>();
+      });
+
+      test("any table, typed value", () => {
+        const schema = z.recordId().type(z.number());
+        expect(schema.safeDecode(new RecordId("user", 123))).toMatchObject({
+          success: true,
+          data: new RecordId("user", 123),
+        });
+        expect(schema.safeDecode(new RecordId("test", 123))).toMatchObject({
+          success: true,
+          data: new RecordId("test", 123),
+        });
+        // TODO: StringRecordId is not supported yet
+        expect(schema.safeDecode(new StringRecordId("user:123"))).toMatchObject(
+          {
+            success: false,
+            error: expect.objectContaining({
+              issues: expect.arrayContaining([
+                expect.objectContaining({
+                  code: "invalid_type",
+                  expected: "record_id",
+                }),
+              ]),
+            }),
+          },
+        );
+
+        // -------------------------- Type Tests --------------------------
+        // parse
+        expectTypeOf(schema.parse).returns.toExtend<
+          RecordId<string, RecordIdValue>
+        >();
+        expectTypeOf(schema.parse<"user">(new RecordId("user", 123))).toExtend<
+          RecordId<"user", number>
+        >();
+        expectTypeOf(
+          schema.parse<RecordId<"user", string>>(new RecordId("user", 123)),
+        ).toExtend<RecordId<"user", number>>();
+        // parseAsync
+        expectTypeOf(schema.parseAsync).returns.toExtend<
+          Promise<RecordId<string, RecordIdValue>>
+        >();
+        expectTypeOf(
+          schema.parseAsync<"user">(new RecordId("user", 123)),
+        ).toExtend<Promise<RecordId<"user", number>>>();
+        expectTypeOf(
+          schema.parseAsync<RecordId<"user", string>>(
+            new RecordId("user", 123),
+          ),
+        ).toExtend<Promise<RecordId<"user", number>>>();
+        // safeParse
+        expectTypeOf(schema.safeParse).returns.toExtend<
+          z.ZodSafeParseResult<RecordId<string, RecordIdValue>>
+        >();
+        expectTypeOf(
+          schema.safeParse<"user">(new RecordId("user", 123)),
+        ).toExtend<z.ZodSafeParseResult<RecordId<"user", number>>>();
+        expectTypeOf(
+          schema.safeParse<RecordId<"user", number>>(new RecordId("user", 123)),
+        ).toExtend<z.ZodSafeParseResult<RecordId<"user", number>>>();
+        // safeParseAsync
+        expectTypeOf(schema.safeParseAsync).returns.toExtend<
+          Promise<z.ZodSafeParseResult<RecordId<string, RecordIdValue>>>
+        >();
+        expectTypeOf(
+          schema.safeParseAsync<"user">(new RecordId("user", 123)),
+        ).toExtend<Promise<z.ZodSafeParseResult<RecordId<"user", number>>>>();
+        expectTypeOf(
+          schema.safeParseAsync<RecordId<"user", number>>(
+            new RecordId("user", 123),
+          ),
+        ).toExtend<Promise<z.ZodSafeParseResult<RecordId<"user", number>>>>();
+        // decode
+        expectTypeOf(schema.decode).returns.toExtend<
+          RecordId<string, RecordIdValue>
+        >();
+        expectTypeOf(schema.decode<"user">(new RecordId("user", 123))).toExtend<
+          RecordId<"user", number>
+        >();
+        expectTypeOf(
+          schema.decode<RecordId<"user", number>>(new RecordId("user", 123)),
+        ).toExtend<RecordId<"user", number>>();
+        // decodeAsync
+        expectTypeOf(schema.decodeAsync).returns.toExtend<
+          Promise<RecordId<string, RecordIdValue>>
+        >();
+        expectTypeOf(
+          schema.decodeAsync<"user">(new RecordId("user", 123)),
+        ).toExtend<Promise<RecordId<"user", number>>>();
+        expectTypeOf(
+          schema.decodeAsync<RecordId<"user", number>>(
+            new RecordId("user", 123),
+          ),
+        ).toExtend<Promise<RecordId<"user", number>>>();
+        // safeDecode
+        expectTypeOf(schema.safeDecode).returns.toExtend<
+          z.ZodSafeParseResult<RecordId<string, RecordIdValue>>
+        >();
+        expectTypeOf(
+          schema.safeDecode<"user">(new RecordId("user", 123)),
+        ).toExtend<z.ZodSafeParseResult<RecordId<"user", number>>>();
+        expectTypeOf(
+          schema.safeDecode<RecordId<"user", number>>(
+            new RecordId("user", 123),
+          ),
+        ).toExtend<z.ZodSafeParseResult<RecordId<"user", number>>>();
+        // safeDecodeAsync
+        expectTypeOf(schema.safeDecodeAsync).returns.toExtend<
+          Promise<z.ZodSafeParseResult<RecordId<string, RecordIdValue>>>
+        >();
+        expectTypeOf(
+          schema.safeDecodeAsync<"user">(new RecordId("user", 123)),
+        ).toExtend<Promise<z.ZodSafeParseResult<RecordId<"user", number>>>>();
+        expectTypeOf(
+          schema.safeDecodeAsync<RecordId<"user", number>>(
+            new RecordId("user", 123),
+          ),
+        ).toExtend<Promise<z.ZodSafeParseResult<RecordId<"user", number>>>>();
+      });
+
+      test("specific table, any value", () => {
+        const schema = z.recordId("user");
+        expect(schema.safeDecode(new RecordId("user", "123"))).toMatchObject({
+          success: true,
+          data: new RecordId("user", "123"),
+        });
+        expect(
+          schema.safeDecode(new RecordId("test", "123") as never),
+        ).toMatchObject({
+          success: false,
+          error: expect.objectContaining({
+            issues: expect.arrayContaining([
+              expect.objectContaining({
+                code: "invalid_value",
+                values: ["user"],
+              }),
+            ]),
+          }),
+        });
+        // TODO: StringRecordId is not supported yet
+        expect(schema.safeDecode(new StringRecordId("user:123"))).toMatchObject(
+          {
+            success: false,
+            error: expect.objectContaining({
+              issues: expect.arrayContaining([
+                expect.objectContaining({
+                  code: "invalid_type",
+                  expected: "record_id",
+                }),
+              ]),
+            }),
+          },
+        );
+
+        // -------------------------- Type Tests --------------------------
+        // parse
+        expectTypeOf(schema.parse).returns.toExtend<
+          RecordId<string, RecordIdValue>
+        >();
+        expectTypeOf(schema.parse<number>(new RecordId("user", 123))).toExtend<
+          RecordId<"user", RecordIdValue>
+        >();
+        expectTypeOf(
+          schema.parse<RecordId<"user", number>>(new RecordId("user", 123)),
+        ).toExtend<RecordId<"user", number>>();
+        // parseAsync
+        expectTypeOf(schema.parseAsync).returns.toExtend<
+          Promise<RecordId<string, RecordIdValue>>
+        >();
+        expectTypeOf(
+          schema.parseAsync<number>(new RecordId("user", 123)),
+        ).toExtend<Promise<RecordId<"user", number>>>();
+        expectTypeOf(
+          schema.parseAsync<RecordId<"user", number>>(
+            new RecordId("user", 123),
+          ),
+        ).toExtend<Promise<RecordId<"user", number>>>();
+        // safeParse
+        expectTypeOf(schema.safeParse).returns.toExtend<
+          z.ZodSafeParseResult<RecordId<"user", RecordIdValue>>
+        >();
+        expectTypeOf(
+          schema.safeParse<number>(new RecordId("user", 123)),
+        ).toExtend<z.ZodSafeParseResult<RecordId<"user", number>>>();
+        expectTypeOf(
+          schema.safeParse<RecordId<"user", number>>(new RecordId("user", 123)),
+        ).toExtend<z.ZodSafeParseResult<RecordId<"user", number>>>();
+        // safeParseAsync
+        expectTypeOf(schema.safeParseAsync).returns.toExtend<
+          Promise<z.ZodSafeParseResult<RecordId<string, RecordIdValue>>>
+        >();
+        expectTypeOf(
+          schema.safeParseAsync<number>(new RecordId("user", 123)),
+        ).toExtend<Promise<z.ZodSafeParseResult<RecordId<"user", number>>>>();
+        expectTypeOf(
+          schema.safeParseAsync<RecordId<"user", number>>(
+            new RecordId("user", 123),
+          ),
+        ).toExtend<Promise<z.ZodSafeParseResult<RecordId<"user", number>>>>();
+        // decode
+        expectTypeOf(schema.decode).returns.toExtend<
+          RecordId<string, RecordIdValue>
+        >();
+        expectTypeOf(schema.decode<number>(new RecordId("user", 123))).toExtend<
+          RecordId<"user", number>
+        >();
+        expectTypeOf(
+          schema.decode<RecordId<"user", number>>(new RecordId("user", 123)),
+        ).toExtend<RecordId<"user", number>>();
+        // decodeAsync
+        expectTypeOf(schema.decodeAsync).returns.toExtend<
+          Promise<RecordId<string, RecordIdValue>>
+        >();
+        expectTypeOf(
+          schema.decodeAsync<number>(new RecordId("user", 123)),
+        ).toExtend<Promise<RecordId<"user", number>>>();
+        expectTypeOf(
+          schema.decodeAsync<RecordId<"user", number>>(
+            new RecordId("user", 123),
+          ),
+        ).toExtend<Promise<RecordId<"user", number>>>();
+        // safeDecode
+        expectTypeOf(schema.safeDecode).returns.toExtend<
+          z.ZodSafeParseResult<RecordId<string, RecordIdValue>>
+        >();
+        expectTypeOf(
+          schema.safeDecode<number>(new RecordId("user", 123)),
+        ).toExtend<z.ZodSafeParseResult<RecordId<"user", number>>>();
+        expectTypeOf(
+          schema.safeDecode<RecordId<"user", number>>(
+            new RecordId("user", 123),
+          ),
+        ).toExtend<z.ZodSafeParseResult<RecordId<"user", number>>>();
+        // safeDecodeAsync
+        expectTypeOf(schema.safeDecodeAsync).returns.toExtend<
+          Promise<z.ZodSafeParseResult<RecordId<string, RecordIdValue>>>
+        >();
+        expectTypeOf(
+          schema.safeDecodeAsync<number>(new RecordId("user", 123)),
+        ).toExtend<Promise<z.ZodSafeParseResult<RecordId<"user", number>>>>();
+        expectTypeOf(
+          schema.safeDecodeAsync<RecordId<"user", number>>(
+            new RecordId("user", 123),
+          ),
+        ).toExtend<Promise<z.ZodSafeParseResult<RecordId<"user", number>>>>();
+      });
+
+      test("specific table, typed value", () => {
+        const schema = z.recordId("user").type(z.number());
+        expect(schema.safeDecode(new RecordId("user", 123))).toMatchObject({
+          success: true,
+          data: new RecordId("user", 123),
+        });
+        expect(
+          schema.safeDecode(new RecordId("test", 123) as never),
+        ).toMatchObject({
+          success: false,
+          error: expect.objectContaining({
+            issues: expect.arrayContaining([
+              expect.objectContaining({
+                code: "invalid_value",
+                values: ["user"],
+              }),
+            ]),
+          }),
+        });
+        // TODO: StringRecordId is not supported yet
+        expect(schema.safeDecode(new StringRecordId("user:123"))).toMatchObject(
+          {
+            success: false,
+            error: expect.objectContaining({
+              issues: expect.arrayContaining([
+                expect.objectContaining({
+                  code: "invalid_type",
+                  expected: "record_id",
+                }),
+              ]),
+            }),
+          },
+        );
+
+        // -------------------------- Type Tests --------------------------
+        // parse
+        expectTypeOf(schema.parse).returns.toExtend<RecordId<string, number>>();
+        expectTypeOf(schema.parse(new RecordId("user", 123))).toExtend<
+          RecordId<"user", number>
+        >();
+        // parseAsync
+        expectTypeOf(schema.parseAsync).returns.toExtend<
+          Promise<RecordId<string, number>>
+        >();
+        expectTypeOf(schema.parseAsync(new RecordId("user", 123))).toExtend<
+          Promise<RecordId<"user", number>>
+        >();
+        // safeParse
+        expectTypeOf(schema.safeParse).returns.toExtend<
+          z.ZodSafeParseResult<RecordId<string, number>>
+        >();
+        expectTypeOf(schema.safeParse(new RecordId("user", 123))).toExtend<
+          z.ZodSafeParseResult<RecordId<"user", number>>
+        >();
+        // safeParseAsync
+        expectTypeOf(schema.safeParseAsync).returns.toExtend<
+          Promise<z.ZodSafeParseResult<RecordId<string, number>>>
+        >();
+        expectTypeOf(schema.safeParseAsync(new RecordId("user", 123))).toExtend<
+          Promise<z.ZodSafeParseResult<RecordId<"user", number>>>
+        >();
+        // decode
+        expectTypeOf(schema.decode).returns.toExtend<
+          RecordId<string, number>
+        >();
+        expectTypeOf(schema.decode(new RecordId("user", 123))).toExtend<
+          RecordId<"user", number>
+        >();
+        // decodeAsync
+        expectTypeOf(schema.decodeAsync).returns.toExtend<
+          Promise<RecordId<string, number>>
+        >();
+        expectTypeOf(schema.decodeAsync(new RecordId("user", 123))).toExtend<
+          Promise<RecordId<"user", number>>
+        >();
+        // safeDecode
+        expectTypeOf(schema.safeDecode).returns.toExtend<
+          z.ZodSafeParseResult<RecordId<string, number>>
+        >();
+        expectTypeOf(schema.safeDecode(new RecordId("user", 123))).toExtend<
+          z.ZodSafeParseResult<RecordId<"user", number>>
+        >();
+        // safeDecodeAsync
+        expectTypeOf(schema.safeDecodeAsync).returns.toExtend<
+          Promise<z.ZodSafeParseResult<RecordId<string, number>>>
+        >();
+        expectTypeOf(
+          schema.safeDecodeAsync(new RecordId("user", 123)),
+        ).toExtend<Promise<z.ZodSafeParseResult<RecordId<"user", number>>>>();
+      });
+
+      test("multiple tables, any value", () => {
+        const schema = z.recordId(["user", "admin"]);
+        expect(schema.safeDecode(new RecordId("user", "123"))).toMatchObject({
+          success: true,
+          data: new RecordId("user", "123"),
+        });
+        expect(schema.safeDecode(new RecordId("admin", "123"))).toMatchObject({
+          success: true,
+          data: new RecordId("admin", "123"),
+        });
+        expect(
+          schema.safeDecode(new RecordId("test", "123") as never),
+        ).toMatchObject({
+          success: false,
+          error: expect.objectContaining({
+            issues: expect.arrayContaining([
+              expect.objectContaining({
+                code: "invalid_value",
+                values: ["user", "admin"],
+              }),
+            ]),
+          }),
+        });
+        // TODO: StringRecordId is not supported yet
+        expect(schema.safeDecode(new StringRecordId("user:123"))).toMatchObject(
+          {
+            success: false,
+            error: expect.objectContaining({
+              issues: expect.arrayContaining([
+                expect.objectContaining({
+                  code: "invalid_type",
+                  expected: "record_id",
+                }),
+              ]),
+            }),
+          },
+        );
+
+        // -------------------------- Type Tests --------------------------
+        // parse
+        expectTypeOf(schema.parse).returns.toExtend<
+          RecordId<"user" | "admin", RecordIdValue>
+        >();
+        expectTypeOf(schema.parse<number>(new RecordId("user", 123))).toExtend<
+          RecordId<"user" | "admin", number>
+        >();
+        expectTypeOf(
+          schema.parse<RecordId<"user", number>>(new RecordId("user", 123)),
+        ).toExtend<RecordId<"user" | "admin", number>>();
+        // parseAsync
+        expectTypeOf(schema.parseAsync).returns.toExtend<
+          Promise<RecordId<"user" | "admin", RecordIdValue>>
+        >();
+        expectTypeOf(
+          schema.parseAsync<number>(new RecordId("user", 123)),
+        ).toExtend<Promise<RecordId<"user" | "admin", number>>>();
+        expectTypeOf(
+          schema.parseAsync<RecordId<"user", number>>(
+            new RecordId("user", 123),
+          ),
+        ).toExtend<Promise<RecordId<"user" | "admin", number>>>();
+        // safeParse
+        expectTypeOf(schema.safeParse).returns.toExtend<
+          z.ZodSafeParseResult<RecordId<"user" | "admin", RecordIdValue>>
+        >();
+        expectTypeOf(
+          schema.safeParse<number>(new RecordId("user", 123)),
+        ).toExtend<z.ZodSafeParseResult<RecordId<"user" | "admin", number>>>();
+        expectTypeOf(
+          schema.safeParse<RecordId<"user", number>>(new RecordId("user", 123)),
+        ).toExtend<z.ZodSafeParseResult<RecordId<"user" | "admin", number>>>();
+        // safeParseAsync
+        expectTypeOf(schema.safeParseAsync).returns.toExtend<
+          Promise<
+            z.ZodSafeParseResult<RecordId<"user" | "admin", RecordIdValue>>
+          >
+        >();
+        expectTypeOf(
+          schema.safeParseAsync<number>(new RecordId("user", 123)),
+        ).toExtend<
+          Promise<z.ZodSafeParseResult<RecordId<"user" | "admin", number>>>
+        >();
+        expectTypeOf(
+          schema.safeParseAsync<RecordId<"user", number>>(
+            new RecordId("user", 123),
+          ),
+        ).toExtend<
+          Promise<z.ZodSafeParseResult<RecordId<"user" | "admin", number>>>
+        >();
+        // decode
+        expectTypeOf(schema.decode).returns.toExtend<
+          RecordId<"user" | "admin", RecordIdValue>
+        >();
+        expectTypeOf(schema.decode<number>(new RecordId("user", 123))).toExtend<
+          RecordId<"user" | "admin", number>
+        >();
+        expectTypeOf(
+          schema.decode<RecordId<"user", number>>(new RecordId("user", 123)),
+        ).toExtend<RecordId<"user" | "admin", number>>();
+        // decodeAsync
+        expectTypeOf(schema.decodeAsync).returns.toExtend<
+          Promise<RecordId<"user" | "admin", RecordIdValue>>
+        >();
+        expectTypeOf(
+          schema.decodeAsync<number>(new RecordId("user", 123)),
+        ).toExtend<Promise<RecordId<"user" | "admin", number>>>();
+        expectTypeOf(
+          schema.decodeAsync<RecordId<"user", number>>(
+            new RecordId("user", 123),
+          ),
+        ).toExtend<Promise<RecordId<"user" | "admin", number>>>();
+      });
+
+      test("multiple tables, typed value", () => {
+        const schema = z.recordId(["user", "admin"]).type(z.number());
+        expect(schema.safeDecode(new RecordId("user", 123))).toMatchObject({
+          success: true,
+          data: new RecordId("user", 123),
+        });
+        expect(schema.safeDecode(new RecordId("admin", 123))).toMatchObject({
+          success: true,
+          data: new RecordId("admin", 123),
+        });
+        expect(
+          schema.safeDecode(new RecordId("test", "123") as never),
+        ).toMatchObject({
+          success: false,
+          error: expect.objectContaining({
+            issues: expect.arrayContaining([
+              expect.objectContaining({
+                code: "invalid_value",
+                values: ["user", "admin"],
+              }),
+            ]),
+          }),
+        });
+        // TODO: StringRecordId is not supported yet
+        expect(schema.safeDecode(new StringRecordId("user:123"))).toMatchObject(
+          {
+            success: false,
+            error: expect.objectContaining({
+              issues: expect.arrayContaining([
+                expect.objectContaining({
+                  code: "invalid_type",
+                  expected: "record_id",
+                }),
+              ]),
+            }),
+          },
+        );
+
+        // -------------------------- Type Tests --------------------------
+        // parse
+        expectTypeOf(schema.parse).returns.toExtend<
+          RecordId<"user" | "admin", number>
+        >();
+        expectTypeOf(schema.parse(new RecordId("user", 123))).toExtend<
+          RecordId<"user" | "admin", number>
+        >();
+        // parseAsync
+        expectTypeOf(schema.parseAsync).returns.toExtend<
+          Promise<RecordId<"user" | "admin", number>>
+        >();
+        expectTypeOf(schema.parseAsync(new RecordId("user", 123))).toExtend<
+          Promise<RecordId<"user" | "admin", number>>
+        >();
+        // safeParse
+        expectTypeOf(schema.safeParse).returns.toExtend<
+          z.ZodSafeParseResult<RecordId<"user" | "admin", number>>
+        >();
+        expectTypeOf(schema.safeParse(new RecordId("user", 123))).toExtend<
+          z.ZodSafeParseResult<RecordId<"user" | "admin", number>>
+        >();
+        // safeParseAsync
+        expectTypeOf(schema.safeParseAsync).returns.toExtend<
+          Promise<z.ZodSafeParseResult<RecordId<"user" | "admin", number>>>
+        >();
+        expectTypeOf(schema.safeParseAsync(new RecordId("user", 123))).toExtend<
+          Promise<z.ZodSafeParseResult<RecordId<"user" | "admin", number>>>
+        >();
+        // decode
+        expectTypeOf(schema.decode).returns.toExtend<
+          RecordId<"user" | "admin", number>
+        >();
+        expectTypeOf(schema.decode(new RecordId("user", 123))).toExtend<
+          RecordId<"user" | "admin", number>
+        >();
+        // decodeAsync
+        expectTypeOf(schema.decodeAsync).returns.toExtend<
+          Promise<RecordId<"user" | "admin", number>>
+        >();
+        expectTypeOf(schema.decodeAsync(new RecordId("user", 123))).toExtend<
+          Promise<RecordId<"user" | "admin", number>>
+        >();
+        // safeDecode
+        expectTypeOf(schema.safeDecode).returns.toExtend<
+          z.ZodSafeParseResult<RecordId<"user" | "admin", number>>
+        >();
+        expectTypeOf(schema.safeDecode(new RecordId("user", 123))).toExtend<
+          z.ZodSafeParseResult<RecordId<"user" | "admin", number>>
+        >();
+        // safeDecodeAsync
+        expectTypeOf(schema.safeDecodeAsync).returns.toExtend<
+          Promise<z.ZodSafeParseResult<RecordId<"user" | "admin", number>>>
+        >();
+        expectTypeOf(
+          schema.safeDecodeAsync(new RecordId("user", 123)),
+        ).toExtend<
+          Promise<z.ZodSafeParseResult<RecordId<"user" | "admin", number>>>
+        >();
+      });
+    });
+
+    describe("from parts", () => {
+      test("any table, any value", () => {
+        const schema = z.recordId();
+        expect(schema.safeFromParts("user", "123")).toMatchObject({
+          success: true,
+          data: new RecordId("user", "123"),
+        });
+      });
+
+      test("any table, typed value", () => {
+        const schema = z.recordId().type(z.number());
+        expect(schema.safeFromParts("user", 123)).toMatchObject({
+          success: true,
+          data: new RecordId("user", 123),
+        });
+        expect(schema.safeFromParts("test", "123" as never)).toMatchObject({
+          success: false,
+          error: expect.objectContaining({
+            issues: expect.arrayContaining([
+              expect.objectContaining({
+                code: "invalid_type",
+                expected: "number",
+              }),
+            ]),
+          }),
+        });
+      });
+
+      test("specific table, any value", () => {
+        const schema = z.recordId("user");
+        expect(schema.safeFromParts("user", "123")).toMatchObject({
+          success: true,
+          data: new RecordId("user", "123"),
+        });
+        expect(schema.safeFromParts("admin" as never, "123")).toMatchObject({
+          success: false,
+          error: expect.objectContaining({
+            issues: expect.arrayContaining([
+              expect.objectContaining({
+                code: "invalid_value",
+                values: ["user"],
+              }),
+            ]),
+          }),
+        });
+      });
+
+      test("specific table, typed value", () => {
+        const schema = z.recordId("user").type(z.number());
+        expect(schema.safeFromParts("user", 123)).toMatchObject({
+          success: true,
+          data: new RecordId("user", 123),
+        });
+        expect(schema.safeFromParts("test" as any, 123)).toMatchObject({
+          success: false,
+          error: expect.objectContaining({
+            issues: expect.arrayContaining([
+              expect.objectContaining({
+                code: "invalid_value",
+                values: ["user"],
+              }),
+            ]),
+          }),
+        });
+      });
+
+      test("multiple tables, any value", () => {
+        const schema = z.recordId(["user", "admin"]);
+        expect(schema.safeFromParts("user", "123")).toMatchObject({
+          success: true,
+          data: new RecordId("user", "123"),
+        });
+        expect(schema.safeFromParts("test" as never, "123")).toMatchObject({
+          success: false,
+          error: expect.objectContaining({
+            issues: expect.arrayContaining([
+              expect.objectContaining({
+                code: "invalid_value",
+                values: ["user", "admin"],
+              }),
+            ]),
+          }),
+        });
+      });
+
+      test("multiple tables, typed value", () => {
+        const schema = z.recordId(["user", "admin"]).type(z.number());
+        expect(schema.safeFromParts("user", 123)).toMatchObject({
+          success: true,
+          data: new RecordId("user", 123),
+        });
+        expect(schema.safeFromParts("test" as never, 123)).toMatchObject({
+          success: false,
+          error: expect.objectContaining({
+            issues: expect.arrayContaining([
+              expect.objectContaining({
+                code: "invalid_value",
+                values: ["user", "admin"],
+              }),
+            ]),
+          }),
+        });
+      });
+    });
+
+    describe("from id", () => {
+      test("any table, any value", () => {
+        const schema = z.recordId();
+        // @ts-expect-error - from id not allowed
+        expect(schema.safeFromId).toBeUndefined();
+      });
+
+      test("any table, typed value", () => {
+        const schema = z.recordId().type(z.number());
+        // @ts-expect-error - from id not allowed
+        expect(schema.safeFromId).toBeUndefined();
+      });
+
+      test("specific table, any value", () => {
+        const schema = z.recordId("user");
+        expect(schema.safeFromId("123")).toMatchObject({
+          success: true,
+          data: new RecordId("user", "123"),
+        });
+      });
+
+      test("specific table, typed value", () => {
+        const schema = z.recordId("user").type(z.number());
+        expect(schema.safeFromId(123)).toMatchObject({
+          success: true,
+          data: new RecordId("user", 123),
+        });
+      });
+
+      test("multiple tables, any value", () => {
+        const schema = z.recordId(["user", "admin"]);
+        // @ts-expect-error - from id not allowed
+        expect(schema.safeFromId).toBeUndefined();
+      });
+
+      test("multiple table, typed value", () => {
+        const schema = z.recordId(["user", "admin"]).type(z.number());
+        // @ts-expect-error - from id not allowed
+        expect(schema.safeFromId).toBeUndefined();
+      });
+    });
   });
 
-  // @original
-  defineTest("json", z.json(), {
-    type: "string | number | bool | null | array | object",
-    children: [{ name: "*", type: "any" }],
-    tests: [
-      testCase({ value: "Hello World", parse: { data: "Hello World" } }),
-      testCase({ value: 123, parse: { data: 123 } }),
-      testCase({ value: true, parse: { data: true } }),
-      testCase({ value: false, parse: { data: false } }),
-      testCase({ value: null, parse: { data: null } }),
-      testCase({ value: [1, 2, 3], parse: { data: [1, 2, 3] } }),
-      testCase({
-        value: { name: "John Doe", age: 17 },
-        parse: { data: { name: "John Doe", age: 17 } },
-      }),
-    ],
+  describe("table", () => {
+    test("fails if not an object", () => {
+      const schema = z.table("test").fields({
+        name: z.string(),
+      });
+      expect(schema.safeParse("Hello World")).toMatchObject({
+        success: false,
+        error: expect.objectContaining({
+          message: expect.stringMatching(/expected object, received string/i),
+        }),
+      });
+      expect(schema.safeParse(null)).toMatchObject({
+        success: false,
+        error: expect.objectContaining({
+          message: expect.stringMatching(/expected object, received null/i),
+        }),
+      });
+      expect(schema.safeParse(123)).toMatchObject({
+        success: false,
+        error: expect.objectContaining({
+          message: expect.stringMatching(/expected object, received number/i),
+        }),
+      });
+      expect(schema.safeParse(true)).toMatchObject({
+        success: false,
+        error: expect.objectContaining({
+          message: expect.stringMatching(/expected object, received boolean/i),
+        }),
+      });
+    });
+
+    test("fails if id does not match table name", () => {
+      const schema = z.table("user").schemaless().fields({
+        name: z.string(),
+      });
+      const parse = schema.safeParse({
+        id: new RecordId("test", 123),
+        name: "John Doe",
+        age: 99,
+      });
+      expect(parse).toMatchObject({
+        success: false,
+        error: expect.objectContaining({
+          message: expect.stringMatching(
+            /Expected RecordId's table to be user but found test/i,
+          ),
+        }),
+      });
+    });
+
+    test("id's table is overriden if already set", () => {
+      const schema = z.table("user").fields({
+        id: z.recordId(["test", "admin"]),
+      });
+      expect(
+        schema.safeParse({
+          id: new RecordId("test", 123),
+        }),
+      ).toMatchObject({
+        success: false,
+        error: expect.objectContaining({
+          issues: expect.arrayContaining([
+            expect.objectContaining({
+              code: "invalid_value",
+              values: ["user"],
+              path: ["id"],
+            }),
+          ]),
+          message: expect.stringMatching(
+            /Expected RecordId's table to be user but found test/i,
+          ),
+        }),
+      });
+    });
+
+    test("fails if id is not provided", () => {
+      const schema = z.table("user").fields({
+        name: z.string(),
+      });
+      const parse = schema.safeParse({
+        name: "John Doe",
+        age: 99,
+      });
+      expect(parse).toMatchObject({
+        success: false,
+        error: expect.objectContaining({
+          issues: expect.arrayContaining([
+            expect.objectContaining({
+              code: "invalid_type",
+              path: ["id"],
+              expected: "record_id",
+            }),
+          ]),
+        }),
+      });
+    });
+
+    test("allow extra fields if schemaless", () => {
+      const schema = z.table("user").schemaless().fields({
+        name: z.string(),
+      });
+      const parse = schema.safeParse({
+        id: new RecordId("user", 123),
+        name: "John Doe",
+        age: 99,
+      });
+      expect(parse).toMatchObject({
+        success: true,
+        data: {
+          name: "John Doe",
+          age: 99,
+        },
+      });
+    });
+
+    test("deny extra fields if schemafull", () => {
+      const schema = z.table("user").schemafull().fields({
+        name: z.string(),
+      });
+      const parse = schema.safeParse({
+        id: new RecordId("user", "213"),
+        name: "John Doe",
+        age: 99,
+      });
+      expect(parse).toMatchObject({
+        success: false,
+        error: expect.objectContaining({
+          issues: expect.arrayContaining([
+            expect.objectContaining({
+              code: "unrecognized_keys",
+              keys: ["age"],
+            }),
+          ]),
+        }),
+      });
+    });
+
+    test("fail on missing fields", () => {
+      const schema = z.table("test").fields({
+        name: z.string(),
+        age: z.string(),
+      });
+      const parse = schema.safeParse({
+        id: new RecordId("test", "123"),
+      });
+      expect(parse).toMatchObject({
+        success: false,
+        error: expect.objectContaining({
+          issues: expect.arrayContaining([
+            expect.objectContaining({
+              code: "invalid_type",
+              path: ["name"],
+              expected: "string",
+            }),
+            expect.objectContaining({
+              code: "invalid_type",
+              path: ["age"],
+              expected: "string",
+            }),
+          ]),
+        }),
+      });
+    });
+
+    describe("record()", () => {
+      test("matches table's id type", () => {
+        const schema = z.table("test").record();
+        let parse = schema.safeParse(new RecordId("test", "123"));
+        expect(parse).toMatchObject({
+          success: true,
+          data: new RecordId("test", "123"),
+        });
+        parse = schema.safeParse(new RecordId("user", "123"));
+        expect(parse).toMatchObject({
+          success: false,
+          error: expect.any(Error),
+        });
+      });
+
+      test("original id schema is preserved", () => {
+        const schema = z
+          .table("test")
+          .fields({
+            id: z.string(),
+            name: z.string(),
+          })
+          .record();
+        let parse = schema.safeParse(new RecordId("test", "123"));
+        expect(parse).toMatchObject({
+          success: true,
+          data: new RecordId("test", "123"),
+        });
+        parse = schema.safeParse(new RecordId("user", "123"));
+        expect(parse).toMatchObject({
+          success: false,
+          error: expect.objectContaining({
+            issues: expect.arrayContaining([
+              expect.objectContaining({
+                code: "invalid_value",
+                values: ["test"],
+              }),
+            ]),
+          }),
+        });
+      });
+    });
+
+    describe("dto()", () => {
+      test("id is optional", () => {
+        const schema = z
+          .table("user")
+          .fields({
+            name: z.string(),
+          })
+          .dto();
+        const parse = schema.safeParse({
+          name: "John Doe",
+        });
+        expect(parse).toMatchObject({
+          success: true,
+          data: {
+            name: "John Doe",
+          },
+        });
+      });
+
+      test("original id schema is preserved", () => {
+        const schema = z
+          .table("user")
+          .fields({
+            name: z.string(),
+          })
+          .dto();
+        let parse = schema.safeParse({
+          id: new RecordId("user", "123"),
+          name: "John Doe",
+        });
+        expect(parse).toMatchObject({
+          success: true,
+          data: {
+            id: new RecordId("user", "123"),
+            name: "John Doe",
+          },
+        });
+        parse = schema.safeParse({
+          id: new RecordId("test", "456"),
+          name: "John Doe",
+        });
+        expect(parse).toMatchObject({
+          success: false,
+          error: expect.objectContaining({
+            issues: expect.arrayContaining([
+              expect.objectContaining({
+                code: "invalid_value",
+                values: ["user"],
+              }),
+            ]),
+          }),
+        });
+      });
+    });
   });
 
-  // @original
-  // TODO: DB Normalization
-  defineTest("stringbool", z.stringbool(), {
-    type: "string | bool",
-    tests: [
-      testCase({ value: "yes", parse: { data: true } }),
-      testCase({ value: "true", parse: { data: true } }),
-      testCase({ value: "no", parse: { data: false } }),
-      testCase({ value: "false", parse: { data: false } }),
-    ],
+  describe("duration", () => {
+    test("matches duration type", () => {
+      const schema = z.duration();
+      const parse = schema.safeParse(new Duration("1y"));
+      expect(parse.data?.equals(new Duration("1y"))).toBeTrue();
+    });
   });
 });

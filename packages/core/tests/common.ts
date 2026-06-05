@@ -8,6 +8,7 @@ import {
 } from "./utils";
 import dedent from "dedent";
 import { core } from "zod";
+import * as _core_ from "../src/zod/core";
 import { ZodSurrealTable } from "../src/zod/schema";
 import { z } from "../src";
 import { formatQuery } from "../src/surql";
@@ -80,7 +81,7 @@ export function setupSurrealTests() {
 
   function defineTest(
     typeName: string,
-    schemas: core.$ZodType | core.$ZodType[],
+    schemas: _core_.$SomeSurrealType | _core_.$SomeSurrealType[],
     expected: ZodTest,
   ) {
     test(typeName, async () => {

@@ -36,3 +36,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # build
 lib/
 dist/
+
+# local npm auth / scratch
+.npmrc
+history.txt

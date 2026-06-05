@@ -1,8 +1,16 @@
 import {
+  BoundExcluded,
+  BoundIncluded,
+  DateTime,
   Duration,
+  escapeIdent,
+  escapeIdPart,
+  r,
+  RecordId,
   surql,
   Surreal,
   Uuid,
+  type RecordIdValue,
   // DateTime,
   // Decimal,
   // RecordId,
@@ -16,9 +24,9 @@ import {
   // createRemoteEngines,
   // Future,
 } from "surrealdb";
-import z, { ZodSurrealField } from "./src";
+import z, { __rest__, ZodSurrealField } from "./src/index.js";
 import z4 from "zod/v4";
-import { inspect } from "bun";
+import { inspect, sql } from "bun";
 // import z4 from "zod/v4";
 
 // // import { createNodeEngines } from "@surrealdb/node";
@@ -65,7 +73,21 @@ await surreal.connect("ws://127.0.0.1:8000", {
   database: "main",
 });
 
+// await surreal.connect(
+//   "wss://msanchezdev-06ahltcdr5qsl2sv0d0fseoka4.aws-use1.surreal.cloud/",
+//   {
+//     authentication: {
+//       username: "msanchezdev",
+//       password: "MAshley20240606.",
+//     },
+//     namespace: "msanchezdev",
+//     database: "main",
+//   },
+// );
+
 // // await surreal.use({ namespace: "test", database: "test" });
+
+console.log('Refine', z.object({}).refine);
 
 // // const input = "a";
 
@@ -430,31 +452,74 @@ await surreal.connect("ws://127.0.0.1:8000", {
 //   name: z.string(),
 // });
 
-const schema = z.uuid();
+// const schema = z
+//   .discriminatedUnion("type", [
+//     z.object({
+//       type: z.number(),
+//       name: z.string(),
+//     }),
+//     z.object({
+//       type: z.string(),
+//       name: z.number(),
+//     }),
+//   ])
+//   .$prefault(surql`{type: 1}`);
 
-console.log(schema._zod.def);
-console.log(
-  inspect(schema.decode(new Uuid("3836340b-7be8-4481-b07b-9d7cafaa7876")), {
-    colors: true,
-  }),
-);
-
-// console.log("default().$default() expected:", 456);
-// const innerSchema = z4.string().trim().min(8).default(456);
-// const oSchema = new ZodSurrealField({
-//   type: "any",
-//   innerType: innerSchema,
-//   surreal: {
-//     type: "string",
-//     field: {
-//       default: {
-//         value: surql`123`,
-//         always: false,
-//         parse: false,
-//       },
+// const schema = z
+//   .table("episode")
+//   .fields({
+//     id: z.tuple([z.recordId("anime"), z.number()]),
+//     // id: z.object({
+//     //   form: z.string(),
+//     //   id: z.string().$default(surql`rand::id()`)
+//     // }),
+//     name: z.string().$default(""),
+//   })
+//   .schemafull();
+//
+// const schema_r = schema.record().fromRange([r`anime:jjk`, undefined], []);
+// console.log(schema_r);
+//
+// console.log(await surreal.query(surql`SELECT * FROM ${schema_r}`));
+//
+// // console.log(schema);
+// // const raw = {
+// //   id: new RecordId("test", ["Help", undefined]),
+// //   name: "Manuel",
+// // };
+// const valueLocal = await schema.parse(undefined, {
+//   db: surreal,
+// }); //"user", undefined);
+// // const valueRemote = await schema.safeFromPartsAsync("user", undefined, {
+// //   db: surreal,
+// // });
+//
+// console.log(
+//   inspect(
+//     {
+//       local: valueLocal,
+//       // remote: valueRemote,
 //     },
-//   },
-// });
+//     { colors: true },
+//   ),
+// );
+//
+// // console.log("default().$default() expected:", 456);
+// // const innerSchema = z4.string().trim().min(8).default(456);
+// // const oSchema = new ZodSurrealField({
+// //   type: "any",
+// //   innerType: innerSchema,
+// //   surreal: {
+// //     type: "string",
+// //     field: {
+// //       default: {
+// //         value: surql`123`,
+// //         always: false,
+// //         parse: false,
+// //       },
+// //     },
+// //   },
+// // });
 // const data = await oSchema.safeDecodeAsync(undefined, { db: surreal });
 // console.log(data);
 
