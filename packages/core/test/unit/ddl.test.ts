@@ -72,9 +72,10 @@ describe("wrappers", () => {
     expect(typeOf(sz.string().nullable())).toBe("string | null");
   });
 
-  test("nullish -> option<T | null>; .optional().nullable() -> option<T> | null", () => {
+  test("nullish / .optional().nullable() / .nullable().optional() all -> option<T | null>", () => {
     expect(typeOf(sz.string().nullish())).toBe("option<string | null>");
-    expect(typeOf(sz.string().optional().nullable())).toBe("option<string> | null");
+    expect(typeOf(sz.string().optional().nullable())).toBe("option<string | null>");
+    expect(typeOf(sz.string().nullable().optional())).toBe("option<string | null>");
   });
 
   test("prefault -> option<> (app-side default); catch is transparent", () => {
@@ -121,6 +122,12 @@ describe("DB-side metadata clauses", () => {
   test("$value -> VALUE and strips option<>", () => {
     expect(ddl(sz.string().optional().$value(surql`string::lowercase($value)`))).toBe(
       "DEFINE FIELD x ON TABLE t TYPE string VALUE string::lowercase($value);",
+    );
+  });
+
+  test("$value with { optional: true } emits VALUE; type not wrapped in option<>", () => {
+    expect(ddl(sz.datetime().$value(surql`time::now()`, { optional: true }))).toBe(
+      "DEFINE FIELD x ON TABLE t TYPE datetime VALUE time::now();",
     );
   });
 

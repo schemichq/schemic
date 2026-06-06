@@ -80,6 +80,12 @@ function inferField(schema: z.ZodType, seen: Set<z.ZodType> = new Set()): FieldI
     }
     case "nullable": {
       const inner = inferField(def.innerType as z.ZodType, seen);
+      // Fold null INTO an existing option<X> so .optional().nullable() matches
+      // .nullish()/.nullable().optional(): option<X> | null -> option<X | null>.
+      if (inner.type.startsWith("option<") && inner.type.endsWith(">")) {
+        const x = inner.type.slice("option<".length, -1);
+        return { ...inner, type: `option<${x} | null>` };
+      }
       return { ...inner, type: `${inner.type} | null` };
     }
     case "readonly":

@@ -131,7 +131,21 @@ export class SField<S extends z.ZodType = z.ZodType, Flags extends string = neve
   $defaultAlways(value: z.output<S> | BoundQuery): SField<S, Flags | "create"> {
     return new SField(this.schema, { ...this.surreal, default: toExpr(value), defaultAlways: true });
   }
-  $value(expr: BoundQuery): SField<S, Flags> {
+  /**
+   * Set a DB-side `VALUE` clause. Whether the field is create-OPTIONAL depends on
+   * whether the expression consumes the client input (`$value`), which can't be
+   * inferred — so it's explicit via the `optional` option:
+   *   - `time::now()` ignores input -> `{ optional: true }` (create-optional)
+   *   - `string::lowercase($value)` requires input -> default (create-required)
+   * Optionality is purely type-level (the option drives the `"create"` flag that
+   * `Create<>`/`make()` read); it does not touch the app type or DB nullability.
+   * There is no separate update option — every field is already optional in `Update<>`.
+   */
+  $value<O extends boolean = false>(
+    expr: BoundQuery,
+    // biome-ignore lint/correctness/noUnusedFunctionParameters: drives the O generic (type-level only)
+    opts?: { optional?: O },
+  ): SField<S, O extends true ? Flags | "create" : Flags> {
     return new SField(this.schema, { ...this.surreal, value: expr });
   }
   $assert(expr: BoundQuery): SField<S, Flags> {

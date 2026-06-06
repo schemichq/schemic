@@ -90,7 +90,12 @@ false sense of safety for a browser-direct app where the DB is the only trustwor
 **Suggestion:** optionally translate common refinements (email/url/min/max/length/regex/int
 bounds) into `ASSERT`, or at minimum document prominently that formats are app-side only.
 
-### 5. `$value` (computed) fields are required in `Create`/`make()` input — Medium
+### 5. `$value` (computed) fields are required in `Create`/`make()` input — Medium — RESOLVED
+RESOLVED: `$value` now takes an options bag, `$value(expr, { optional: true })`, which adds
+the `"create"` flag (create-optional) for input-ignoring exprs like `time::now()`; the default
+stays create-required for input-consuming exprs like `string::lowercase($value)`. `updatedAt`
+dropped its workaround `.optional()`.
+
 `$default`/`$defaultAlways` add the `"create"` flag so the field is optional in `Create<>`
 and `make()`. `$value` does **not**, even though a `VALUE` column is *always* computed by
 the DB and should never be supplied by the client. `updatedAt: sz.datetime().$value(surql\`
@@ -112,7 +117,12 @@ a DB `ASSERT`) would. The empty-title case only fails after the round-trip, at t
 `safeMake`/parse-on-make (or a documented "validate first with `safeEncode`") would let the
 client catch invalid input without a server round-trip.
 
-### 8. `.optional().nullable()` emits `option<datetime> | null` — Low
+### 8. `.optional().nullable()` emits `option<datetime> | null` — Low — RESOLVED
+RESOLVED: the `nullable` DDL case now folds `null` into an existing `option<X>`, so
+`.optional().nullable()` emits `option<T | null>` (matching `.nullish()`/`.nullable().optional()`).
+`completedAt` now emits `option<datetime | null>` for free. Purely cosmetic — SurrealDB
+canonicalizes both forms to `none | T | null`.
+
 Wrapper order leaks into the DDL: `sz.datetime().optional().nullable()` →
 `TYPE option<datetime> | null` (redundant — `option<T>` already includes `NONE`), whereas
 `.nullable().optional()` → the cleaner `TYPE option<datetime | null>`. SurrealDB 3.1 accepts

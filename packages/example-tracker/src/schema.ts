@@ -53,7 +53,7 @@ export const Task = table("task", {
   createdBy: User.record().$default(surql`$auth.id`).$readonly(),
   createdAt: sz.datetime().$default(surql`time::now()`).$readonly(),
   /** Always stamped on every write via a DB-side VALUE clause. */
-  updatedAt: sz.datetime().$value(surql`time::now()`).optional(),
+  updatedAt: sz.datetime().$value(surql`time::now()`, { optional: true }),
 }).comment("Project tasks");
 
 /** Comments on a task; `author` defaults to the signed-in user and is fixed. */

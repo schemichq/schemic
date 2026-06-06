@@ -91,3 +91,27 @@ describe("field method types", () => {
     sz.int().$default("not a number");
   });
 });
+
+describe("$value create-optionality", () => {
+  const T = table("t", {
+    id: z.string(),
+    slug: sz.string().$value(surql`string::slug($value)`), // create-required (consumes $value)
+    updatedAt: sz.datetime().$value(surql`time::now()`, { optional: true }), // create-optional
+  });
+
+  test("{ optional: true } makes the field create-optional; default stays required", () => {
+    expectTypeOf<Create<typeof T>>().toEqualTypeOf<{
+      slug: string;
+      id?: RecordId<"t", string>;
+      updatedAt?: Date;
+    }>();
+    expectTypeOf<{ slug: string }>().toExtend<Create<typeof T>>();
+  });
+
+  test("make enforces the create-required slug; create-optional updatedAt is allowed", () => {
+    T.make({ slug: "x" });
+    T.make({ slug: "x", updatedAt: new Date() });
+    // @ts-expect-error - slug is create-required (its $value consumes client input)
+    T.make({});
+  });
+});
