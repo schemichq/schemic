@@ -1,5 +1,19 @@
 import { z } from "zod";
-import { DateTime, RecordId, type BoundQuery, type RecordIdValue } from "surrealdb";
+import {
+  BoundExcluded,
+  BoundIncluded,
+  DateTime,
+  Decimal,
+  Duration,
+  FileRef,
+  Geometry,
+  RecordId,
+  RecordIdRange,
+  Uuid,
+  type Bound,
+  type BoundQuery,
+  type RecordIdValue,
+} from "surrealdb";
 
 /**
  * The "pure" approach: a field is a stock Zod schema + SurrealQL DDL metadata.
@@ -94,6 +108,41 @@ function datetimeCodec() {
   return codec;
 }
 
+/** Register a schema's SurrealQL type and return it (for instanceof-backed native types). */
+function native<T>(schema: z.ZodType<T>, surrealType: string): z.ZodType<T, T> {
+  surrealTypeRegistry.set(schema, surrealType);
+  return schema as z.ZodType<T, T>;
+}
+
+/** Surreal `uuid` <-> JS `string` (a codec: app `string`, DB `Uuid`). */
+function uuidCodec() {
+  const codec = z.codec(z.instanceof(Uuid), z.uuid(), {
+    decode: (u) => u.toString(),
+    encode: (s) => new Uuid(s),
+  });
+  surrealTypeRegistry.set(codec, "uuid");
+  return codec;
+}
+
+/** Surreal `bytes` <-> JS `Uint8Array` (the DB may return an ArrayBuffer; normalize it). */
+function bytesCodec() {
+  const codec = z.codec(z.union([z.instanceof(Uint8Array), z.instanceof(ArrayBuffer)]), z.instanceof(Uint8Array), {
+    decode: (b) => (b instanceof Uint8Array ? b : new Uint8Array(b)),
+    encode: (u) => u,
+  });
+  surrealTypeRegistry.set(codec, "bytes");
+  return codec;
+}
+
+type GeometryKind =
+  | "point"
+  | "line"
+  | "polygon"
+  | "multipoint"
+  | "multiline"
+  | "multipolygon"
+  | "collection";
+
 /** A `RecordId` restricted to `tables` (+ optional id-value type). Identity, so no codec. */
 function recordIdSchema<T extends string, V extends RecordIdValue = RecordIdValue>(
   tables: T[],
@@ -136,6 +185,25 @@ export class RecordIdField<
         : new RecordId(idOrTable as T, id)
     ) as RecordId<T, V>;
   }
+
+  /** A record-id range for queries (default: inclusive start .. exclusive end). */
+  range(from?: V | Bound<V>, to?: V | Bound<V>): RecordIdRange<T, V> {
+    // `undefined` -> an open bound (`user:..x` / `user:x..`); otherwise wrap the value
+    // (default inclusive start, exclusive end). Pass a Bound to override inclusivity.
+    const bound = (b: V | Bound<V> | undefined, exclusive: boolean) =>
+      b === undefined
+        ? undefined
+        : b instanceof BoundIncluded || b instanceof BoundExcluded
+          ? b
+          : exclusive
+            ? new BoundExcluded(b)
+            : new BoundIncluded(b);
+    return new RecordIdRange(
+      this.tables[0]!,
+      bound(from, false) as Bound<RecordIdValue>,
+      bound(to, true) as Bound<RecordIdValue>,
+    ) as RecordIdRange<T, V>;
+  }
 }
 
 /** Unwrap an SField to its Zod schema (raw Zod schemas pass through). */
@@ -153,7 +221,8 @@ export const sz = {
 
   // String formats — all map to DDL `string` (their Zod def.type is "string").
   url: (params?: Parameters<typeof z.url>[0]) => new SField(z.url(params)),
-  uuid: (params?: Parameters<typeof z.uuid>[0]) => new SField(z.uuid(params)),
+  /** Surreal native `uuid`: a `string` app-side, stored as a `Uuid`. */
+  uuid: () => new SField(uuidCodec()),
   guid: (params?: Parameters<typeof z.guid>[0]) => new SField(z.guid(params)),
   nanoid: (params?: Parameters<typeof z.nanoid>[0]) => new SField(z.nanoid(params)),
   cuid: (params?: Parameters<typeof z.cuid>[0]) => new SField(z.cuid(params)),
@@ -181,6 +250,17 @@ export const sz = {
   datetime: () => new SField(datetimeCodec()),
   /** Alias of `datetime` (Surreal stores a `datetime`; there is no plain date). */
   date: () => new SField(datetimeCodec()),
+  /** Surreal `duration` (a `Duration` instance). */
+  duration: () => new SField(native(z.instanceof(Duration), "duration")),
+  /** Surreal `decimal` (a `Decimal` instance — arbitrary precision). */
+  decimal: () => new SField(native(z.instanceof(Decimal), "decimal")),
+  /** Surreal `bytes` (a `Uint8Array`). */
+  bytes: () => new SField(bytesCodec()),
+  /** Surreal `file` (a `FileRef`). */
+  file: () => new SField(native(z.instanceof(FileRef), "file")),
+  /** Surreal `geometry` (a `Geometry`), optionally narrowed to a kind. */
+  geometry: (kind?: GeometryKind) =>
+    new SField(native(z.instanceof(Geometry), kind ? `geometry<${kind}>` : "geometry")),
   recordId: <T extends string>(table: T | T[]) =>
     new RecordIdField<T>(Array.isArray(table) ? table : [table]),
   /** A nested object whose fields keep their surreal metadata + native types. */
