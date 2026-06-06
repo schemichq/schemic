@@ -76,3 +76,18 @@ describe("App<> / Wire<>", () => {
     expectTypeOf<App<typeof Liked>["out"]>().toEqualTypeOf<RecordId<"post", RecordIdValue>>();
   });
 });
+
+describe("field method types", () => {
+  test("unwrap peels the wrapper type", () => {
+    expectTypeOf(sz.string().optional().unwrap().schema).toExtend<z.ZodString>();
+    expectTypeOf(sz.string().array().unwrap().schema).toExtend<z.ZodString>();
+  });
+
+  test("$default accepts a plain value or a surql expression", () => {
+    sz.string().$default("x");
+    sz.string().$default(surql`"x"`);
+    sz.int().$default(0);
+    // @ts-expect-error - value must match the field's type
+    sz.int().$default("not a number");
+  });
+});

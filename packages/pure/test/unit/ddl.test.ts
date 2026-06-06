@@ -68,8 +68,18 @@ describe("wrappers", () => {
     expect(ddl(sz.string().default("x"))).toBe("DEFINE FIELD x ON TABLE t TYPE option<string>;");
   });
 
-  test("nullable passes through (Surreal has no nullable wrapper)", () => {
-    expect(typeOf(sz.string().nullable())).toBe("string");
+  test("nullable -> T | null", () => {
+    expect(typeOf(sz.string().nullable())).toBe("string | null");
+  });
+
+  test("nullish -> option<T | null>; .optional().nullable() -> option<T> | null", () => {
+    expect(typeOf(sz.string().nullish())).toBe("option<string | null>");
+    expect(typeOf(sz.string().optional().nullable())).toBe("option<string> | null");
+  });
+
+  test("prefault -> option<> (app-side default); catch is transparent", () => {
+    expect(typeOf(sz.string().prefault("x"))).toBe("option<string>");
+    expect(typeOf(sz.string().catch("x"))).toBe("string");
   });
 
   test("array / set", () => {
@@ -88,6 +98,17 @@ describe("DB-side metadata clauses", () => {
   test("$default strips a leading option<> (the column is always populated)", () => {
     expect(ddl(sz.string().optional().$default(surql`"hi"`))).toBe(
       `DEFINE FIELD x ON TABLE t TYPE string DEFAULT "hi";`,
+    );
+  });
+
+  test("$default accepts a plain value, rendered as a clean literal", () => {
+    expect(ddl(sz.string().$default("light"))).toBe(
+      `DEFINE FIELD x ON TABLE t TYPE string DEFAULT "light";`,
+    );
+    expect(ddl(sz.int().$default(0))).toBe("DEFINE FIELD x ON TABLE t TYPE int DEFAULT 0;");
+    expect(ddl(sz.boolean().$default(true))).toBe("DEFINE FIELD x ON TABLE t TYPE bool DEFAULT true;");
+    expect(ddl(sz.string().$defaultAlways("hi"))).toBe(
+      `DEFINE FIELD x ON TABLE t TYPE string DEFAULT ALWAYS "hi";`,
     );
   });
 

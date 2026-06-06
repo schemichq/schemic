@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   BoundExcluded,
   BoundIncluded,
+  BoundQuery,
   DateTime,
   Decimal,
   Duration,
@@ -9,9 +10,9 @@ import {
   Geometry,
   RecordId,
   RecordIdRange,
+  surql,
   Uuid,
   type Bound,
-  type BoundQuery,
   type RecordIdValue,
 } from "surrealdb";
 
@@ -45,6 +46,39 @@ export interface SurrealMeta {
   comment?: string;
 }
 
+/** Render a primitive as a clean SurrealQL literal; non-primitives return "". */
+function primitiveLiteral(value: unknown): string {
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return String(value);
+  }
+  return "";
+}
+
+/** Coerce a `$default`/`$defaultAlways` argument (a value or a `surql` expr) to a BoundQuery. */
+function toExpr(value: unknown): BoundQuery {
+  if (value instanceof BoundQuery) return value;
+  const literal = primitiveLiteral(value);
+  return literal ? new BoundQuery(literal) : surql`${value}`;
+}
+
+/** The schema one wrapper down — what `unwrap()` returns. */
+type InnerOf<S extends z.ZodType> = S extends z.ZodOptional<infer I extends z.ZodType>
+  ? I
+  : S extends z.ZodNullable<infer I extends z.ZodType>
+    ? I
+    : S extends z.ZodDefault<infer I extends z.ZodType>
+      ? I
+      : S extends z.ZodPrefault<infer I extends z.ZodType>
+        ? I
+        : S extends z.ZodCatch<infer I extends z.ZodType>
+          ? I
+          : S extends z.ZodReadonly<infer I extends z.ZodType>
+            ? I
+            : S extends z.ZodArray<infer I extends z.ZodType>
+              ? I
+              : S;
+
 /**
  * A Zod schema paired with SurrealQL DDL metadata. `Flags` tracks input traits
  * used by `Create<>`/`Update<>`: `"create"` (DB-filled -> optional on create) and
@@ -67,17 +101,35 @@ export class SField<S extends z.ZodType = z.ZodType, Flags extends string = neve
   default(value: z.input<S>): SField<z.ZodDefault<S>, Flags> {
     return new SField(this.schema.default(value as never), this.surreal);
   }
+  /** Zod prefault: fill an absent value with `value`, then validate it (unlike `.default`). */
+  prefault(value: z.input<S>): SField<z.ZodPrefault<S>, Flags> {
+    return new SField(z.prefault(this.schema, value as never), this.surreal);
+  }
+  /** Zod catch: fall back to `value` when parsing fails. */
+  catch(value: z.output<S>): SField<z.ZodCatch<S>, Flags> {
+    return new SField(this.schema.catch(value as never), this.surreal);
+  }
   array(): SField<z.ZodArray<S>, Flags> {
     return new SField(z.array(this.schema), this.surreal);
   }
+  nullish(): SField<z.ZodOptional<z.ZodNullable<S>>, Flags> {
+    return new SField(this.schema.nullish(), this.surreal);
+  }
+  /** Peel one wrapper (optional/nullable/default/prefault/catch/readonly/array) off the field. */
+  unwrap(): SField<InnerOf<S>, Flags> {
+    const def = this.schema._zod.def as { innerType?: z.ZodType; element?: z.ZodType };
+    const inner = def.innerType ?? def.element ?? this.schema;
+    return new SField(inner, this.surreal) as unknown as SField<InnerOf<S>, Flags>;
+  }
 
   // SurrealQL DDL metadata. $default/$defaultAlways mark the field create-optional;
-  // $readonly marks it non-updatable (see Create<>/Update<>).
-  $default(expr: BoundQuery): SField<S, Flags | "create"> {
-    return new SField(this.schema, { ...this.surreal, default: expr, defaultAlways: false });
+  // $readonly marks it non-updatable (see Create<>/Update<>). The default accepts a
+  // plain value (rendered as a literal) or a `surql` expression.
+  $default(value: z.output<S> | BoundQuery): SField<S, Flags | "create"> {
+    return new SField(this.schema, { ...this.surreal, default: toExpr(value), defaultAlways: false });
   }
-  $defaultAlways(expr: BoundQuery): SField<S, Flags | "create"> {
-    return new SField(this.schema, { ...this.surreal, default: expr, defaultAlways: true });
+  $defaultAlways(value: z.output<S> | BoundQuery): SField<S, Flags | "create"> {
+    return new SField(this.schema, { ...this.surreal, default: toExpr(value), defaultAlways: true });
   }
   $value(expr: BoundQuery): SField<S, Flags> {
     return new SField(this.schema, { ...this.surreal, value: expr });

@@ -73,12 +73,17 @@ function inferField(schema: z.ZodType, seen: Set<z.ZodType> = new Set()): FieldI
       return leaf("null");
 
     case "optional":
-    case "default": {
+    case "default":
+    case "prefault": {
       const inner = inferField(def.innerType as z.ZodType, seen);
       return { ...inner, type: `option<${inner.type}>` };
     }
-    case "nullable":
+    case "nullable": {
+      const inner = inferField(def.innerType as z.ZodType, seen);
+      return { ...inner, type: `${inner.type} | null` };
+    }
     case "readonly":
+    case "catch": // app-side error recovery — the stored type is the inner type
       return inferField(def.innerType as z.ZodType, seen);
     case "pipe": // a codec with no explicit type — use its encoded (wire) side
       return inferField(def.in as z.ZodType, seen);

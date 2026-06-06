@@ -109,3 +109,33 @@ describe("composite builders", () => {
     expect(defType(a)).toBe("array");
   });
 });
+
+describe("field method wrappers", () => {
+  test("prefault fills an absent value (and validates it)", () => {
+    const f = sz.int().prefault(5);
+    expect(f).toBeInstanceOf(SField);
+    expect(defType(f)).toBe("prefault");
+    expect(z.decode(f.schema, undefined as never)).toBe(5);
+  });
+
+  test("catch recovers from a parse failure", () => {
+    const f = sz.int().catch(9);
+    expect(defType(f)).toBe("catch");
+    expect(z.decode(f.schema, "nope" as never)).toBe(9);
+  });
+
+  test("nullish accepts null, undefined, and the value", () => {
+    const f = sz.string().nullish();
+    expect(defType(f)).toBe("optional");
+    expect(f.schema.safeParse(null).success).toBe(true);
+    expect(f.schema.safeParse(undefined).success).toBe(true);
+    expect(f.schema.safeParse("x").success).toBe(true);
+  });
+
+  test("unwrap peels one wrapper and keeps surreal metadata", () => {
+    expect(defType(sz.string().optional().unwrap())).toBe("string");
+    expect(defType(sz.int().default(1).unwrap())).toBe("number");
+    expect(defType(sz.string().array().unwrap())).toBe("string");
+    expect(sz.string().$comment("c").optional().unwrap().surreal.comment).toBe("c");
+  });
+});
