@@ -94,7 +94,26 @@ normal table). `defineTable` also can't emit just the table head, or merge a cla
 **Suggestion:** fold permissions into the single `DEFINE TABLE` that `defineTable` emits
 (depends on #1).
 
-### 4. Zod format/refinement constraints don't become DB `ASSERT`s — Medium
+### 4. Zod format/refinement constraints don't become DB `ASSERT`s — Medium — RESOLVED
+RESOLVED: assert generation is now explicit and **opt-in by builder** (deliberately NOT
+auto-on for arbitrary Zod refinements — silently turning every `.refine()`/transform into an
+`ASSERT` would surprise; the builder / `$`-constraint IS the intent). Three sources:
+(a) **Format builders bake by default** — `sz.email()` → `ASSERT string::is_email($value)`,
+and likewise `url`/`ulid`/`ipv4`/`ipv6`: every format whose `string::is_*` exists on the
+server (verified live on **3.1.3**, which uses the underscore form `string::is_email`, **not**
+`string::is::email`). Formats with no server validator (`nanoid`/`cuid`/`cuid2`/`xid`/`ksuid`/
+`cidrv4`/`cidrv6`/`guid`/`base64`/`base64url`/`e164`/`jwt`/`emoji`) stay assert-free (no
+fabricated regex); `sz.uuid()` is the native `uuid` type (no assert).
+(b) **`$`-constraints** — `.$min`/`.$max`/`.$length`/`.$regex` (string) and `.$min`/`.$max`/
+`.$gt`/`.$gte`/`.$lt`/`.$lte` (number) apply the matching Zod check app-side AND push a
+type-aware DB fragment (`string::len($value) >= n`, `$value <= n`, `$value = /re/`, …).
+(c) **`.$assert(surql\`…\`)`** still pushes a custom expr; **`.$assert()`** (no args) derives
+fragments from the field's existing Zod checks. Fragments AND-combine into one deduped
+`ASSERT`. The tracker dropped its hand-written `string::len($value) > 0` asserts for `.$min(1)`,
+`email` now gets `string::is_email` for free, and the 12 live tests still pass (the empty-title
+rejection rides on `.$min(1)` now).
+
+Original finding:
 `sz.email()`, `sz.url()`, the string side of `sz.uuid()`, and `z.string().min()/regex()`,
 number ranges, etc. all generate plain `TYPE string`/`TYPE int`. The constraint exists only
 app-side (in `decode`/`encode`); the **database stores anything**. e.g. `email` is neither
@@ -179,5 +198,5 @@ pattern or a tiny `X.decode`-over-`LiveMessage` helper would round out the clien
 | 1 | No `DEFINE ACCESS` / `PERMISSIONS` generation — PARTIAL: table/field `PERMISSIONS` now generated (`.permissions` / `.$permissions`); `DEFINE ACCESS` still raw | High |
 | 2 | ~~Can't model internal/hidden fields (e.g. `passhash`) without leaking into `App`~~ — RESOLVED via `.$internal()` + `.system` | High |
 | 3 | ~~Adding permissions forces a full table `OVERWRITE` that restates TYPE/SCHEMAFULL/COMMENT~~ — RESOLVED: folded into the single `DEFINE TABLE` | Medium |
-| 4 | Zod format refinements (email/url/min/regex) don't become DB `ASSERT`s | Medium |
+| 4 | ~~Zod format refinements (email/url/min/regex) don't become DB `ASSERT`s~~ — RESOLVED: format builders bake `string::is_*`, `$`-constraints + `.$assert()` push fragments (opt-in by builder) | Medium |
 | 5 | `$value` (computed) fields are required in `Create`/`make()` input | Medium |

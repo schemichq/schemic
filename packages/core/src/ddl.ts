@@ -21,6 +21,22 @@ function inline(query: BoundQuery): string {
   return out.trim();
 }
 
+/**
+ * Combine a field's `ASSERT` fragments into one clause: inline any `BoundQuery` entries
+ * (custom `surql` asserts), keep strings (computed checks) as-is, dedupe while preserving
+ * order, and AND-join. Each fragment is already a complete boolean expr. Returns "" when
+ * there are no fragments.
+ */
+function renderAsserts(asserts: SurrealMeta["asserts"]): string {
+  if (!asserts?.length) return "";
+  const frags: string[] = [];
+  for (const a of asserts) {
+    const frag = a instanceof BoundQuery ? inline(a) : a;
+    if (frag && !frags.includes(frag)) frags.push(frag);
+  }
+  return frags.length ? `ASSERT ${frags.join(" AND ")}` : "";
+}
+
 /** Read a Zod schema's internal def with a loose type for traversal. */
 function zdef(schema: z.ZodType): { type: string; [k: string]: unknown } {
   return schema._zod.def as unknown as { type: string; [k: string]: unknown };
@@ -270,7 +286,8 @@ function emit(
     parts.push(`DEFAULT ${surreal.defaultAlways ? "ALWAYS " : ""}${inline(surreal.default)}`);
   }
   if (surreal?.value) parts.push(`VALUE ${inline(surreal.value)}`);
-  if (surreal?.assert) parts.push(`ASSERT ${inline(surreal.assert)}`);
+  const assertClause = renderAsserts(surreal?.asserts);
+  if (assertClause) parts.push(assertClause);
   if (surreal?.readonly) parts.push("READONLY");
   if (surreal?.comment) parts.push(`COMMENT ${JSON.stringify(surreal.comment)}`);
   // Internal fields still exist on the table (so SCHEMAFULL writes succeed) but grant

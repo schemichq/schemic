@@ -32,12 +32,13 @@ describe("leaf types", () => {
     expect(typeOf(sz.float())).toBe("float");
   });
 
-  test("string formats all collapse to string", () => {
-    expect(typeOf(sz.email())).toBe("string");
-    expect(typeOf(sz.url())).toBe("string");
-    expect(typeOf(sz.ulid())).toBe("string");
-    expect(typeOf(sz.ipv4())).toBe("string");
+  test("string formats all collapse to string (TYPE leaf)", () => {
+    // Non-bakeable formats (no SurrealDB validator) stay a plain `string` with no ASSERT,
+    // so the bare TYPE leaf is observable. (Bakeable ones carry an ASSERT — see below.)
     expect(typeOf(sz.jwt())).toBe("string");
+    expect(typeOf(sz.cuid())).toBe("string");
+    expect(typeOf(sz.nanoid())).toBe("string");
+    expect(typeOf(sz.base64())).toBe("string");
   });
 
   test("surreal-native types", () => {
@@ -153,6 +154,103 @@ describe("DB-side metadata clauses", () => {
   test("clauses combine in a stable order", () => {
     expect(ddl(sz.int().$default(surql`0`).$readonly().$comment("n"))).toBe(
       `DEFINE FIELD x ON TABLE t TYPE int DEFAULT 0 READONLY COMMENT "n";`,
+    );
+  });
+});
+
+describe("ASSERT generation", () => {
+  test("format builders bake string::is_<fmt> by default (confirmed on v3.1.3)", () => {
+    expect(ddl(sz.email())).toBe(
+      "DEFINE FIELD x ON TABLE t TYPE string ASSERT string::is_email($value);",
+    );
+    expect(ddl(sz.url())).toBe("DEFINE FIELD x ON TABLE t TYPE string ASSERT string::is_url($value);");
+    expect(ddl(sz.ulid())).toBe(
+      "DEFINE FIELD x ON TABLE t TYPE string ASSERT string::is_ulid($value);",
+    );
+    expect(ddl(sz.ipv4())).toBe(
+      "DEFINE FIELD x ON TABLE t TYPE string ASSERT string::is_ipv4($value);",
+    );
+    expect(ddl(sz.ipv6())).toBe(
+      "DEFINE FIELD x ON TABLE t TYPE string ASSERT string::is_ipv6($value);",
+    );
+  });
+
+  test("formats without a SurrealDB validator stay assert-free (no fabricated regex)", () => {
+    expect(ddl(sz.jwt())).toBe("DEFINE FIELD x ON TABLE t TYPE string;");
+    expect(ddl(sz.cuid())).toBe("DEFINE FIELD x ON TABLE t TYPE string;");
+    expect(ddl(sz.nanoid())).toBe("DEFINE FIELD x ON TABLE t TYPE string;");
+    expect(ddl(sz.cidrv4())).toBe("DEFINE FIELD x ON TABLE t TYPE string;");
+  });
+
+  test("sz.uuid() is the native uuid type with no assert", () => {
+    expect(ddl(sz.uuid())).toBe("DEFINE FIELD x ON TABLE t TYPE uuid;");
+  });
+
+  test("string $min/$max -> string::len bounds (AND-joined)", () => {
+    expect(ddl(sz.string().$min(1).$max(120))).toBe(
+      "DEFINE FIELD x ON TABLE t TYPE string ASSERT string::len($value) >= 1 AND string::len($value) <= 120;",
+    );
+  });
+
+  test("string $length -> string::len equality", () => {
+    expect(ddl(sz.string().$length(8))).toBe(
+      "DEFINE FIELD x ON TABLE t TYPE string ASSERT string::len($value) == 8;",
+    );
+  });
+
+  test("string $regex -> $value = /re/", () => {
+    expect(ddl(sz.string().$regex(/^[a-z]+$/))).toBe(
+      "DEFINE FIELD x ON TABLE t TYPE string ASSERT $value = /^[a-z]+$/;",
+    );
+  });
+
+  test("number $min/$max -> bare value bounds", () => {
+    expect(ddl(sz.number().$min(0).$max(10))).toBe(
+      "DEFINE FIELD x ON TABLE t TYPE number ASSERT $value >= 0 AND $value <= 10;",
+    );
+  });
+
+  test("number $gt/$gte/$lt/$lte map to the right operator", () => {
+    expect(ddl(sz.number().$gte(0).$lte(1))).toBe(
+      "DEFINE FIELD x ON TABLE t TYPE number ASSERT $value >= 0 AND $value <= 1;",
+    );
+    expect(ddl(sz.number().$gt(0).$lt(1))).toBe(
+      "DEFINE FIELD x ON TABLE t TYPE number ASSERT $value > 0 AND $value < 1;",
+    );
+  });
+
+  test("a $-constraint also applies the matching Zod check app-side", () => {
+    const f = sz.string().$min(2).$max(4);
+    expect(f.schema.safeParse("ab").success).toBe(true);
+    expect(f.schema.safeParse("a").success).toBe(false);
+    expect(f.schema.safeParse("abcde").success).toBe(false);
+    const n = sz.number().$gte(0).$lte(1);
+    expect(n.schema.safeParse(0.5).success).toBe(true);
+    expect(n.schema.safeParse(2).success).toBe(false);
+  });
+
+  test("custom $assert(surql`…`) pushes the inlined expression", () => {
+    expect(ddl(sz.int().$assert(surql`$value % 2 == 0`))).toBe(
+      "DEFINE FIELD x ON TABLE t TYPE int ASSERT $value % 2 == 0;",
+    );
+  });
+
+  test("a builder + a $-constraint + a custom assert AND-join into one clause (deduped)", () => {
+    // sz.email() already baked string::is_email; the custom $assert repeats it -> deduped.
+    const f = sz.email().$max(254).$assert(surql`string::is_email($value)`);
+    expect(ddl(f)).toBe(
+      "DEFINE FIELD x ON TABLE t TYPE string ASSERT string::is_email($value) AND string::len($value) <= 254;",
+    );
+  });
+
+  test("$assert() (no args) derives fragments from existing Zod checks", () => {
+    // string: top-level format + chained length + regex.
+    expect(ddl(new SField(z.email().min(5).regex(/@example\.com$/)).$assert())).toBe(
+      "DEFINE FIELD x ON TABLE t TYPE string ASSERT string::is_email($value) AND string::len($value) >= 5 AND $value = /@example\\.com$/;",
+    );
+    // number: inclusive vs exclusive bounds.
+    expect(ddl(new SField(z.number().gte(0).lt(100)).$assert())).toBe(
+      "DEFINE FIELD x ON TABLE t TYPE number ASSERT $value >= 0 AND $value < 100;",
     );
   });
 });
@@ -301,7 +399,9 @@ describe("defineTable", () => {
     const Account = table("user", { email: sz.email(), passhash: sz.string().$internal() });
     const out = defineTable(Account);
     expect(out).toContain("DEFINE FIELD passhash ON TABLE user TYPE string PERMISSIONS NONE;");
-    expect(out).toContain("DEFINE FIELD email ON TABLE user TYPE string;");
+    expect(out).toContain(
+      "DEFINE FIELD email ON TABLE user TYPE string ASSERT string::is_email($value);",
+    );
   });
 
   test("schemaless / drop config", () => {

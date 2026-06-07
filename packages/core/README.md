@@ -30,7 +30,7 @@ export const User = table("user", {
 });
 
 export const Friend = relation("friend", {
-  strength: sz.number().$assert(surql`$value >= 0 AND $value <= 1`),
+  strength: sz.number().$gte(0).$lte(1), // -> ASSERT $value >= 0 AND $value <= 1
 })
   .from(User)
   .to(User);
@@ -73,6 +73,34 @@ Table permissions fold into the single generated `DEFINE TABLE` (no separate `OV
 **Omitted-op asymmetry** (it mirrors SurrealDB's own defaults): an omitted op defaults to
 **NONE** (deny) on a *table* but to **FULL** on a *field* — the table is the gate, so to lock a
 field op you must set it `false` explicitly.
+
+## Asserts / constraints
+
+A field can accumulate several `ASSERT` fragments that AND-combine into one `ASSERT`
+clause (deduped, order preserved). There are three sources:
+
+- **Format builders bake by default.** `sz.email()` → `ASSERT string::is_email($value)`,
+  `sz.url()` → `string::is_url`, and likewise `ulid` / `ipv4` / `ipv6` — i.e. every
+  builder whose `string::is_*` validator exists on the server. SurrealDB **3.x** uses the
+  underscore form (`string::is_email`, **not** `string::is::email`). Formats with no
+  server validator (`nanoid`, `cuid`/`cuid2`, `xid`, `ksuid`, `cidrv4`/`cidrv6`, `guid`,
+  `base64`/`base64url`, `e164`, `jwt`, `emoji`) stay assert-free — no fabricated regex.
+  `sz.uuid()` is the native `uuid` type (no assert).
+- **`$`-constraints** apply the matching Zod check app-side **and** push a type-aware DB
+  fragment (string vs. number is read from the schema):
+  - `.$min(n)` / `.$max(n)` — string: `string::len($value) >= n` / `<= n`; number: `$value >= n` / `<= n`
+  - `.$length(n)` — string: `string::len($value) == n`
+  - `.$regex(/re/)` — string: `$value = /re/`
+  - `.$gt(n)` / `.$gte(n)` / `.$lt(n)` / `.$lte(n)` — number: `$value > / >= / < / <= n`
+- **`.$assert(...)`** — `.$assert(surql\`…\`)` pushes a custom fragment; `.$assert()` (no
+  args) derives fragments from the field's existing Zod checks (formats, length, regex,
+  number bounds), best-effort.
+
+```ts
+sz.string().$min(1).$max(120);                 // string::len($value) >= 1 AND ... <= 120
+sz.number().$gte(0).$lte(1);                    // $value >= 0 AND $value <= 1
+sz.email().$assert(surql`$value != $forbidden`); // string::is_email($value) AND $value != $forbidden
+```
 
 ## Develop
 

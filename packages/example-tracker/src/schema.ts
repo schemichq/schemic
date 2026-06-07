@@ -7,8 +7,9 @@ import { type App, relation, sz, table, type Wire } from "surreal-zod";
  *
  * Exercises: smart record ids, record links + arrays of links, nested objects
  * with per-field `$default`, enums (status/priority/role), datetime, duration,
- * DB-side `$default` / `$assert` / `$readonly` / `$comment` / `$value`, and per-table
- * row-level `.permissions(...)`.
+ * DB-side `$default` / `$readonly` / `$comment` / `$value`, per-table row-level
+ * `.permissions(...)`, and DB `ASSERT`s — both auto-baked by format builders
+ * (`sz.email()` -> `string::is_email`) and authored via `$`-constraints (`.$min(1)`).
  *
  * NOTE: `passhash` is modeled with `.$internal()`: it still emits its `DEFINE FIELD`
  * (so the SCHEMAFULL SIGNUP write succeeds) plus `PERMISSIONS NONE`, but is excluded
@@ -23,7 +24,8 @@ import { type App, relation, sz, table, type Wire } from "surreal-zod";
 
 /** End users. `id` omitted -> `record<user>` with a DB-generated id. */
 export const User = table("user", {
-  name: sz.string().$assert(surql`string::len($value) > 0`),
+  name: sz.string().$min(1),
+  // sz.email() bakes `ASSERT string::is_email($value)` for free (3.x validator).
   email: sz.email(),
   // DB-managed, client-hidden: written by the record-access SIGNUP block, never exposed.
   passhash: sz.string().$internal(),
@@ -40,7 +42,7 @@ export const User = table("user", {
 /** Projects owned by a user; `owner` defaults to the signed-in user and is fixed. */
 export const Project = table("project", {
   owner: User.record().$default(surql`$auth.id`).$readonly(),
-  name: sz.string().$assert(surql`string::len($value) > 0`),
+  name: sz.string().$min(1),
   description: sz.string().optional(),
   color: sz.string().$default("#6366f1"),
   tags: sz.string().array().$default(surql`[]`),
@@ -64,7 +66,7 @@ export const Project = table("project", {
 /** Tasks within a project. Demonstrates enums, duration, links + arrays of links. */
 export const Task = table("task", {
   project: Project.record(),
-  title: sz.string().$assert(surql`string::len($value) > 0`).$comment("Short summary"),
+  title: sz.string().$min(1).$comment("Short summary"),
   description: sz.string().optional(),
   status: sz.enum(["todo", "in_progress", "done", "archived"]).$default("todo"),
   priority: sz.enum(["low", "medium", "high", "urgent"]).$default("medium"),
@@ -92,7 +94,7 @@ export const Task = table("task", {
 export const Comment = table("comment", {
   task: Task.record(),
   author: User.record().$default(surql`$auth.id`).$readonly(),
-  body: sz.string().$assert(surql`string::len($value) > 0`),
+  body: sz.string().$min(1),
   createdAt: sz.datetime().$default(surql`time::now()`).$readonly().$comment("When posted"),
 })
   .comment("Task comments")

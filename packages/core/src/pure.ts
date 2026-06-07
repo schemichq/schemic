@@ -57,7 +57,12 @@ export interface SurrealMeta {
   default?: BoundQuery;
   defaultAlways?: boolean;
   value?: BoundQuery;
-  assert?: BoundQuery;
+  /**
+   * `ASSERT` fragments that AND-combine into one clause. Computed checks (format
+   * builders, `$`-constraints, `.$assert()`-derived) are plain strings; a custom
+   * `.$assert(surql\`…\`)` is a `BoundQuery` (inlined during DDL generation).
+   */
+  asserts?: (string | BoundQuery)[];
   readonly?: boolean;
   comment?: string;
   /** Field-level `PERMISSIONS` (no `delete` op). Omitted ops default to FULL in
@@ -82,6 +87,109 @@ function toExpr(value: unknown): BoundQuery {
   if (value instanceof BoundQuery) return value;
   const literal = primitiveLiteral(value);
   return literal ? new BoundQuery(literal) : surql`${value}`;
+}
+
+/**
+ * Zod string formats whose `string::is_<fmt>` validator exists on SurrealDB v3.x
+ * (probed live on 3.1.3: `RETURN string::is_<fmt>("x")`). A matching format builder
+ * bakes `string::is_<fmt>($value)` by default; formats absent here (nanoid/cuid/cuid2/
+ * xid/ksuid/cidrv4/cidrv6/guid/base64/base64url/e164/jwt/emoji) stay assert-free — no
+ * fabricated regex. `uuid` is the native `uuid` type, not a string format (no assert).
+ */
+const STRING_IS_FORMATS = new Set(["email", "url", "ulid", "ipv4", "ipv6"]);
+
+/** Map a Zod string format to its SurrealDB `string::is_*` assert, when one exists. */
+function formatAssert(format: string): string | undefined {
+  return STRING_IS_FORMATS.has(format) ? `string::is_${format}($value)` : undefined;
+}
+
+/** Build an SField for a Zod string-format schema, baking `string::is_<fmt>($value)`
+ * when SurrealDB has that validator (else no assert). */
+function formatField<S extends z.ZodType>(schema: S, format: string): SField<S> {
+  const frag = formatAssert(format);
+  return new SField(schema, frag ? { asserts: [frag] } : {});
+}
+
+/** The check methods that live on concrete Zod subtypes (ZodString/ZodNumber) but not
+ * the base `z.ZodType` — `$`-constraints call these (cast through this shape). */
+type CheckableSchema = {
+  min(n: number): z.ZodType;
+  max(n: number): z.ZodType;
+  length(n: number): z.ZodType;
+  regex(re: RegExp): z.ZodType;
+  gt(n: number): z.ZodType;
+  gte(n: number): z.ZodType;
+  lt(n: number): z.ZodType;
+  lte(n: number): z.ZodType;
+};
+
+/** One entry in a Zod schema's `_zod.def.checks`. */
+type ZodCheck = {
+  _zod: {
+    def: {
+      check?: string;
+      minimum?: number;
+      maximum?: number;
+      length?: number;
+      value?: number;
+      inclusive?: boolean;
+      format?: string;
+      pattern?: RegExp;
+    };
+  };
+};
+
+/**
+ * Best-effort: derive DB `ASSERT` fragments from a Zod schema's checks. Reads the Zod 4
+ * check shape (`schema._zod.def.checks[]._zod.def`): string `min_length`/`max_length`/
+ * `length_equals`, `string_format` (regex -> `$value = /…/`; email/url/… -> `string::is_*`),
+ * and number `greater_than`/`less_than` (with `inclusive`). The schema may itself be a
+ * `string_format` (e.g. `z.email()`), so its top-level `def.format` is mapped too. Unknown
+ * checks are skipped silently.
+ */
+function deriveAsserts(schema: z.ZodType): string[] {
+  const def = schema._zod.def as {
+    check?: string;
+    format?: string;
+    checks?: ZodCheck[];
+  };
+  const out: string[] = [];
+
+  // The schema itself may be a string-format (z.email()/z.url()/…).
+  if (def.check === "string_format" && typeof def.format === "string") {
+    const frag = formatAssert(def.format);
+    if (frag) out.push(frag);
+  }
+
+  for (const c of def.checks ?? []) {
+    const d = c._zod.def;
+    switch (d.check) {
+      case "min_length":
+        out.push(`string::len($value) >= ${d.minimum}`);
+        break;
+      case "max_length":
+        out.push(`string::len($value) <= ${d.maximum}`);
+        break;
+      case "length_equals":
+        out.push(`string::len($value) == ${d.length}`);
+        break;
+      case "string_format":
+        if (d.format === "regex" && d.pattern) {
+          out.push(`$value = /${d.pattern.source}/`);
+        } else if (typeof d.format === "string") {
+          const frag = formatAssert(d.format);
+          if (frag) out.push(frag);
+        }
+        break;
+      case "greater_than":
+        out.push(`$value >${d.inclusive ? "=" : ""} ${d.value}`);
+        break;
+      case "less_than":
+        out.push(`$value <${d.inclusive ? "=" : ""} ${d.value}`);
+        break;
+    }
+  }
+  return out;
 }
 
 /** The schema one wrapper down — what `unwrap()` returns. */
@@ -170,8 +278,86 @@ export class SField<S extends z.ZodType = z.ZodType, Flags extends string = neve
   ): SField<S, O extends true ? Flags | "create" : Flags> {
     return new SField(this.schema, { ...this.surreal, value: expr });
   }
-  $assert(expr: BoundQuery): SField<S, Flags> {
-    return new SField(this.schema, { ...this.surreal, assert: expr });
+  /**
+   * Add an `ASSERT` fragment (fragments AND-combine into one clause):
+   *   - `.$assert(surql\`…\`)` pushes a custom expression (inlined during DDL generation).
+   *   - `.$assert()` (no args) derives fragments from the field's existing Zod checks
+   *     (formats, string length/regex, number bounds) — best-effort; unknowns are skipped.
+   */
+  $assert(expr?: BoundQuery): SField<S, Flags> {
+    const frags = expr ? [expr] : deriveAsserts(this.schema);
+    return this.pushAsserts(frags);
+  }
+
+  // --- $-constraints: apply the app-side Zod check AND push a type-aware DB ASSERT. ---
+  // String-vs-number is read from the schema's own `def.type`; unsupported type/method
+  // combos no-op (return the field unchanged).
+
+  /** Min length (string) / minimum value (number). */
+  $min(n: number): SField<S, Flags> {
+    if (this.schemaType === "string") return this.constrain("min", n, `string::len($value) >= ${n}`);
+    if (this.schemaType === "number") return this.constrain("min", n, `$value >= ${n}`);
+    return this;
+  }
+  /** Max length (string) / maximum value (number). */
+  $max(n: number): SField<S, Flags> {
+    if (this.schemaType === "string") return this.constrain("max", n, `string::len($value) <= ${n}`);
+    if (this.schemaType === "number") return this.constrain("max", n, `$value <= ${n}`);
+    return this;
+  }
+  /** Exact length (string). */
+  $length(n: number): SField<S, Flags> {
+    if (this.schemaType === "string") {
+      return this.constrain("length", n, `string::len($value) == ${n}`);
+    }
+    return this;
+  }
+  /** Pattern match (string). */
+  $regex(re: RegExp): SField<S, Flags> {
+    if (this.schemaType === "string") return this.constrain("regex", re, `$value = /${re.source}/`);
+    return this;
+  }
+  /** Greater than (number). */
+  $gt(n: number): SField<S, Flags> {
+    if (this.schemaType === "number") return this.constrain("gt", n, `$value > ${n}`);
+    return this;
+  }
+  /** Greater than or equal (number). */
+  $gte(n: number): SField<S, Flags> {
+    if (this.schemaType === "number") return this.constrain("gte", n, `$value >= ${n}`);
+    return this;
+  }
+  /** Less than (number). */
+  $lt(n: number): SField<S, Flags> {
+    if (this.schemaType === "number") return this.constrain("lt", n, `$value < ${n}`);
+    return this;
+  }
+  /** Less than or equal (number). */
+  $lte(n: number): SField<S, Flags> {
+    if (this.schemaType === "number") return this.constrain("lte", n, `$value <= ${n}`);
+    return this;
+  }
+
+  /** The underlying Zod schema's `def.type` ("string" / "number" / …). */
+  private get schemaType(): string {
+    return (this.schema._zod.def as { type: string }).type;
+  }
+  /** Append ASSERT fragments, returning a new field (same type param + flags). */
+  private pushAsserts(frags: (string | BoundQuery)[]): SField<S, Flags> {
+    if (frags.length === 0) return this;
+    return new SField(this.schema, {
+      ...this.surreal,
+      asserts: [...(this.surreal.asserts ?? []), ...frags],
+    });
+  }
+  /** Apply a concrete-subtype Zod check (`min`/`max`/`length`/`regex`/`gt`/…) and push its
+   * matching DB fragment, returning a new field carrying the refined schema. */
+  private constrain(method: keyof CheckableSchema, arg: number | RegExp, frag: string): SField<S, Flags> {
+    const apply = (this.schema as unknown as Record<string, (a: number | RegExp) => z.ZodType>)[method];
+    return new SField(apply(arg) as S, {
+      ...this.surreal,
+      asserts: [...(this.surreal.asserts ?? []), frag],
+    });
   }
   /** Set field-level `PERMISSIONS` (no `delete` op). Omitted ops default to FULL. */
   $permissions(spec: FieldPermissions): SField<S, Flags> {
@@ -318,28 +504,30 @@ export const sz = {
   string: () => new SField(z.string()),
   number: () => new SField(z.number()),
   boolean: () => new SField(z.boolean()),
-  email: () => new SField(z.email()),
-
-  // String formats — all map to DDL `string` (their Zod def.type is "string").
-  url: (params?: Parameters<typeof z.url>[0]) => new SField(z.url(params)),
-  /** Surreal native `uuid`: a `string` app-side, stored as a `Uuid`. */
+  // String formats — all map to DDL `string` (their Zod def.type is "string"). Builders
+  // whose `string::is_<fmt>` validator exists on SurrealDB bake that ASSERT by default
+  // (see STRING_IS_FORMATS); the rest stay assert-free (no fabricated regex).
+  email: () => formatField(z.email(), "email"),
+  url: (params?: Parameters<typeof z.url>[0]) => formatField(z.url(params), "url"),
+  /** Surreal native `uuid`: a `string` app-side, stored as a `Uuid` (no ASSERT — native type). */
   uuid: () => new SField(uuidCodec()),
-  guid: (params?: Parameters<typeof z.guid>[0]) => new SField(z.guid(params)),
-  nanoid: (params?: Parameters<typeof z.nanoid>[0]) => new SField(z.nanoid(params)),
-  cuid: (params?: Parameters<typeof z.cuid>[0]) => new SField(z.cuid(params)),
-  cuid2: (params?: Parameters<typeof z.cuid2>[0]) => new SField(z.cuid2(params)),
-  ulid: (params?: Parameters<typeof z.ulid>[0]) => new SField(z.ulid(params)),
-  xid: (params?: Parameters<typeof z.xid>[0]) => new SField(z.xid(params)),
-  ksuid: (params?: Parameters<typeof z.ksuid>[0]) => new SField(z.ksuid(params)),
-  ipv4: (params?: Parameters<typeof z.ipv4>[0]) => new SField(z.ipv4(params)),
-  ipv6: (params?: Parameters<typeof z.ipv6>[0]) => new SField(z.ipv6(params)),
-  cidrv4: (params?: Parameters<typeof z.cidrv4>[0]) => new SField(z.cidrv4(params)),
-  cidrv6: (params?: Parameters<typeof z.cidrv6>[0]) => new SField(z.cidrv6(params)),
-  base64: (params?: Parameters<typeof z.base64>[0]) => new SField(z.base64(params)),
-  base64url: (params?: Parameters<typeof z.base64url>[0]) => new SField(z.base64url(params)),
-  e164: (params?: Parameters<typeof z.e164>[0]) => new SField(z.e164(params)),
-  jwt: (params?: Parameters<typeof z.jwt>[0]) => new SField(z.jwt(params)),
-  emoji: (params?: Parameters<typeof z.emoji>[0]) => new SField(z.emoji(params)),
+  guid: (params?: Parameters<typeof z.guid>[0]) => formatField(z.guid(params), "guid"),
+  nanoid: (params?: Parameters<typeof z.nanoid>[0]) => formatField(z.nanoid(params), "nanoid"),
+  cuid: (params?: Parameters<typeof z.cuid>[0]) => formatField(z.cuid(params), "cuid"),
+  cuid2: (params?: Parameters<typeof z.cuid2>[0]) => formatField(z.cuid2(params), "cuid2"),
+  ulid: (params?: Parameters<typeof z.ulid>[0]) => formatField(z.ulid(params), "ulid"),
+  xid: (params?: Parameters<typeof z.xid>[0]) => formatField(z.xid(params), "xid"),
+  ksuid: (params?: Parameters<typeof z.ksuid>[0]) => formatField(z.ksuid(params), "ksuid"),
+  ipv4: (params?: Parameters<typeof z.ipv4>[0]) => formatField(z.ipv4(params), "ipv4"),
+  ipv6: (params?: Parameters<typeof z.ipv6>[0]) => formatField(z.ipv6(params), "ipv6"),
+  cidrv4: (params?: Parameters<typeof z.cidrv4>[0]) => formatField(z.cidrv4(params), "cidrv4"),
+  cidrv6: (params?: Parameters<typeof z.cidrv6>[0]) => formatField(z.cidrv6(params), "cidrv6"),
+  base64: (params?: Parameters<typeof z.base64>[0]) => formatField(z.base64(params), "base64"),
+  base64url: (params?: Parameters<typeof z.base64url>[0]) =>
+    formatField(z.base64url(params), "base64url"),
+  e164: (params?: Parameters<typeof z.e164>[0]) => formatField(z.e164(params), "e164"),
+  jwt: (params?: Parameters<typeof z.jwt>[0]) => formatField(z.jwt(params), "jwt"),
+  emoji: (params?: Parameters<typeof z.emoji>[0]) => formatField(z.emoji(params), "emoji"),
 
   // Numbers. int/int32/uint32 -> DDL `int`; float -> DDL `float` (def.format-driven).
   int: (params?: Parameters<typeof z.int>[0]) => new SField(z.int(params)),
