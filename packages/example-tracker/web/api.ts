@@ -5,7 +5,7 @@ import { Comment, Project, Task } from "../src/schema";
 /**
  * Browser data layer. Every read runs the row through `surreal-zod` `decode`
  * (DB -> app types: RecordId, Date, Duration, enums) and every write builds its
- * payload with `make` / `makePartial` (app -> wire). All queries run as the
+ * payload with `encode` / `encodePartial` (app -> wire). All queries run as the
  * signed-in record user, so table PERMISSIONS scope the results automatically.
  */
 
@@ -22,7 +22,7 @@ export async function createProject(
   db: Surreal,
   input: Create<typeof Project>,
 ): Promise<AppProject> {
-  const [rows] = await db.query<[unknown[]]>(surql`CREATE project CONTENT ${Project.make(input)}`);
+  const [rows] = await db.query<[unknown[]]>(surql`CREATE project CONTENT ${Project.encode(input)}`);
   return Project.decode(rows[0]);
 }
 
@@ -34,7 +34,7 @@ export async function listTasks(db: Surreal, project: RecordId<"project">): Prom
 }
 
 export async function createTask(db: Surreal, input: Create<typeof Task>): Promise<AppTask> {
-  const [rows] = await db.query<[unknown[]]>(surql`CREATE task CONTENT ${Task.make(input)}`);
+  const [rows] = await db.query<[unknown[]]>(surql`CREATE task CONTENT ${Task.encode(input)}`);
   return Task.decode(rows[0]);
 }
 
@@ -44,7 +44,7 @@ export async function updateTask(
   patch: Update<typeof Task>,
 ): Promise<AppTask> {
   const [rows] = await db.query<[unknown[]]>(
-    surql`UPDATE ${id} MERGE ${Task.makePartial(patch)} RETURN AFTER`,
+    surql`UPDATE ${id} MERGE ${Task.encodePartial(patch)} RETURN AFTER`,
   );
   return Task.decode(rows[0]);
 }
@@ -61,7 +61,7 @@ export async function listComments(db: Surreal, task: RecordId<"task">): Promise
 }
 
 export async function addComment(db: Surreal, input: Create<typeof Comment>): Promise<AppComment> {
-  const [rows] = await db.query<[unknown[]]>(surql`CREATE comment CONTENT ${Comment.make(input)}`);
+  const [rows] = await db.query<[unknown[]]>(surql`CREATE comment CONTENT ${Comment.encode(input)}`);
   return Comment.decode(rows[0]);
 }
 

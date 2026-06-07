@@ -38,9 +38,9 @@ describe("Create<>", () => {
 
   test("missing a required field is a type error", () => {
     // @ts-expect-error - name and email are required on create
-    User.make({});
+    User.encode({});
     // @ts-expect-error - email is required
-    User.make({ name: "a" });
+    User.encode({ name: "a" });
   });
 });
 
@@ -56,9 +56,9 @@ describe("Update<>", () => {
 
   test("readonly / id keys are rejected", () => {
     // @ts-expect-error - createdAt is readonly, excluded from updates
-    User.makePartial({ createdAt: new Date() });
+    User.encodePartial({ createdAt: new Date() });
     // @ts-expect-error - id is excluded from updates
-    User.makePartial({ id: new RecordId("user", "x") });
+    User.encodePartial({ id: new RecordId("user", "x") });
   });
 });
 
@@ -77,21 +77,21 @@ describe("App<> / Wire<>", () => {
   });
 });
 
-describe("make / safeMake return types (#6, #7)", () => {
-  test("make returns Partial<Wire<>>: codec fields are wire-typed (DateTime, not Date)", () => {
-    const made = User.make({ name: "Alice", email: "alice@example.com" });
+describe("encode / safeEncode return types (#6, #7)", () => {
+  test("encode returns Partial<Wire<>>: codec fields are wire-typed (DateTime, not Date)", () => {
+    const made = User.encode({ name: "Alice", email: "alice@example.com" });
     expectTypeOf(made).toEqualTypeOf<Partial<Wire<typeof User>>>();
     // a datetime codec field is its wire type (DateTime) on the way out, never the app Date
     expectTypeOf(made.createdAt).toEqualTypeOf<DateTime | undefined>();
     expectTypeOf(made.createdAt).not.toEqualTypeOf<Date | undefined>();
   });
 
-  test("makePartial returns the same Partial<Wire<>>", () => {
-    expectTypeOf(User.makePartial({ name: "x" })).toEqualTypeOf<Partial<Wire<typeof User>>>();
+  test("encodePartial returns the same Partial<Wire<>>", () => {
+    expectTypeOf(User.encodePartial({ name: "x" })).toEqualTypeOf<Partial<Wire<typeof User>>>();
   });
 
-  test("safeMake's result is the Zod success|error union; data is the wire partial", () => {
-    const res = User.safeMake({ name: "Alice", email: "alice@example.com" });
+  test("safeEncode's result is the Zod success|error union; data is the wire partial", () => {
+    const res = User.safeEncode({ name: "Alice", email: "alice@example.com" });
     expectTypeOf(res).toEqualTypeOf<z.ZodSafeParseResult<Partial<Wire<typeof User>>>>();
     if (res.success) {
       expectTypeOf(res.data).toEqualTypeOf<Partial<Wire<typeof User>>>();
@@ -101,9 +101,18 @@ describe("make / safeMake return types (#6, #7)", () => {
     }
   });
 
-  test("safeMakePartial mirrors safeMake's result type", () => {
-    expectTypeOf(User.safeMakePartial({ name: "x" })).toEqualTypeOf<
+  test("safeEncodePartial mirrors safeEncode's result type", () => {
+    expectTypeOf(User.safeEncodePartial({ name: "x" })).toEqualTypeOf<
       z.ZodSafeParseResult<Partial<Wire<typeof User>>>
+    >();
+  });
+
+  test("encodeAsync returns Promise<Partial<Wire<>>>", () => {
+    expectTypeOf(User.encodeAsync({ name: "x", email: "a@b.co" })).toEqualTypeOf<
+      Promise<Partial<Wire<typeof User>>>
+    >();
+    expectTypeOf(User.safeEncodeAsync({ name: "x", email: "a@b.co" })).toEqualTypeOf<
+      Promise<z.ZodSafeParseResult<Partial<Wire<typeof User>>>>
     >();
   });
 });
@@ -142,15 +151,15 @@ describe("$internal fields", () => {
     }>();
   });
 
-  test("Create excludes the internal key; make rejects it, system.make accepts it", () => {
+  test("Create excludes the internal key; encode rejects it, system.encode accepts it", () => {
     expectTypeOf<Create<typeof Account>>().toEqualTypeOf<{
       email: string;
       id?: RecordId<"account", string>;
     }>();
     // @ts-expect-error - passhash is internal, not part of the public create input
-    Account.make({ email: "alice@example.com", passhash: "x" });
+    Account.encode({ email: "alice@example.com", passhash: "x" });
     // the system view CAN set internal fields
-    Account.system.make({ email: "alice@example.com", passhash: "x" });
+    Account.system.encode({ email: "alice@example.com", passhash: "x" });
   });
 });
 
@@ -182,7 +191,7 @@ describe("nested create-optionality", () => {
     // a single nested key is a valid patch (deep-partial)
     expectTypeOf<{ settings: { theme: string } }>().toExtend<Update<typeof T>>();
     expectTypeOf<{ settings: Record<string, never> }>().toExtend<Update<typeof T>>();
-    T.makePartial({ settings: { theme: "x" } });
+    T.encodePartial({ settings: { theme: "x" } });
   });
 
   // The object field itself is $default (create-optional) AND its nested field is too.
@@ -231,10 +240,10 @@ describe("$value create-optionality", () => {
     expectTypeOf<{ slug: string }>().toExtend<Create<typeof T>>();
   });
 
-  test("make enforces the create-required slug; create-optional updatedAt is allowed", () => {
-    T.make({ slug: "x" });
-    T.make({ slug: "x", updatedAt: new Date() });
+  test("encode enforces the create-required slug; create-optional updatedAt is allowed", () => {
+    T.encode({ slug: "x" });
+    T.encode({ slug: "x", updatedAt: new Date() });
     // @ts-expect-error - slug is create-required (its $value consumes client input)
-    T.make({});
+    T.encode({});
   });
 });

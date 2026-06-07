@@ -91,13 +91,13 @@ describe("record access + identity", () => {
   });
 });
 
-describe("create + decode (make / DB defaults / codecs)", () => {
+describe("create + decode (encode / DB defaults / codecs)", () => {
   let projectId: RecordId<"project">;
   let taskId: RecordId<"task">;
 
-  test("Project.make omits DB-filled fields; defaults + nested object decode", async () => {
-    const payload = Project.make({ name: "Launch", description: "Ship it", tags: ["q3"] });
-    // make() leaves owner/createdAt/settings/color to the DB.
+  test("Project.encode omits DB-filled fields; defaults + nested object decode", async () => {
+    const payload = Project.encode({ name: "Launch", description: "Ship it", tags: ["q3"] });
+    // encode() leaves owner/createdAt/settings/color to the DB.
     expect(payload).not.toHaveProperty("owner");
     expect(payload).not.toHaveProperty("createdAt");
 
@@ -117,7 +117,7 @@ describe("create + decode (make / DB defaults / codecs)", () => {
     // Nested create-optionality: provide only ONE nested settings field (defaultView) and
     // omit the DB-defaulted `isPublic`. The partial nested object must round-trip with the
     // DB filling the omitted nested default (kept private so it doesn't leak to Bob below).
-    const partial = Project.make({ name: "Partial", settings: { defaultView: "board" } });
+    const partial = Project.encode({ name: "Partial", settings: { defaultView: "board" } });
     expect(partial.settings as Record<string, unknown>).not.toHaveProperty("isPublic");
     const [prows] = await A.query<[unknown[]]>(surql`CREATE project CONTENT ${partial}`);
     const pp = Project.decode(prows[0]);
@@ -125,8 +125,8 @@ describe("create + decode (make / DB defaults / codecs)", () => {
     expect(pp.settings.isPublic).toBe(false); // DB-filled nested default
   });
 
-  test("Task.make + enums, duration, links, $value updatedAt", async () => {
-    const payload = Task.make({
+  test("Task.encode + enums, duration, links, $value updatedAt", async () => {
+    const payload = Task.encode({
       project: projectId,
       title: "Write docs",
       priority: "high",
@@ -149,12 +149,12 @@ describe("create + decode (make / DB defaults / codecs)", () => {
     expect(t.completedAt).toBeUndefined();
   });
 
-  test("makePartial MERGE updates status + completedAt; updatedAt advances", async () => {
+  test("encodePartial MERGE updates status + completedAt; updatedAt advances", async () => {
     const [before] = await A.query<[unknown[]]>(surql`SELECT * FROM ${taskId}`);
     const updatedBefore = Task.decode(before[0]).updatedAt!;
     await Bun.sleep(10);
 
-    const patch = Task.makePartial({ status: "done", completedAt: new Date() });
+    const patch = Task.encodePartial({ status: "done", completedAt: new Date() });
     const [rows] = await A.query<[unknown[]]>(surql`UPDATE ${taskId} MERGE ${patch} RETURN AFTER`);
     const t = Task.decode(rows[0]);
 
@@ -163,9 +163,9 @@ describe("create + decode (make / DB defaults / codecs)", () => {
     expect(t.updatedAt!.getTime()).toBeGreaterThan(updatedBefore.getTime());
   });
 
-  test("Comment.make defaults author to $auth and decodes links", async () => {
+  test("Comment.encode defaults author to $auth and decodes links", async () => {
     const [rows] = await A.query<[unknown[]]>(
-      surql`CREATE comment CONTENT ${Comment.make({ task: taskId, body: "Looks good" })}`,
+      surql`CREATE comment CONTENT ${Comment.encode({ task: taskId, body: "Looks good" })}`,
     );
     const c = Comment.decode(rows[0]);
     expect(String(c.author)).toBe(String(aliceId));
@@ -179,7 +179,7 @@ describe("create + decode (make / DB defaults / codecs)", () => {
     // `expect(db.query(...)).rejects` does not settle under bun — capture instead.
     let error: unknown;
     try {
-      await A.query(surql`CREATE task CONTENT ${Task.make({ project: projectId, title: "" })}`);
+      await A.query(surql`CREATE task CONTENT ${Task.encode({ project: projectId, title: "" })}`);
     } catch (e) {
       error = e;
     }
@@ -198,7 +198,7 @@ describe("create + decode (make / DB defaults / codecs)", () => {
 
     test("Bob cannot create a task in Alice's project", async () => {
       const [rows] = await B.query<[unknown[]]>(
-        surql`CREATE task CONTENT ${Task.make({ project: projectId, title: "sneaky" })}`,
+        surql`CREATE task CONTENT ${Task.encode({ project: projectId, title: "sneaky" })}`,
       ).catch(() => [[]] as [unknown[]]);
       expect(rows.length).toBe(0);
     });
@@ -223,7 +223,7 @@ describe("create + decode (make / DB defaults / codecs)", () => {
 
       // And can edit a task (member write permission).
       const [edited] = await B.query<[unknown[]]>(
-        surql`UPDATE ${taskId} MERGE ${Task.makePartial({ priority: "urgent" })} RETURN AFTER`,
+        surql`UPDATE ${taskId} MERGE ${Task.encodePartial({ priority: "urgent" })} RETURN AFTER`,
       );
       expect(Task.decode(edited[0]).priority).toBe("urgent");
     });

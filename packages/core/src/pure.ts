@@ -221,6 +221,54 @@ export class SField<S extends z.ZodType = z.ZodType, Flags extends string = neve
     readonly surreal: SurrealMeta = {},
   ) {}
 
+  // --- Field-level codec (raw, on `this.schema`): `decode` reads (wire -> app), `encode`
+  // writes (app -> wire). Create-shaping is a table concept, so these are NOT create-shaped —
+  // e.g. `sz.datetime().decode(dbDateTime) -> Date`, `sz.uuid().encode("…") -> Uuid`. ---
+  /** Decode a DB value to its app type (wire -> app). */
+  decode(value: unknown): z.output<S> {
+    return z.decode(this.schema, value as never);
+  }
+  /** Encode an app value to its DB wire type (app -> wire). */
+  encode(value: z.output<S>): z.input<S> {
+    return z.encode(this.schema, value);
+  }
+  decodeAsync(value: unknown): Promise<z.output<S>> {
+    return z.decodeAsync(this.schema, value as never);
+  }
+  encodeAsync(value: z.output<S>): Promise<z.input<S>> {
+    return z.encodeAsync(this.schema, value);
+  }
+  safeDecode(value: unknown) {
+    return z.safeDecode(this.schema, value as never);
+  }
+  safeEncode(value: z.output<S>) {
+    return z.safeEncode(this.schema, value);
+  }
+  safeDecodeAsync(value: unknown) {
+    return z.safeDecodeAsync(this.schema, value as never);
+  }
+  safeEncodeAsync(value: z.output<S>) {
+    return z.safeEncodeAsync(this.schema, value);
+  }
+  // Deprecated Zod-style aliases — `parse` runs the DECODE direction (wire -> app), so it's
+  // just `decode` under a misleading name. Kept for `z`-API familiarity (struck through).
+  /** @deprecated `parse` decodes a value (wire -> app). Use {@link SField.decode | decode}. */
+  parse(value: unknown): z.output<S> {
+    return this.decode(value);
+  }
+  /** @deprecated Use {@link SField.safeDecode | safeDecode}. */
+  safeParse(value: unknown) {
+    return this.safeDecode(value);
+  }
+  /** @deprecated Use {@link SField.decodeAsync | decodeAsync}. */
+  parseAsync(value: unknown): Promise<z.output<S>> {
+    return this.decodeAsync(value);
+  }
+  /** @deprecated Use {@link SField.safeDecodeAsync | safeDecodeAsync}. */
+  safeParseAsync(value: unknown) {
+    return this.safeDecodeAsync(value);
+  }
+
   // Zod wrappers — delegate to the inner schema, carry DDL metadata + flags forward.
   optional(): SField<z.ZodOptional<S>, Flags> {
     return new SField(this.schema.optional(), this.surreal);
@@ -268,7 +316,7 @@ export class SField<S extends z.ZodType = z.ZodType, Flags extends string = neve
    *   - `time::now()` ignores input -> `{ optional: true }` (create-optional)
    *   - `string::lowercase($value)` requires input -> default (create-required)
    * Optionality is purely type-level (the option drives the `"create"` flag that
-   * `Create<>`/`make()` read); it does not touch the app type or DB nullability.
+   * `Create<>`/`encode()` read); it does not touch the app type or DB nullability.
    * There is no separate update option — every field is already optional in `Update<>`.
    */
   $value<O extends boolean = false>(
@@ -711,7 +759,7 @@ function normalizeFields<S extends Shape>(shape: S): Fields<S> {
   return out as unknown as Fields<S>;
 }
 
-/** The wrappers `encodeValue` peels to reach a schema registered in `objectFieldsRegistry`
+/** The wrappers `safeEncodeValue` peels to reach a schema registered in `objectFieldsRegistry`
  * (and the array element) — the same identity-preserving set `ShapeOf` strips at the type
  * level. `array` is intentionally NOT peeled (it's handled separately). */
 const ENCODE_PEEL = new Set(["optional", "nullable", "default", "prefault", "catch", "readonly"]);
@@ -738,9 +786,9 @@ function arrayElementFields(core: z.ZodType): Record<string, AnyField> | undefin
 
 /**
  * Validate + encode one provided field value to its wire form (non-throwing — the shared core
- * of both `make` and `safeMake`). A nested `sz.object` (or an array of one) recurses via
+ * of both `encode` and `safeEncode`). A nested `sz.object` (or an array of one) recurses via
  * `safeEncodeInput`, so absent nested keys are OMITTED — on CREATE the DB fills their defaults;
- * on UPDATE `makePartial` is deep-partial and pairs with `MERGE` (which deep-merges), so
+ * on UPDATE `encodePartial` is deep-partial and pairs with `MERGE` (which deep-merges), so
  * omitted siblings are preserved. Leaf fields go through `z.safeEncode` (which validates);
  * issues are pushed into `issues` with their path prefixed by `path`, so the aggregate
  * `ZodError` carries fully-qualified paths. Object-LEVEL refinements on a nested `sz.object`
@@ -785,10 +833,11 @@ function safeEncodeInput(
 }
 
 /**
- * The core of `safeMake`/`safeMakePartial` AND `make`/`makePartial`: validate+encode the
- * PROVIDED keys, aggregating every leaf issue (with correct paths) into one `z.ZodError`.
- * `safeMake` returns the result; `make` throws `error` (so `make` and `safeMake` are the
- * same operation — `make` = `safeMake` + throw — including for a PARTIAL nested `sz.object`).
+ * The core of `safeEncode`/`safeEncodePartial` AND `encode`/`encodePartial`: validate+encode
+ * the PROVIDED keys, aggregating every leaf issue (with correct paths) into one `z.ZodError`.
+ * `safeEncode` returns the result; `encode` throws `error` (so `encode` and `safeEncode` are
+ * the same operation — `encode` = `safeEncode` + throw — including for a PARTIAL nested
+ * `sz.object`).
  */
 function safeEncodeFields(
   fields: Record<string, AnyField>,
@@ -796,6 +845,59 @@ function safeEncodeFields(
 ): z.ZodSafeParseResult<unknown> {
   const issues: z.core.$ZodIssue[] = [];
   const data = safeEncodeInput(fields, input, [], issues);
+  return issues.length > 0
+    ? { success: false, error: new z.ZodError(issues) }
+    : { success: true, data };
+}
+
+/** Async mirror of `safeEncodeValue` — awaits `z.safeEncodeAsync` per leaf and recurses into a
+ * nested `sz.object` (or array of one) via `safeEncodeInputAsync`. Backs the `*Async` writes. */
+async function safeEncodeValueAsync(
+  field: AnyField,
+  v: unknown,
+  path: PropertyKey[],
+  issues: z.core.$ZodIssue[],
+): Promise<unknown> {
+  const core = unwrapCore(field.schema);
+  const nested = objectFieldsRegistry.get(core);
+  if (nested) return safeEncodeInputAsync(nested, v as Record<string, unknown>, path, issues);
+  const elem = arrayElementFields(core);
+  if (elem) {
+    return Promise.all(
+      (v as unknown[]).map((el, i) =>
+        safeEncodeInputAsync(elem, el as Record<string, unknown>, [...path, i], issues),
+      ),
+    );
+  }
+  const res = await z.safeEncodeAsync(field.schema, v as never);
+  if (res.success) return res.data;
+  for (const issue of res.error.issues) issues.push({ ...issue, path: [...path, ...issue.path] });
+  return undefined;
+}
+
+/** Async mirror of `safeEncodeInput` — recurse over the provided keys, omitting absent ones. */
+async function safeEncodeInputAsync(
+  fields: Record<string, AnyField>,
+  input: Record<string, unknown>,
+  path: PropertyKey[],
+  issues: z.core.$ZodIssue[],
+): Promise<Record<string, unknown>> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(input)) {
+    if (v === undefined) continue;
+    const field = fields[k];
+    out[k] = field ? await safeEncodeValueAsync(field, v, [...path, k], issues) : v;
+  }
+  return out;
+}
+
+/** Async mirror of `safeEncodeFields` — backs `safeEncodeAsync`/`encodeAsync` (run + throw). */
+async function safeEncodeFieldsAsync(
+  fields: Record<string, AnyField>,
+  input: Record<string, unknown>,
+): Promise<z.ZodSafeParseResult<unknown>> {
+  const issues: z.core.$ZodIssue[] = [];
+  const data = await safeEncodeInputAsync(fields, input, [], issues);
   return issues.length > 0
     ? { success: false, error: new z.ZodError(issues) }
     : { success: true, data };
@@ -927,9 +1029,9 @@ type UpdateShapeAll<S extends Shape> = Prettify<{
 }>;
 
 /** A Zod-style non-throwing result: `{ success: true; data }` | `{ success: false; error }`
- * (mirrors `z.safeEncode`/`z.safeDecode`, so `safeMake` matches `safeEncode`). */
+ * (mirrors `z.safeEncode`/`z.safeDecode`). */
 type SafeResult<T> = z.ZodSafeParseResult<T>;
-/** The wire payload `make`/`safeMake` build: the provided keys' wire (`z.input`) types. Only
+/** The wire payload `encode`/`safeEncode` build: the provided keys' wire (`z.input`) types. Only
  * the supplied keys are present at runtime, hence `Partial`. */
 type MakeWire<S extends Shape> = Partial<z.input<z.ZodObject<ZShape<S>>>>;
 /** Same, over ALL fields — the `.system` view includes `$internal()` ones. */
@@ -963,36 +1065,22 @@ export class TableDef<Name extends string, S extends Shape> {
   decode(row: unknown): z.output<z.ZodObject<ZShape<S>>> {
     return z.decode(this.object, row as never);
   }
-  /** App object -> DB wire row. */
-  encode(value: z.output<z.ZodObject<ZShape<S>>>): z.input<z.ZodObject<ZShape<S>>> {
-    return z.encode(this.object, value);
-  }
-  // Async variants (for async refinements).
+  /** DB wire row -> app object (async — for async refinements). */
   decodeAsync(row: unknown): Promise<z.output<z.ZodObject<ZShape<S>>>> {
     return z.decodeAsync(this.object, row as never);
   }
-  encodeAsync(value: z.output<z.ZodObject<ZShape<S>>>): Promise<z.input<z.ZodObject<ZShape<S>>>> {
-    return z.encodeAsync(this.object, value);
-  }
 
-  // No-throw variants — return { success, data } | { success, error }.
-  // (To validate an app object without converting, use safeEncode — it validates the app side.)
+  // No-throw read variants — return { success, data } | { success, error }.
   safeDecode(row: unknown) {
     return z.safeDecode(this.object, row as never);
-  }
-  safeEncode(value: z.output<z.ZodObject<ZShape<S>>>) {
-    return z.safeEncode(this.object, value);
   }
   safeDecodeAsync(row: unknown) {
     return z.safeDecodeAsync(this.object, row as never);
   }
-  safeEncodeAsync(value: z.output<z.ZodObject<ZShape<S>>>) {
-    return z.safeEncodeAsync(this.object, value);
-  }
 
   // Deprecated Zod-style aliases. For codecs `parse` runs the DECODE direction (wire -> app),
-  // so it's just `decode` under a misleading name — prefer `decode`/`encode` (and `make` for
-  // create payloads). Kept for `z`-API familiarity; editors will strike them through.
+  // so it's just `decode` under a misleading name — prefer `decode` (and `encode` for create
+  // payloads). Kept for `z`-API familiarity; editors will strike them through.
   /** @deprecated `parse` decodes a DB row (wire -> app). Use {@link TableDef.decode | decode}. */
   parse(row: unknown): z.output<z.ZodObject<ZShape<S>>> {
     return this.decode(row);
@@ -1010,42 +1098,73 @@ export class TableDef<Name extends string, S extends Shape> {
     return this.safeDecodeAsync(row);
   }
 
+  // --- Write side (app -> wire). `encode`/`encodePartial` are create/patch-shaped: DB-filled
+  // (`$default`/`id`) fields are optional (the DB fills them), absent keys are OMITTED, and each
+  // provided leaf is validated via the recursive encoder. The raw full-object codec (no create-
+  // shaping) is `z.encode(table.object, app)` if ever needed. ---
+
   /**
-   * Build a wire payload for `CREATE` (DB-filled fields optional). Encodes each provided
-   * field via `z.encode`, which validates — so this VALIDATES and THROWS a `z.ZodError`
-   * on invalid input. Use `safeMake` for the non-throwing form.
+   * Build a wire payload for `CREATE` (DB-filled fields optional). Validates+encodes each
+   * provided field — so this VALIDATES and THROWS the aggregated `z.ZodError` on invalid
+   * input. Use `safeEncode` for the non-throwing form.
    */
-  make(input: CreateShape<S>): MakeWire<S> {
-    const r = this.safeMake(input);
+  encode(input: CreateShape<S>): MakeWire<S> {
+    const r = this.safeEncode(input);
     if (!r.success) throw r.error;
     return r.data;
   }
   /**
    * Build a wire payload for `UPDATE`/`MERGE` (a partial patch; excludes id/readonly).
-   * VALIDATES and THROWS on invalid input; use `safeMakePartial` for the non-throwing form.
+   * VALIDATES and THROWS on invalid input; use `safeEncodePartial` for the non-throwing form.
    */
-  makePartial(input: UpdateShape<S>): MakeWire<S> {
-    const r = this.safeMakePartial(input);
+  encodePartial(input: UpdateShape<S>): MakeWire<S> {
+    const r = this.safeEncodePartial(input);
     if (!r.success) throw r.error;
     return r.data;
   }
   /**
-   * Non-throwing `make`: validates+encodes the provided keys and returns a Zod-style
+   * Non-throwing `encode`: validates+encodes the provided keys and returns a Zod-style
    * `{ success: true; data }` | `{ success: false; error }`. All field errors are
    * aggregated (with correct paths) into a single `z.ZodError`.
    */
-  safeMake(input: CreateShape<S>): SafeResult<MakeWire<S>> {
+  safeEncode(input: CreateShape<S>): SafeResult<MakeWire<S>> {
     return safeEncodeFields(
       this.fields as unknown as Record<string, AnyField>,
       input as Record<string, unknown>,
     ) as SafeResult<MakeWire<S>>;
   }
-  /** Non-throwing `makePartial` (see `safeMake`). */
-  safeMakePartial(input: UpdateShape<S>): SafeResult<MakeWire<S>> {
+  /** Non-throwing `encodePartial` (see `safeEncode`). */
+  safeEncodePartial(input: UpdateShape<S>): SafeResult<MakeWire<S>> {
     return safeEncodeFields(
       this.fields as unknown as Record<string, AnyField>,
       input as Record<string, unknown>,
     ) as SafeResult<MakeWire<S>>;
+  }
+  /** Async `encode` (awaits async refinements per leaf); throws the aggregated error. */
+  async encodeAsync(input: CreateShape<S>): Promise<MakeWire<S>> {
+    const r = await this.safeEncodeAsync(input);
+    if (!r.success) throw r.error;
+    return r.data;
+  }
+  /** Async `encodePartial`; throws the aggregated error. */
+  async encodePartialAsync(input: UpdateShape<S>): Promise<MakeWire<S>> {
+    const r = await this.safeEncodePartialAsync(input);
+    if (!r.success) throw r.error;
+    return r.data;
+  }
+  /** Non-throwing async `encode` (see `safeEncode`). */
+  safeEncodeAsync(input: CreateShape<S>): Promise<SafeResult<MakeWire<S>>> {
+    return safeEncodeFieldsAsync(
+      this.fields as unknown as Record<string, AnyField>,
+      input as Record<string, unknown>,
+    ) as Promise<SafeResult<MakeWire<S>>>;
+  }
+  /** Non-throwing async `encodePartial`. */
+  safeEncodePartialAsync(input: UpdateShape<S>): Promise<SafeResult<MakeWire<S>>> {
+    return safeEncodeFieldsAsync(
+      this.fields as unknown as Record<string, AnyField>,
+      input as Record<string, unknown>,
+    ) as Promise<SafeResult<MakeWire<S>>>;
   }
 
   /**
@@ -1126,7 +1245,7 @@ export class TableDef<Name extends string, S extends Shape> {
 /**
  * The server/system view of a table (`TableDef.system`): the same data methods typed
  * over ALL fields, including `$internal()` ones the public `TableDef` hides. Its
- * `.object` validates/encodes/decodes the full shape, and `make`/`makePartial` accept
+ * `.object` validates/encodes/decodes the full shape, and `encode`/`encodePartial` accept
  * internal fields. Exposed for trusted server code; never hand it to a browser client.
  */
 // biome-ignore lint/correctness/noUnusedVariables: Name mirrors TableDef<Name, S> for symmetry (type-only)
@@ -1144,58 +1263,92 @@ export class SystemView<Name extends string, S extends Shape> {
   decode(row: unknown): z.output<z.ZodObject<ZShapeAll<S>>> {
     return z.decode(this.object, row as never);
   }
-  /** App object -> DB wire row (internal fields kept). */
-  encode(value: z.output<z.ZodObject<ZShapeAll<S>>>): z.input<z.ZodObject<ZShapeAll<S>>> {
-    return z.encode(this.object, value);
-  }
+  /** DB wire row -> app object (async; internal fields kept). */
   decodeAsync(row: unknown): Promise<z.output<z.ZodObject<ZShapeAll<S>>>> {
     return z.decodeAsync(this.object, row as never);
   }
-  encodeAsync(value: z.output<z.ZodObject<ZShapeAll<S>>>): Promise<z.input<z.ZodObject<ZShapeAll<S>>>> {
-    return z.encodeAsync(this.object, value);
-  }
 
+  // No-throw read variants.
   safeDecode(row: unknown) {
     return z.safeDecode(this.object, row as never);
-  }
-  safeEncode(value: z.output<z.ZodObject<ZShapeAll<S>>>) {
-    return z.safeEncode(this.object, value);
   }
   safeDecodeAsync(row: unknown) {
     return z.safeDecodeAsync(this.object, row as never);
   }
-  safeEncodeAsync(value: z.output<z.ZodObject<ZShapeAll<S>>>) {
-    return z.safeEncodeAsync(this.object, value);
+
+  // Deprecated Zod-style aliases (parse runs the decode direction; use `decode`).
+  /** @deprecated `parse` decodes a DB row (wire -> app). Use {@link SystemView.decode | decode}. */
+  parse(row: unknown): z.output<z.ZodObject<ZShapeAll<S>>> {
+    return this.decode(row);
+  }
+  /** @deprecated Use {@link SystemView.safeDecode | safeDecode}. */
+  safeParse(row: unknown) {
+    return this.safeDecode(row);
+  }
+  /** @deprecated Use {@link SystemView.decodeAsync | decodeAsync}. */
+  parseAsync(row: unknown): Promise<z.output<z.ZodObject<ZShapeAll<S>>>> {
+    return this.decodeAsync(row);
+  }
+  /** @deprecated Use {@link SystemView.safeDecodeAsync | safeDecodeAsync}. */
+  safeParseAsync(row: unknown) {
+    return this.safeDecodeAsync(row);
   }
 
+  // --- Write side over ALL fields (internal included). Mirrors `TableDef`'s create/patch-shaped
+  // `encode`/`encodePartial`; the raw full-object codec is `z.encode(view.object, app)`. ---
+
   /**
-   * Build a `CREATE` payload allowed to set internal fields. VALIDATES and THROWS a
-   * `z.ZodError` on invalid input; use `safeMake` for the non-throwing form.
+   * Build a `CREATE` payload allowed to set internal fields. VALIDATES and THROWS the
+   * aggregated `z.ZodError` on invalid input; use `safeEncode` for the non-throwing form.
    */
-  make(input: CreateShapeAll<S>): MakeWireAll<S> {
-    const r = this.safeMake(input);
+  encode(input: CreateShapeAll<S>): MakeWireAll<S> {
+    const r = this.safeEncode(input);
     if (!r.success) throw r.error;
     return r.data;
   }
   /**
    * Build an `UPDATE`/`MERGE` payload allowed to set internal fields. VALIDATES and THROWS
-   * on invalid input; use `safeMakePartial` for the non-throwing form.
+   * on invalid input; use `safeEncodePartial` for the non-throwing form.
    */
-  makePartial(input: UpdateShapeAll<S>): MakeWireAll<S> {
-    const r = this.safeMakePartial(input);
+  encodePartial(input: UpdateShapeAll<S>): MakeWireAll<S> {
+    const r = this.safeEncodePartial(input);
     if (!r.success) throw r.error;
     return r.data;
   }
-  /** Non-throwing `make` over ALL fields (see `TableDef.safeMake`). */
-  safeMake(input: CreateShapeAll<S>): SafeResult<MakeWireAll<S>> {
+  /** Non-throwing `encode` over ALL fields (see `TableDef.safeEncode`). */
+  safeEncode(input: CreateShapeAll<S>): SafeResult<MakeWireAll<S>> {
     return safeEncodeFields(this.fields, input as Record<string, unknown>) as SafeResult<
       MakeWireAll<S>
     >;
   }
-  /** Non-throwing `makePartial` over ALL fields. */
-  safeMakePartial(input: UpdateShapeAll<S>): SafeResult<MakeWireAll<S>> {
+  /** Non-throwing `encodePartial` over ALL fields. */
+  safeEncodePartial(input: UpdateShapeAll<S>): SafeResult<MakeWireAll<S>> {
     return safeEncodeFields(this.fields, input as Record<string, unknown>) as SafeResult<
       MakeWireAll<S>
+    >;
+  }
+  /** Async `encode` over ALL fields; throws the aggregated error. */
+  async encodeAsync(input: CreateShapeAll<S>): Promise<MakeWireAll<S>> {
+    const r = await this.safeEncodeAsync(input);
+    if (!r.success) throw r.error;
+    return r.data;
+  }
+  /** Async `encodePartial` over ALL fields; throws the aggregated error. */
+  async encodePartialAsync(input: UpdateShapeAll<S>): Promise<MakeWireAll<S>> {
+    const r = await this.safeEncodePartialAsync(input);
+    if (!r.success) throw r.error;
+    return r.data;
+  }
+  /** Non-throwing async `encode` over ALL fields. */
+  safeEncodeAsync(input: CreateShapeAll<S>): Promise<SafeResult<MakeWireAll<S>>> {
+    return safeEncodeFieldsAsync(this.fields, input as Record<string, unknown>) as Promise<
+      SafeResult<MakeWireAll<S>>
+    >;
+  }
+  /** Non-throwing async `encodePartial` over ALL fields. */
+  safeEncodePartialAsync(input: UpdateShapeAll<S>): Promise<SafeResult<MakeWireAll<S>>> {
+    return safeEncodeFieldsAsync(this.fields, input as Record<string, unknown>) as Promise<
+      SafeResult<MakeWireAll<S>>
     >;
   }
 }

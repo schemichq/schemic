@@ -21,17 +21,17 @@ const db = await connect();
 await db.query(ddl);
 await db.query(surql`DELETE liked; DELETE friend; DELETE comment; DELETE post; DELETE tag; DELETE user;`);
 
-rule("Create users — User.make() builds the CONTENT payload");
+rule("Create users — User.encode() builds the CONTENT payload");
 const alice = User.record().make("alice");
 const bob = User.record().make("bob");
-// make() input: id/status/role/createdAt are optional (DB-filled); name/email/settings required.
-await db.query(surql`CREATE ${alice} CONTENT ${User.make({
+// encode() input: id/status/role/createdAt are optional (DB-filled); name/email/settings required.
+await db.query(surql`CREATE ${alice} CONTENT ${User.encode({
   name: "Alice",
   email: "alice@example.com",
   bio: "Builder",
   settings: { theme: "dark", notifications: true, lastSeen: new Date() },
 })}`);
-await db.query(surql`CREATE ${bob} CONTENT ${User.make({
+await db.query(surql`CREATE ${bob} CONTENT ${User.encode({
   name: "Bob",
   email: "bob@example.com",
   settings: { theme: "light", notifications: false },
@@ -43,8 +43,8 @@ for (const row of userRows) {
   console.log(`  ${String(u.id)}  role=${u.role}  status=${u.status}  theme=${u.settings.theme}  lastSeen=${seen}`);
 }
 
-rule("Update — User.makePartial() (id & readonly createdAt excluded by the type)");
-await db.query(surql`UPDATE ${alice} MERGE ${User.makePartial({ role: "admin", bio: "Builder & maintainer" })}`);
+rule("Update — User.encodePartial() (id & readonly createdAt excluded by the type)");
+await db.query(surql`UPDATE ${alice} MERGE ${User.encodePartial({ role: "admin", bio: "Builder & maintainer" })}`);
 const [aliceRow] = await db.query<[unknown[]]>(surql`SELECT * FROM ${alice}`);
 const updated = User.decode(aliceRow[0]);
 console.log(`  alice role=${updated.role}  bio="${updated.bio}"`);

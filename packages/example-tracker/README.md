@@ -3,7 +3,7 @@
 A full-stack **project / task tracker** that dogfoods [`surreal-zod`](../core) end to
 end. The browser talks **directly** to SurrealDB (record access + table permissions),
 and the same `surreal-zod` schema module runs **isomorphically** on the server (migration
-+ tests) and in the browser (`decode`/`encode`, typed `make`/`makePartial`).
++ tests) and in the browser (`decode`/`encode`, typed `encode`/`encodePartial`).
 
 > Built to surface DX friction — see **[DX-FINDINGS.md](./DX-FINDINGS.md)**.
 
@@ -18,8 +18,8 @@ test/           bun integration tests against the live DB
 ```
 
 - **Schema** (`src/schema.ts`) is the single source of truth. `defineTable` generates the
-  `DEFINE TABLE`/`DEFINE FIELD` DDL; `decode`/`encode` map rows ⇄ app types; `make`/
-  `makePartial` build `CONTENT`/`MERGE` payloads. `App<>`/`Wire<>`/`Create<>`/`Update<>`
+  `DEFINE TABLE`/`DEFINE FIELD` DDL; `decode` maps rows → app types; `encode`/
+  `encodePartial` build `CONTENT`/`MERGE` payloads. `App<>`/`Wire<>`/`Create<>`/`Update<>`
   types are exported.
 - **Auth** is SurrealDB **record access**: the browser calls `signup`/`signin` and gets a
   token; every query then runs as that user, so **table PERMISSIONS** scope what they can
@@ -61,6 +61,6 @@ and asserts:
 - `decode` yields app types (`RecordId`, `Date`, `Duration`, enums) and hides `passhash`;
 - DB-side defaults (`$default $auth.id`, nested-object defaults, enum defaults) populate;
 - `$value updatedAt` advances on every write; `$assert` rejects an empty title;
-- `make`/`makePartial` omit DB-filled/readonly fields;
+- `encode`/`encodePartial` omit DB-filled/readonly fields;
 - **permission isolation** — user B cannot see/edit user A's project or tasks until A grants
   membership, after which B can.

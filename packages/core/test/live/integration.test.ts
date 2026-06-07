@@ -45,7 +45,7 @@ live("CRUD + codecs against a live DB", () => {
 
   test("CREATE fills DB-side defaults; decode yields app types", async () => {
     const id = User.record().make("alice");
-    await db!.query(surql`CREATE ${id} CONTENT ${User.make({ name: "Alice" })}`);
+    await db!.query(surql`CREATE ${id} CONTENT ${User.encode({ name: "Alice" })}`);
 
     const [rows] = await db!.query<[unknown[]]>(surql`SELECT * FROM ${id}`);
     const u = User.decode(rows[0]);
@@ -56,9 +56,9 @@ live("CRUD + codecs against a live DB", () => {
     expect(u.createdAt).toBeInstanceOf(Date); // datetime -> Date
   });
 
-  test("makePartial MERGE updates a field", async () => {
+  test("encodePartial MERGE updates a field", async () => {
     const id = User.record().make("alice");
-    await db!.query(surql`UPDATE ${id} MERGE ${User.makePartial({ role: "admin" })}`);
+    await db!.query(surql`UPDATE ${id} MERGE ${User.encodePartial({ role: "admin" })}`);
 
     const [rows] = await db!.query<[unknown[]]>(surql`SELECT * FROM ${id}`);
     expect(User.decode(rows[0]).role).toBe("admin");
@@ -67,7 +67,7 @@ live("CRUD + codecs against a live DB", () => {
   test("native round-trip: uuid + bytes + datetime through the DB", async () => {
     const id = Native.record().make("n1");
     const tag = "0190b6e0-1234-7890-abcd-ef0123456789";
-    await db!.query(surql`CREATE ${id} CONTENT ${Native.make({
+    await db!.query(surql`CREATE ${id} CONTENT ${Native.encode({
       tag,
       data: new Uint8Array([1, 2, 3]),
       when: new Date("2022-01-01T00:00:00.000Z"),
@@ -85,7 +85,7 @@ live("CRUD + codecs against a live DB", () => {
   test("RELATE + decode of an edge record", async () => {
     const alice = User.record().make("alice");
     const bob = User.record().make("bob");
-    await db!.query(surql`CREATE ${bob} CONTENT ${User.make({ name: "Bob" })}`);
+    await db!.query(surql`CREATE ${bob} CONTENT ${User.encode({ name: "Bob" })}`);
     await db!.query(surql`RELATE ${alice}->it_friend->${bob} SET strength = 0.9`);
 
     const [rows] = await db!.query<[unknown[]]>(surql`SELECT * FROM it_friend`);

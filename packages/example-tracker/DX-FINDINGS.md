@@ -38,9 +38,9 @@ tool) · Medium (notable friction, easy to trip on) · Low (polish).
   .$default(surql\`{}\`)`) populated child defaults correctly.
 - **Nested create-optionality now works (RESOLVED).** A nested `$default` field (e.g.
   `settings.isPublic` / `settings.defaultView`) is optional in the create input, so a client
-  may pass a PARTIAL nested object (`Project.make({ settings: { defaultView: "board" } })`)
+  may pass a PARTIAL nested object (`Project.encode({ settings: { defaultView: "board" } })`)
   and the DB fills the omitted nested defaults — while the field stays REQUIRED in `App<>`
-  (decode). Previously create-optionality applied only to top-level fields; `make`/`makePartial`
+  (decode). Previously create-optionality applied only to top-level fields; `encode`/`encodePartial`
   now recurse into `sz.object` (and arrays of one). Verified live: the partial-settings create
   round-trips with `isPublic` filled to `false`.
 
@@ -67,9 +67,9 @@ is record access; the schema is no longer only ~60% of what you ship.
 ### 2. Internal / write-only / hidden fields can't be modeled — High — RESOLVED
 RESOLVED: fields now take a `.$internal()` modifier. It (a) still emits the `DEFINE FIELD`
 (so the SCHEMAFULL `SIGNUP` write succeeds) plus `PERMISSIONS NONE`, and (b) is excluded
-from `App`/`Create`/`Update` inference (and stripped by `decode`/`make`). Trusted server
+from `App`/`Create`/`Update` inference (and stripped by `decode`/`encode`). Trusted server
 code reaches internal fields via a `.system` escape-hatch view (`User.system.decode(row)` /
-`User.system.make({ ...passhash })`), typed over the full shape. `passhash` now lives in
+`User.system.encode({ ...passhash })`), typed over the full shape. `passhash` now lives in
 `src/schema.ts` as `sz.string().$internal()`; the raw `DEFINE FIELD passhash ... PERMISSIONS
 NONE` in `setup.ts` is gone — `defineTable` generates it. The 12 live tests still pass
 (signup writes `passhash` via the access block; clients never see it).
@@ -194,7 +194,7 @@ regardless of chaining order.
 
 ### 9. Lots of `decode(rows[0])` boilerplate; no data-access layer — Low
 Every read is `const [rows] = await db.query(...); X.decode(rows[0])` and every write is
-`CREATE/UPDATE ... CONTENT/MERGE ${X.make(...)}` then decode. I wrote a thin `web/api.ts`
+`CREATE/UPDATE ... CONTENT/MERGE ${X.encode(...)}` then decode. I wrote a thin `web/api.ts`
 (`listProjects`/`createTask`/`updateTask`/…) by hand to remove the repetition. A small
 optional helper bound to a `Surreal` instance (`X.create(db, input)` → decoded row,
 `X.select(db, id)`, `X.update(db, id, patch)`) would be a big ergonomic win and is a natural

@@ -48,6 +48,45 @@ describe("native codecs (schema-level)", () => {
   });
 });
 
+describe("field-level codec (SField.decode / encode)", () => {
+  test("datetime: decode(DateTime) -> Date, encode(Date) -> DateTime", () => {
+    const f = sz.datetime();
+    const dt = new DateTime(new Date("2020-01-01T00:00:00.000Z"));
+    const decoded = f.decode(dt);
+    expect(decoded).toBeInstanceOf(Date);
+    expect(decoded.toISOString()).toBe("2020-01-01T00:00:00.000Z");
+
+    const encoded = f.encode(new Date("2020-01-01T00:00:00.000Z"));
+    expect(encoded).toBeInstanceOf(DateTime);
+  });
+
+  test("uuid: decode(Uuid) -> string, encode(string) -> Uuid", () => {
+    const f = sz.uuid();
+    expect(f.decode(new Uuid(UUID))).toBe(UUID);
+    const encoded = f.encode(UUID);
+    expect(encoded).toBeInstanceOf(Uuid);
+    expect((encoded as Uuid).toString()).toBe(UUID);
+  });
+
+  test("encode throws on an invalid value; safeEncode reports it", () => {
+    expect(() => sz.uuid().encode("not-a-uuid")).toThrow();
+    expect(sz.uuid().safeEncode("not-a-uuid").success).toBe(false);
+    expect(sz.uuid().safeEncode(UUID).success).toBe(true);
+  });
+
+  test("async + deprecated parse alias", async () => {
+    const f = sz.datetime();
+    const decoded = await f.decodeAsync(new DateTime(new Date("2020-01-01T00:00:00.000Z")));
+    expect(decoded).toBeInstanceOf(Date);
+    expect(await f.encodeAsync(new Date())).toBeInstanceOf(DateTime);
+    const safe = await f.safeEncodeAsync(new Date());
+    expect(safe.success).toBe(true);
+    // `parse` runs the decode direction (deprecated alias).
+    expect(f.parse(new DateTime(new Date("2020-01-01T00:00:00.000Z")))).toBeInstanceOf(Date);
+    expect(f.safeParse(new DateTime(new Date())).success).toBe(true);
+  });
+});
+
 describe("table decode/encode", () => {
   const T = table("t", {
     id: z.string(),

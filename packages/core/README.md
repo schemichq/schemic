@@ -42,16 +42,38 @@ console.log(defineTable(User));
 // ...
 
 // Build a CREATE payload (DB-filled fields optional), then decode a row back:
-const payload = User.make({ name: "Alice", email: "alice@example.com" });
+const payload = User.encode({ name: "Alice", email: "alice@example.com" });
 type AppUser = App<typeof User>; // id: RecordId, createdAt: Date, ...
 ```
 
-`make` / `makePartial` validate and encode your input, returning a typed `Partial<Wire<T>>`
-(codec fields are wire-typed — `createdAt` is a `DateTime`, not a `Date`). They **throw** a
-`ZodError` on invalid input. For the non-throwing form use `safeMake` / `safeMakePartial`,
-which return a Zod-style `{ success: true; data } | { success: false; error }` (all field
-errors aggregated into one `ZodError`). `TableDef.system.{make,safeMake,…}` are the same over
-the full shape, including `$internal()` fields.
+### Reading & writing
+
+The whole JS ⇄ DB mapping rides on Zod's two codec channels:
+
+- **`decode`** (read, wire → app) turns a DB row into your app object (`DateTime` → `Date`,
+  `Uuid` → `string`, `RecordId`, …).
+- **`encode` / `encodePartial`** (write, app → wire) build a payload. They're **create/patch-
+  shaped**: DB-filled fields (`$default`, `id`) are *optional* (the DB fills them), absent keys
+  are omitted, and each provided value is validated. Use `encode` with `CONTENT` (create) and
+  `encodePartial` with `MERGE` (patch).
+- `parse*` are kept as **`@deprecated`** aliases of `decode*` (for `z`-API familiarity).
+
+`encode` / `encodePartial` return a typed `Partial<Wire<T>>` (codec fields are wire-typed —
+`createdAt` is a `DateTime`, not a `Date`). They **throw** a `ZodError` on invalid input. For
+the non-throwing form use `safeEncode` / `safeEncodePartial`, which return a Zod-style
+`{ success: true; data } | { success: false; error }` (all field errors aggregated into one
+`ZodError`). Each has an async twin (`encodeAsync` / `safeEncodeAsync` / …) for async
+refinements. `TableDef.system.{encode,safeEncode,…}` are the same over the full shape,
+including `$internal()` fields. If you ever need the **raw full-object codec** (no create-
+shaping), that's just `z.encode(table.object, app)`.
+
+Field-level codecs work the same way directly on a field:
+
+```ts
+sz.datetime().decode(dbDateTime); // -> Date
+sz.datetime().encode(new Date()); // -> DateTime
+sz.uuid().encode("0190b6e0-…");   // -> Uuid
+```
 
 See [`examples/`](./examples) for a full schema, a live demo (`bun examples/demo.ts`),
 and a small CRUD server.
@@ -62,7 +84,7 @@ and a small CRUD server.
 each nested field keeps its own DDL metadata and create-optionality:
 
 - A nested field with a DB `$default` (or `$value(..., { optional: true })`) is
-  **create-optional** in `make` — omit it and the DB fills it — exactly like a top-level
+  **create-optional** in `encode` — omit it and the DB fills it — exactly like a top-level
   defaulted field. So you can pass a *partial* nested object and let the DB complete it:
 
   ```ts
@@ -74,26 +96,26 @@ each nested field keeps its own DDL metadata and create-optionality:
     }),
   });
 
-  Project.make({ name: "Launch", settings: { defaultView: "board" } });
+  Project.encode({ name: "Launch", settings: { defaultView: "board" } });
   // -> { name, settings: { defaultView: "board" } }   (the DB fills settings.isPublic)
   ```
 
 - On the **decoded** side those nested fields stay **required** in `App<T>` — a stored row has
   them — consistent with how top-level defaulted fields behave.
 
-### `make` (CONTENT) vs `makePartial` (MERGE)
+### `encode` (CONTENT) vs `encodePartial` (MERGE)
 
-`make` builds a **`CONTENT`** payload; `makePartial` builds a **deep-partial `MERGE`** payload —
-every nested key is optional, mirroring SurrealDB's `MERGE`, which **recursively deep-merges**
-(siblings are preserved at every level):
+`encode` builds a **`CONTENT`** payload; `encodePartial` builds a **deep-partial `MERGE`**
+payload — every nested key is optional, mirroring SurrealDB's `MERGE`, which **recursively
+deep-merges** (siblings are preserved at every level):
 
 ```ts
-Project.makePartial({ settings: { defaultView: "board" } });
+Project.encodePartial({ settings: { defaultView: "board" } });
 // -> { settings: { defaultView: "board" } }   ->   UPDATE $id MERGE $payload
 ```
 
-The library only **builds the payload** — you choose the statement. Pair `make` with `CONTENT`
-and `makePartial` with `MERGE`. **Warning:** sending a *partial* payload with `CONTENT`
+The library only **builds the payload** — you choose the statement. Pair `encode` with `CONTENT`
+and `encodePartial` with `MERGE`. **Warning:** sending a *partial* payload with `CONTENT`
 **replaces** the record (unsupplied fields are dropped); use `MERGE` for partial writes.
 
 ### Atomic (object-level) validation
@@ -111,7 +133,7 @@ table("booking", {
 ```
 
 That's the built-in escape when you want all-or-nothing / object-level checks. For full manual
-control, build the payload yourself and pass it via `surql` — `make`/`makePartial` are just
+control, build the payload yourself and pass it via `surql` — `encode`/`encodePartial` are just
 conveniences, not a requirement.
 
 ## Permissions

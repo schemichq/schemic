@@ -23,7 +23,7 @@ describe("smart id", () => {
   });
 });
 
-describe("make / makePartial", () => {
+describe("encode / encodePartial", () => {
   const User = table("user", {
     id: z.string(),
     name: sz.string(),
@@ -32,8 +32,8 @@ describe("make / makePartial", () => {
     createdAt: sz.datetime().$default(surql`time::now()`).$readonly(),
   });
 
-  test("make omits absent fields and encodes the present ones", () => {
-    const payload = User.make({
+  test("encode omits absent fields and encodes the present ones", () => {
+    const payload = User.encode({
       name: "Alice",
       settings: { theme: "dark", lastSeen: new Date("2022-01-01T00:00:00.000Z") },
     });
@@ -43,8 +43,24 @@ describe("make / makePartial", () => {
     expect((payload.settings as { lastSeen: unknown }).lastSeen).toBeInstanceOf(DateTime);
   });
 
-  test("makePartial encodes only the given keys", () => {
-    const patch = User.makePartial({ role: "admin" });
+  test("encode accepts a full App object and a partial create input alike", () => {
+    // full app (every key supplied, including DB-filled defaults)
+    const full = User.encode({
+      id: new RecordId("user", "alice"),
+      name: "Alice",
+      role: "admin",
+      settings: { theme: "dark", lastSeen: new Date("2022-01-01T00:00:00.000Z") },
+      createdAt: new Date("2022-01-01T00:00:00.000Z"),
+    });
+    expect(full.role).toBe("admin");
+    expect(full.createdAt).toBeInstanceOf(DateTime);
+    // partial create input (DB-filled fields omitted)
+    const partial = User.encode({ name: "Bob", settings: { theme: "light" } });
+    expect(Object.keys(partial).sort()).toEqual(["name", "settings"]);
+  });
+
+  test("encodePartial encodes only the given keys", () => {
+    const patch = User.encodePartial({ role: "admin" });
     expect(Object.keys(patch)).toEqual(["role"]);
     expect(patch.role).toBe("admin");
   });
@@ -60,8 +76,8 @@ describe("nested create-optionality (runtime)", () => {
     }),
   });
 
-  test("make omits an absent nested defaulted field so the DB fills it", () => {
-    const payload = Widget.make({ settings: { tz: "utc" } });
+  test("encode omits an absent nested defaulted field so the DB fills it", () => {
+    const payload = Widget.encode({ settings: { tz: "utc" } });
     expect(Object.keys(payload)).toEqual(["settings"]);
     const settings = payload.settings as Record<string, unknown>;
     expect(settings).not.toHaveProperty("theme");
@@ -69,8 +85,8 @@ describe("nested create-optionality (runtime)", () => {
     expect(settings.tz).toBe("utc");
   });
 
-  test("make includes a provided nested field and encodes nested codecs", () => {
-    const payload = Widget.make({
+  test("encode includes a provided nested field and encodes nested codecs", () => {
+    const payload = Widget.encode({
       settings: { tz: "utc", theme: "dark", lastSeen: new Date("2022-01-01T00:00:00.000Z") },
     });
     const settings = payload.settings as Record<string, unknown>;
@@ -80,8 +96,8 @@ describe("nested create-optionality (runtime)", () => {
     expect(settings.lastSeen).toBeInstanceOf(DateTime);
   });
 
-  test("makePartial encodes the full nested object (no sibling dropped)", () => {
-    const patch = Widget.makePartial({ settings: { theme: "dark", tz: "utc" } });
+  test("encodePartial encodes the full nested object (no sibling dropped)", () => {
+    const patch = Widget.encodePartial({ settings: { theme: "dark", tz: "utc" } });
     const settings = patch.settings as Record<string, unknown>;
     expect(Object.keys(settings).sort()).toEqual(["theme", "tz"]);
     expect(settings.theme).toBe("dark");
@@ -93,49 +109,49 @@ describe("nested create-optionality (runtime)", () => {
       id: z.string(),
       tags: sz.object({ name: sz.string(), color: sz.string().$default("#fff") }).array(),
     });
-    const payload = List.make({ tags: [{ name: "a" }, { name: "b", color: "#000" }] });
+    const payload = List.encode({ tags: [{ name: "a" }, { name: "b", color: "#000" }] });
     const tags = payload.tags as Record<string, unknown>[];
     expect(tags[0]).not.toHaveProperty("color");
     expect(Object.keys(tags[0]!)).toEqual(["name"]);
     expect(tags[1]!.color).toBe("#000");
   });
 
-  test("makePartial is deep-partial: a partial nested object round-trips (no sibling added)", () => {
+  test("encodePartial is deep-partial: a partial nested object round-trips (no sibling added)", () => {
     // MERGE deep-merges, so a single nested key is a valid patch — and only it is emitted.
-    const patch = Widget.makePartial({ settings: { theme: "dark" } });
+    const patch = Widget.encodePartial({ settings: { theme: "dark" } });
     expect(Object.keys(patch)).toEqual(["settings"]);
     expect(patch.settings as Record<string, unknown>).toEqual({ theme: "dark" });
   });
 });
 
-describe("make / safeMake agreement on nested input (Fix 1)", () => {
+describe("encode / safeEncode agreement on nested input (Fix 1)", () => {
   const T = table("nested", {
     id: z.string(),
     settings: sz.object({ theme: sz.string().$default(surql`"x"`), tz: sz.string() }),
   });
-  // Mirror helper: did `make` throw for this input?
-  const makeThrew = (input: Parameters<typeof T.make>[0]) => {
+  // Mirror helper: did `encode` throw for this input?
+  const encodeThrew = (input: Parameters<typeof T.encode>[0]) => {
     try {
-      T.make(input);
+      T.encode(input);
       return false;
     } catch {
       return true;
     }
   };
 
-  test("a nested-partial input: make accepts and safeMake agrees (same data)", () => {
+  test("a nested-partial input: encode accepts and safeEncode agrees (same data)", () => {
     const input = { settings: { tz: "utc" } } as const;
-    expect(makeThrew(input)).toBe(false);
-    const res = T.safeMake(input);
+    expect(encodeThrew(input)).toBe(false);
+    const res = T.safeEncode(input);
     expect(res.success).toBe(true);
     if (res.success) expect(res.data as Record<string, unknown>).toEqual({ settings: { tz: "utc" } });
   });
 
-  test("an invalid nested field: make throws and safeMake agrees (rejects, correct path)", () => {
+  test("an invalid nested field: encode throws and safeEncode agrees (rejects, correct path)", () => {
     // tz must be a string — both paths must reject.
-    const input = { settings: { tz: 123 } } as unknown as Parameters<typeof T.make>[0];
-    expect(makeThrew(input)).toBe(true);
-    const res = T.safeMake(input);
+    const input = { settings: { tz: 123 } } as unknown as Parameters<typeof T.encode>[0];
+    expect(encodeThrew(input)).toBe(true);
+    const res = T.safeEncode(input);
     expect(res.success).toBe(false);
     if (!res.success) {
       expect(res.error).toBeInstanceOf(z.ZodError);
@@ -144,7 +160,7 @@ describe("make / safeMake agreement on nested input (Fix 1)", () => {
   });
 });
 
-describe("safeMake / make validation (#6, #7)", () => {
+describe("safeEncode / encode validation (#6, #7)", () => {
   const User = table("user", {
     id: z.string(),
     name: sz.string().$min(1),
@@ -153,8 +169,8 @@ describe("safeMake / make validation (#6, #7)", () => {
     passhash: sz.string().$internal(),
   });
 
-  test("safeMake with valid input -> { success: true, data } with encoded/wire values", () => {
-    const res = User.safeMake({
+  test("safeEncode with valid input -> { success: true, data } with encoded/wire values", () => {
+    const res = User.safeEncode({
       name: "Alice",
       email: "alice@example.com",
       createdAt: new Date("2022-01-01T00:00:00.000Z"),
@@ -168,8 +184,8 @@ describe("safeMake / make validation (#6, #7)", () => {
     }
   });
 
-  test("safeMake with invalid input -> { success: false } with an aggregated ZodError", () => {
-    const res = User.safeMake({ name: "", email: "not-an-email" });
+  test("safeEncode with invalid input -> { success: false } with an aggregated ZodError", () => {
+    const res = User.safeEncode({ name: "", email: "not-an-email" });
     expect(res.success).toBe(false);
     if (!res.success) {
       expect(res.error).toBeInstanceOf(z.ZodError);
@@ -179,23 +195,58 @@ describe("safeMake / make validation (#6, #7)", () => {
     }
   });
 
-  test("make throws a ZodError on invalid input", () => {
-    expect(() => User.make({ name: "", email: "alice@example.com" })).toThrow();
-    expect(() => User.make({ name: "Alice", email: "nope" })).toThrow();
+  test("encode throws a ZodError on invalid input", () => {
+    expect(() => User.encode({ name: "", email: "alice@example.com" })).toThrow();
+    expect(() => User.encode({ name: "Alice", email: "nope" })).toThrow();
   });
 
-  test("safeMakePartial validates only the provided keys", () => {
-    expect(User.safeMakePartial({ name: "Bob" }).success).toBe(true);
-    expect(User.safeMakePartial({ name: "" }).success).toBe(false);
+  test("safeEncodePartial validates only the provided keys", () => {
+    expect(User.safeEncodePartial({ name: "Bob" }).success).toBe(true);
+    expect(User.safeEncodePartial({ name: "" }).success).toBe(false);
   });
 
-  test("SystemView.safeMake validates internal fields too", () => {
-    const ok = User.system.safeMake({ name: "Alice", email: "a@b.co", passhash: "secret" });
+  test("SystemView.safeEncode validates internal fields too", () => {
+    const ok = User.system.safeEncode({ name: "Alice", email: "a@b.co", passhash: "secret" });
     expect(ok.success).toBe(true);
     if (ok.success) expect(ok.data.passhash).toBe("secret");
 
-    const bad = User.system.safeMake({ name: "", email: "a@b.co", passhash: "secret" });
+    const bad = User.system.safeEncode({ name: "", email: "a@b.co", passhash: "secret" });
     expect(bad.success).toBe(false);
+  });
+});
+
+describe("async encode (recursive encoder)", () => {
+  const User = table("user", {
+    id: z.string(),
+    name: sz.string().$min(1),
+    settings: sz.object({ theme: sz.string(), lastSeen: sz.datetime().optional() }),
+    createdAt: sz.datetime().$default(surql`time::now()`).$readonly(),
+  });
+
+  test("encodeAsync round-trips nested codecs and omits absent defaults", async () => {
+    const payload = await User.encodeAsync({
+      name: "Alice",
+      settings: { theme: "dark", lastSeen: new Date("2022-01-01T00:00:00.000Z") },
+    });
+    expect(Object.keys(payload).sort()).toEqual(["name", "settings"]);
+    expect((payload.settings as { lastSeen: unknown }).lastSeen).toBeInstanceOf(DateTime);
+    expect(payload).not.toHaveProperty("createdAt");
+  });
+
+  test("safeEncodeAsync aggregates leaf errors with correct paths", async () => {
+    const res = await User.safeEncodeAsync({ name: "", settings: { theme: "x" } });
+    expect(res.success).toBe(false);
+    if (!res.success) expect(res.error.issues.map((i) => i.path.join("."))).toContain("name");
+  });
+
+  test("encodePartialAsync encodes only the given keys", async () => {
+    const patch = await User.encodePartialAsync({ name: "Bob" });
+    expect(Object.keys(patch)).toEqual(["name"]);
+    expect(patch.name).toBe("Bob");
+  });
+
+  test("encodeAsync throws the aggregated ZodError on invalid input", async () => {
+    await expect(User.encodeAsync({ name: "", settings: { theme: "x" } })).rejects.toThrow();
   });
 });
 
@@ -217,12 +268,12 @@ describe("$internal fields (runtime)", () => {
     expect(sys.email).toBe("alice@example.com");
   });
 
-  test("make omits internal; system.make includes it", () => {
-    const payload = Account.make({ email: "alice@example.com" });
+  test("encode omits internal; system.encode includes it", () => {
+    const payload = Account.encode({ email: "alice@example.com" });
     expect(payload).not.toHaveProperty("passhash");
     expect(payload.email).toBe("alice@example.com");
 
-    const sysPayload = Account.system.make({ email: "alice@example.com", passhash: "secret" });
+    const sysPayload = Account.system.encode({ email: "alice@example.com", passhash: "secret" });
     expect(sysPayload.passhash).toBe("secret");
   });
 });
