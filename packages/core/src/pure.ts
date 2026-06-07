@@ -990,6 +990,26 @@ export class TableDef<Name extends string, S extends Shape> {
     return z.safeEncodeAsync(this.object, value);
   }
 
+  // Deprecated Zod-style aliases. For codecs `parse` runs the DECODE direction (wire -> app),
+  // so it's just `decode` under a misleading name — prefer `decode`/`encode` (and `make` for
+  // create payloads). Kept for `z`-API familiarity; editors will strike them through.
+  /** @deprecated `parse` decodes a DB row (wire -> app). Use {@link TableDef.decode | decode}. */
+  parse(row: unknown): z.output<z.ZodObject<ZShape<S>>> {
+    return this.decode(row);
+  }
+  /** @deprecated Use {@link TableDef.safeDecode | safeDecode} (or {@link TableDef.safeEncode | safeEncode} to validate an app object). */
+  safeParse(row: unknown) {
+    return this.safeDecode(row);
+  }
+  /** @deprecated Use {@link TableDef.decodeAsync | decodeAsync}. */
+  parseAsync(row: unknown): Promise<z.output<z.ZodObject<ZShape<S>>>> {
+    return this.decodeAsync(row);
+  }
+  /** @deprecated Use {@link TableDef.safeDecodeAsync | safeDecodeAsync}. */
+  safeParseAsync(row: unknown) {
+    return this.safeDecodeAsync(row);
+  }
+
   /**
    * Build a wire payload for `CREATE` (DB-filled fields optional). Encodes each provided
    * field via `z.encode`, which validates — so this VALIDATES and THROWS a `z.ZodError`
