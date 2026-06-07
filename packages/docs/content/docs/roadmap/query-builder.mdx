@@ -1,0 +1,65 @@
+---
+title: Query builder
+description: A type-safe SurrealQL query builder — designed, not yet shipped.
+icon: Compass
+---
+
+<Callout type="warn">
+  **Not shipped yet.** This page describes the planned `surreal-zod/orm` layer. The API
+  below is illustrative and may change. The design is committed and a type-inference
+  proof-of-concept already compiles.
+</Callout>
+
+Today surreal-zod authors schemas, generates DDL, and maps rows via codecs. The next big
+piece is a **type-safe SurrealQL query builder** built on the *same* `sz` definitions —
+no parallel type system.
+
+## The headline
+
+Because a `TableDef` already knows its decoded `App` type, a query with no projection
+returns `App<typeof Table>[]` — fully decoded (`Date`, `RecordId`, `Decimal`, …) — for free:
+
+```ts
+import { select } from "surreal-zod/orm";
+import { User } from "./schema";
+
+// inferred as App<User>[] — decoded, not raw rows
+const admins = await select(db, User).where((u) => u.role.eq("admin"));
+
+// a projection re-types the whole query
+const names = await select(db, User).return((u) => ({ name: u.name }));
+//    names: { name: string }[]
+```
+
+That decoded-result guarantee is the differentiator: results are your real app types, not
+hand-validated shapes.
+
+## Design decisions (locked)
+
+- **Decode by default** → `App` types via codecs; `.raw()` opts out per query.
+- **Free functions are primary** — `select(db, Table)…` works with any connection, any
+  time, and tree-shakes. An optional db-bound registry layers on session helpers
+  (`newSession()` / `forkSession()`).
+- **Opt-in subpath** — `surreal-zod/orm`, to keep the core lean.
+
+## Phased roadmap
+
+| Phase | Scope |
+| ----- | ----- |
+| **1. Read** | Typed `SELECT` + `where` + projection, `orderBy`/`limit`/`start`, **decoded results** |
+| **2. Writes** | `CREATE`/`UPDATE`/`UPSERT`/`DELETE`/`INSERT` with codec-encoded inputs |
+| **3. Graph** | `relation`-driven `.out`/`.in`/`.outEdge`/`.inEdge`, `RELATE`, bounded `FETCH` |
+| **4. Functions** | The SurrealQL function library to parity + `defineFunction` |
+| **5. Live** | Typed `LIVE SELECT` subscriptions/notifications |
+| **6. Admin** | `DEFINE`/`INFO`/`REMOVE`/`ALTER`, transactions |
+
+Phases 1–2 alone ship an immediately useful, differentiated product. Until the builder
+lands, use the SDK's `query` with `decode`/`encode` (see
+[Reading & writing](/docs/guide/reading-and-writing)) — that mapping is exactly what the
+builder will automate.
+
+## Until then
+
+surreal-zod and the official [`surqlize`](https://github.com/surrealdb/surqlize) ORM are
+complementary: surqlize gives you a query builder today (with its own type system);
+surreal-zod gives you Zod-native schemas, DDL generation, and codec-typed reads/writes.

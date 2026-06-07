@@ -1,0 +1,75 @@
+---
+title: Asserts & constraints
+description: ASSERT clauses from formats, $-constraints, and custom expressions.
+icon: CheckCheck
+---
+
+A field can accumulate several `ASSERT` fragments that AND-combine into one `ASSERT` clause
+(deduped, order preserved). There are three sources.
+
+## 1. Format builders bake by default
+
+`sz.email()` → `ASSERT string::is_email($value)`, `sz.url()` → `string::is_url`, and
+likewise `ulid` / `ipv4` / `ipv6` — every builder whose `string::is_*` validator exists on
+the server.
+
+```ts twoslash
+import { sz } from "surreal-zod";
+// ---cut---
+sz.email(); // -> ASSERT string::is_email($value)
+sz.url();   // -> ASSERT string::is_url($value)
+sz.ipv4();  // -> ASSERT string::is_ipv4($value)
+```
+
+<Callout type="info">
+  SurrealDB **3.x** uses the underscore form (`string::is_email`, **not**
+  `string::is::email`). Formats with no server validator (`nanoid`, `cuid`/`cuid2`, `xid`,
+  `ksuid`, `cidrv4`/`cidrv6`, `base64`, `e164`, `jwt`, `emoji`) stay assert-free — no
+  fabricated regex. `sz.uuid()` is the native `uuid` type, so it needs no assert.
+</Callout>
+
+## 2. `$`-constraints
+
+These apply the matching Zod check **app-side** *and* push a type-aware DB fragment (string
+vs. number is read from the schema):
+
+| Method                    | String                       | Number               |
+| ------------------------- | ---------------------------- | -------------------- |
+| `.$min(n)` / `.$max(n)`   | `string::len($value) >= n` / `<= n` | `$value >= n` / `<= n` |
+| `.$length(n)`             | `string::len($value) == n`   | —                    |
+| `.$regex(/re/)`           | `$value = /re/`              | —                    |
+| `.$gt` `.$gte` `.$lt` `.$lte` | —                        | `$value >`/`>=`/`<`/`<= n` |
+
+```ts twoslash
+import { sz } from "surreal-zod";
+// ---cut---
+sz.string().$min(1).$max(120); // ASSERT string::len($value) >= 1 AND string::len($value) <= 120
+sz.number().$gte(0).$lte(1);   // ASSERT $value >= 0 AND $value <= 1
+```
+
+## 3. Custom asserts with `$assert`
+
+`.$assert(surql\`…\`)` pushes a custom fragment; `.$assert()` (no args) derives fragments
+from the field's existing Zod checks (formats, length, regex, number bounds), best-effort.
+All fragments AND-combine:
+
+```ts twoslash
+import { sz } from "surreal-zod";
+import { surql } from "surrealdb";
+declare const forbidden: string;
+// ---cut---
+sz.email().$assert(surql`$value != $forbidden`);
+// -> ASSERT string::is_email($value) AND $value != $forbidden
+```
+
+Because `$`-constraints also run the Zod check app-side, an invalid value is caught by
+`encode` *before* it ever reaches the database:
+
+```ts twoslash
+import { sz, table } from "surreal-zod";
+const Rating = table("rating", { id: sz.string(), score: sz.number().$gte(0).$lte(1) });
+// ---cut---
+const res = Rating.safeEncode({ score: 5 }); // out of range
+res.success; // false — caught app-side, mirrors the DB ASSERT
+//  ^?
+```

@@ -1,0 +1,14 @@
+{
+  "title": "Guide",
+  "icon": "Layers",
+  "pages": [
+    "schemas-and-tables",
+    "field-types",
+    "generating-ddl",
+    "reading-and-writing",
+    "nested-objects",
+    "permissions",
+    "asserts-and-constraints",
+    "live-queries"
+  ]
+}

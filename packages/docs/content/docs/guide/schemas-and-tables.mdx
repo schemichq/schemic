@@ -1,0 +1,103 @@
+---
+title: Schemas & tables
+description: Tables, graph relations, record links, and derived shapes.
+icon: Table2
+---
+
+## Tables
+
+`table(name, shape)` defines a normal table. The `id` field controls the record id type:
+give it `sz.string()` for `record<table, string>`, or omit it to default to `record<table>`.
+
+```ts twoslash
+import { sz, table } from "surreal-zod";
+
+export const User = table("user", {
+  id: sz.string(),          // -> record<user, string>
+  name: sz.string(),
+  email: sz.email(),
+});
+```
+
+A `table(...)` returns a `TableDef` with the write/read methods (`encode`, `decode`, …)
+and a few configuration helpers:
+
+```ts twoslash
+import { sz, table } from "surreal-zod";
+// ---cut---
+const Post = table("post", {
+  title: sz.string(),
+  body: sz.string(),
+})
+  .comment("Blog posts")   // -> COMMENT "Blog posts"
+  .schemafull();           // the default; .schemaless() / .drop() also exist
+```
+
+## Record links
+
+`TableDef.record()` produces a typed `record<...>` field that links to that table. Use it
+directly in another table's shape, and `.array()` for a list of links.
+
+```ts twoslash
+import { sz, table } from "surreal-zod";
+const User = table("user", { id: sz.string(), name: sz.string() });
+const Tag = table("tag", { id: sz.string(), label: sz.string() });
+// ---cut---
+const Post = table("post", {
+  author: User.record(),        // -> record<user>
+  tags: Tag.record().array(),   // -> array<record<tag>>
+  title: sz.string(),
+});
+```
+
+You can also build a link manually with `sz.recordId("user")` when you don't have the
+`TableDef` in scope.
+
+## Graph relations
+
+`relation(name, fields?)` defines an edge table. Chain `.from(X).to(Y)` to set its
+endpoints; the resulting table exposes typed `in` / `out` fields.
+
+```ts twoslash
+import { sz, table, relation, type App } from "surreal-zod";
+import { surql } from "surrealdb";
+const User = table("user", { id: sz.string() });
+const Post = table("post", { id: sz.string() });
+// ---cut---
+export const Liked = relation("liked", {
+  at: sz.datetime().$default(surql`time::now()`),
+})
+  .from(User)
+  .to(Post);
+
+type Liked = App<typeof Liked>;
+//   ^?
+```
+
+You write graph data with `RELATE` and read it back with `decode`, exactly like a table —
+see [Reading & writing](/docs/guide/reading-and-writing).
+
+## Derived shapes
+
+A `TableDef` carries its field metadata through the usual set operations, so you can derive
+focused shapes without redefining fields:
+
+```ts twoslash
+import { sz, table } from "surreal-zod";
+import { surql } from "surrealdb";
+const User = table("user", {
+  id: sz.string(),
+  name: sz.string(),
+  email: sz.email(),
+  status: sz.string().$default("pending"),
+  createdAt: sz.datetime().$default(surql`time::now()`).$readonly(),
+});
+// ---cut---
+const PublicUser = User.omit("email", "status");          // safe to expose
+const NameOnly = User.pick("id", "name");
+const UserPatch = User.omit("id", "createdAt").partial(); // a PATCH body
+const WithBio = User.extend({ bio: sz.string().optional() });
+```
+
+Each derived table is a full `TableDef` again — it has its own `encode`/`decode` and can
+generate its own DDL.

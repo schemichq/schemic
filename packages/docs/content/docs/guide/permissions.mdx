@@ -1,0 +1,72 @@
+---
+title: Permissions
+description: Author row-level PERMISSIONS for tables and fields.
+icon: Lock
+---
+
+Author row-level `PERMISSIONS` with `TableDef.permissions(spec)` and
+`SField.$permissions(spec)`. A `spec` is one of:
+
+- `true` → `FULL`
+- `false` → `NONE`
+- a `surql` `WHERE` expression → shared by every op
+- a **per-op object**, where each op is `true` / `false` / a `surql` expression, or
+  `` `same as <op>` `` to reuse another op's rule.
+
+Table permissions cover `select` / `create` / `update` / `delete`. **Fields have no
+`delete` op.** Ops with an identical resolved rule auto-merge into one `FOR a, b …` clause.
+
+```ts twoslash
+import { sz, table, defineTable } from "surreal-zod";
+import { surql } from "surrealdb";
+// ---cut---
+const Project = table("project", {
+  id: sz.string(),
+  owner: sz.recordId("user").$default(surql`$auth.id`).$readonly(),
+  name: sz.string(),
+  isPublic: sz.boolean().$default(surql`false`),
+}).permissions({
+  select: surql`owner = $auth.id OR isPublic = true`,
+  create: surql`owner = $auth.id`,
+  update: "same as create",
+  delete: "same as create",
+});
+
+const ddl = defineTable(Project);
+```
+
+Table permissions fold into the single generated `DEFINE TABLE` (no separate `OVERWRITE`):
+
+```sql
+DEFINE TABLE project TYPE NORMAL SCHEMAFULL
+  PERMISSIONS
+    FOR select WHERE owner = $auth.id OR isPublic = true
+    FOR create, update, delete WHERE owner = $auth.id;
+```
+
+## Field permissions
+
+```ts twoslash
+import { sz, table } from "surreal-zod";
+import { surql } from "surrealdb";
+// ---cut---
+const User = table("user", {
+  id: sz.string(),
+  email: sz.email().$permissions({
+    select: surql`id = $auth.id`, // only the owner can read their email
+    update: surql`id = $auth.id`,
+  }),
+});
+```
+
+<Callout type="warn">
+  **Omitted-op asymmetry** (this mirrors SurrealDB's own defaults): an omitted op defaults
+  to **NONE** (deny) on a *table* but to **FULL** on a *field*. The table is the gate — so
+  to lock a *field* op you must set it `false` explicitly.
+</Callout>
+
+## Internal fields
+
+For a server-only field, `.$internal()` is the shortcut for `PERMISSIONS NONE` plus removal
+from your app/create/update types. See
+[Generating DDL → Internal fields](/docs/guide/generating-ddl#internal-fields).

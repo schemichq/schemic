@@ -1,0 +1,107 @@
+---
+title: Generating DDL
+description: Turn a schema into DEFINE TABLE / DEFINE FIELD statements.
+icon: FileCode
+---
+
+`defineTable(table, opts?)` returns the full SurrealQL DDL for a table — the
+`DEFINE TABLE` line plus a `DEFINE FIELD` for every field. `defineField(field, …)` exists
+if you ever need a single field.
+
+```ts twoslash
+import { sz, table, defineTable } from "surreal-zod";
+import { surql } from "surrealdb";
+// ---cut---
+const Account = table("account", {
+  id: sz.string(),
+  handle: sz.string().$comment("The public @handle"),
+  email: sz.email(),
+  plan: sz.enum(["free", "pro"]).$default("free"),
+  createdAt: sz.datetime().$default(surql`time::now()`).$readonly(),
+});
+
+const ddl = defineTable(Account);
+```
+
+```sql
+DEFINE TABLE account TYPE NORMAL SCHEMAFULL;
+DEFINE FIELD handle ON TABLE account TYPE string COMMENT "The public @handle";
+DEFINE FIELD email ON TABLE account TYPE string ASSERT string::is_email($value);
+DEFINE FIELD plan ON TABLE account TYPE string DEFAULT "free";
+DEFINE FIELD createdAt ON TABLE account TYPE datetime DEFAULT time::now() READONLY;
+```
+
+## DB-side field metadata
+
+These `$`-methods attach SurrealQL clauses. They never change the app type — they describe
+what the *database* does.
+
+| Method                     | Emits                         | Notes                                              |
+| -------------------------- | ----------------------------- | -------------------------------------------------- |
+| `.$default(v)`             | `DEFAULT v`                   | Plain value → a literal; `surql\`…\`` → expression |
+| `.$defaultAlways(v)`       | `DEFAULT ALWAYS v`            | Re-applied on every update                          |
+| `.$value(expr, opts?)`     | `VALUE expr`                  | Computed value; `{ optional: true }` if it ignores input |
+| `.$readonly()`             | `READONLY`                    | Excluded from updates in the type system            |
+| `.$comment(s)`             | `COMMENT s`                   |                                                    |
+| `.$internal()`             | `PERMISSIONS NONE`            | Server-only; hidden from app types — see below      |
+| `.$assert(…)`              | `ASSERT …`                    | See [Asserts & constraints](/docs/guide/asserts-and-constraints) |
+| `.$permissions(spec)`      | `PERMISSIONS …`               | See [Permissions](/docs/guide/permissions)          |
+
+### `$default` value-form vs expression
+
+A plain value is rendered as a clean SurrealQL literal; a `surql` template is inlined as an
+expression. Both also make the field optional on create.
+
+```ts twoslash
+import { sz } from "surreal-zod";
+import { surql } from "surrealdb";
+// ---cut---
+sz.string().$default("light");          // DEFAULT "light"
+sz.boolean().$default(true);            // DEFAULT true
+sz.datetime().$default(surql`time::now()`); // DEFAULT time::now()
+```
+
+### `$value` and create-optionality
+
+Whether a `VALUE` field still needs client input can't be inferred, so you say so. A value
+that *consumes* `$value` stays create-required; one that ignores it is create-optional.
+
+```ts twoslash
+import { sz } from "surreal-zod";
+import { surql } from "surrealdb";
+// ---cut---
+sz.string().$value(surql`string::slug($value)`);              // needs input -> create-required
+sz.datetime().$value(surql`time::now()`, { optional: true }); // ignores input -> create-optional
+```
+
+## Options
+
+```ts twoslash
+import { sz, table, defineTable } from "surreal-zod";
+const User = table("user", { id: sz.string(), name: sz.string() });
+// ---cut---
+defineTable(User, { exists: "overwrite" }); // DEFINE TABLE OVERWRITE … / DEFINE FIELD OVERWRITE …
+defineTable(User, { exists: "ignore" });    // DEFINE TABLE IF NOT EXISTS …
+```
+
+## Internal fields
+
+`.$internal()` marks a field server-only: it emits `PERMISSIONS NONE` and is **excluded**
+from your app, create, and update types (and from `decode`). The `TableDef.system` view
+exposes it when you legitimately need to read or write it server-side.
+
+```ts twoslash
+import { sz, table, type App } from "surreal-zod";
+// ---cut---
+const Account = table("account", {
+  id: sz.string(),
+  email: sz.email(),
+  passhash: sz.string().$internal(),
+});
+
+type Account = App<typeof Account>;
+//   ^?
+
+// The system view still sees passhash:
+Account.system.encode({ email: "a@b.co", passhash: "…" });
+```

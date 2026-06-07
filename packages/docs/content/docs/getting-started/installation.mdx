@@ -1,0 +1,49 @@
+---
+title: Installation
+description: Add surreal-zod and its peer dependencies.
+icon: Download
+---
+
+surreal-zod has two peer dependencies — `surrealdb` (the official JS SDK) and `zod` —
+so you control their versions.
+
+```bash
+# bun
+bun add surreal-zod surrealdb zod
+
+# npm
+npm install surreal-zod surrealdb zod
+
+# pnpm
+pnpm add surreal-zod surrealdb zod
+```
+
+## Version compatibility
+
+| Package    | Supported range | Notes                                                        |
+| ---------- | --------------- | ------------------------------------------------------------ |
+| `zod`      | `^4.3.5`        | Uses Zod 4 **codecs** (`z.encode` / `z.decode`).             |
+| `surrealdb`| `^2.0.3`        | The JS SDK v2 line targets **SurrealDB server v3.x**.        |
+
+<Callout type="warn">
+  SurrealDB **3.x** renamed the string validators to the underscore form —
+  `string::is_email`, `string::is_url`. surreal-zod emits the 3.x form. If you run an
+  older server, adjust the generated asserts accordingly.
+</Callout>
+
+## TypeScript
+
+surreal-zod is ESM-only and ships its own types. No extra `@types` packages are needed.
+For the best inference, use a modern `moduleResolution`:
+
+```json title="tsconfig.json"
+{
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true
+  }
+}
+```
+
+Next: build something end to end in the [Quick start](/docs/getting-started/quick-start).
