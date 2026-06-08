@@ -1,0 +1,285 @@
+{
+  "version": 1,
+  "statements": {
+    "table::comment": {
+      "kind": "table",
+      "name": "comment",
+      "ddl": "DEFINE TABLE comment TYPE NORMAL SCHEMAFULL COMMENT \"Task comments\" PERMISSIONS FOR select, create WHERE task.project.owner = $auth.id OR task.project.settings.isPublic = true OR task.project IN $auth->member->project FOR update, delete WHERE author = $auth.id;"
+    },
+    "field:comment:task": {
+      "kind": "field",
+      "name": "task",
+      "table": "comment",
+      "ddl": "DEFINE FIELD task ON TABLE comment TYPE record<task>;"
+    },
+    "field:comment:author": {
+      "kind": "field",
+      "name": "author",
+      "table": "comment",
+      "ddl": "DEFINE FIELD author ON TABLE comment TYPE record<user> DEFAULT $auth.id READONLY;"
+    },
+    "field:comment:body": {
+      "kind": "field",
+      "name": "body",
+      "table": "comment",
+      "ddl": "DEFINE FIELD body ON TABLE comment TYPE string ASSERT string::len($value) >= 1;"
+    },
+    "field:comment:createdAt": {
+      "kind": "field",
+      "name": "createdAt",
+      "table": "comment",
+      "ddl": "DEFINE FIELD createdAt ON TABLE comment TYPE datetime DEFAULT time::now() READONLY COMMENT \"When posted\";"
+    },
+    "table::project": {
+      "kind": "table",
+      "name": "project",
+      "ddl": "DEFINE TABLE project TYPE NORMAL SCHEMAFULL COMMENT \"Project workspaces\" PERMISSIONS FOR select WHERE owner = $auth.id OR settings.isPublic = true OR id IN $auth->member->project FOR create, update, delete WHERE owner = $auth.id;"
+    },
+    "field:project:owner": {
+      "kind": "field",
+      "name": "owner",
+      "table": "project",
+      "ddl": "DEFINE FIELD owner ON TABLE project TYPE record<user> DEFAULT $auth.id READONLY;"
+    },
+    "field:project:name": {
+      "kind": "field",
+      "name": "name",
+      "table": "project",
+      "ddl": "DEFINE FIELD name ON TABLE project TYPE string ASSERT string::len($value) >= 1;"
+    },
+    "field:project:description": {
+      "kind": "field",
+      "name": "description",
+      "table": "project",
+      "ddl": "DEFINE FIELD description ON TABLE project TYPE option<string>;"
+    },
+    "field:project:color": {
+      "kind": "field",
+      "name": "color",
+      "table": "project",
+      "ddl": "DEFINE FIELD color ON TABLE project TYPE string DEFAULT \"#6366f1\";"
+    },
+    "field:project:order": {
+      "kind": "field",
+      "name": "order",
+      "table": "project",
+      "ddl": "DEFINE FIELD order ON TABLE project TYPE float DEFAULT 0;"
+    },
+    "field:project:tags": {
+      "kind": "field",
+      "name": "tags",
+      "table": "project",
+      "ddl": "DEFINE FIELD tags ON TABLE project TYPE array<string> DEFAULT [];"
+    },
+    "field:project:settings": {
+      "kind": "field",
+      "name": "settings",
+      "table": "project",
+      "ddl": "DEFINE FIELD settings ON TABLE project TYPE object DEFAULT {};"
+    },
+    "field:project:settings.isPublic": {
+      "kind": "field",
+      "name": "settings.isPublic",
+      "table": "project",
+      "ddl": "DEFINE FIELD settings.isPublic ON TABLE project TYPE bool DEFAULT false;"
+    },
+    "field:project:settings.defaultView": {
+      "kind": "field",
+      "name": "settings.defaultView",
+      "table": "project",
+      "ddl": "DEFINE FIELD settings.defaultView ON TABLE project TYPE \"list\" | \"board\" DEFAULT \"list\";"
+    },
+    "field:project:createdAt": {
+      "kind": "field",
+      "name": "createdAt",
+      "table": "project",
+      "ddl": "DEFINE FIELD createdAt ON TABLE project TYPE datetime DEFAULT time::now() READONLY;"
+    },
+    "table::tag": {
+      "kind": "table",
+      "name": "tag",
+      "ddl": "DEFINE TABLE tag TYPE NORMAL SCHEMAFULL COMMENT \"Reusable task labels\" PERMISSIONS FOR select, create, update, delete WHERE project.owner = $auth.id OR project IN $auth->member->project;"
+    },
+    "field:tag:project": {
+      "kind": "field",
+      "name": "project",
+      "table": "tag",
+      "ddl": "DEFINE FIELD project ON TABLE tag TYPE record<project>;"
+    },
+    "field:tag:name": {
+      "kind": "field",
+      "name": "name",
+      "table": "tag",
+      "ddl": "DEFINE FIELD name ON TABLE tag TYPE string ASSERT string::len($value) >= 1;"
+    },
+    "index:tag:tag_name_idx": {
+      "kind": "index",
+      "name": "tag_name_idx",
+      "table": "tag",
+      "ddl": "DEFINE INDEX tag_name_idx ON TABLE tag FIELDS name UNIQUE;"
+    },
+    "field:tag:color": {
+      "kind": "field",
+      "name": "color",
+      "table": "tag",
+      "ddl": "DEFINE FIELD color ON TABLE tag TYPE string DEFAULT \"#999999\";"
+    },
+    "table::task": {
+      "kind": "table",
+      "name": "task",
+      "ddl": "DEFINE TABLE task TYPE NORMAL SCHEMAFULL COMMENT \"Project tasks\" PERMISSIONS FOR select WHERE project.owner = $auth.id OR project.settings.isPublic = true OR project IN $auth->member->project FOR create, update, delete WHERE project.owner = $auth.id OR project IN $auth->member->project;"
+    },
+    "field:task:project": {
+      "kind": "field",
+      "name": "project",
+      "table": "task",
+      "ddl": "DEFINE FIELD project ON TABLE task TYPE record<project>;"
+    },
+    "field:task:title": {
+      "kind": "field",
+      "name": "title",
+      "table": "task",
+      "ddl": "DEFINE FIELD title ON TABLE task TYPE string ASSERT string::len($value) >= 1 COMMENT \"Short summary\";"
+    },
+    "field:task:description": {
+      "kind": "field",
+      "name": "description",
+      "table": "task",
+      "ddl": "DEFINE FIELD description ON TABLE task TYPE option<string>;"
+    },
+    "field:task:status": {
+      "kind": "field",
+      "name": "status",
+      "table": "task",
+      "ddl": "DEFINE FIELD status ON TABLE task TYPE \"todo\" | \"in_progress\" | \"done\" | \"archived\" DEFAULT \"todo\";"
+    },
+    "field:task:priority": {
+      "kind": "field",
+      "name": "priority",
+      "table": "task",
+      "ddl": "DEFINE FIELD priority ON TABLE task TYPE \"low\" | \"medium\" | \"high\" | \"urgent\" DEFAULT \"medium\";"
+    },
+    "field:task:estimate": {
+      "kind": "field",
+      "name": "estimate",
+      "table": "task",
+      "ddl": "DEFINE FIELD estimate ON TABLE task TYPE option<duration>;"
+    },
+    "field:task:assignees": {
+      "kind": "field",
+      "name": "assignees",
+      "table": "task",
+      "ddl": "DEFINE FIELD assignees ON TABLE task TYPE array<record<user>> DEFAULT [];"
+    },
+    "field:task:labels": {
+      "kind": "field",
+      "name": "labels",
+      "table": "task",
+      "ddl": "DEFINE FIELD labels ON TABLE task TYPE array<string> DEFAULT [];"
+    },
+    "field:task:dueAt": {
+      "kind": "field",
+      "name": "dueAt",
+      "table": "task",
+      "ddl": "DEFINE FIELD dueAt ON TABLE task TYPE option<datetime>;"
+    },
+    "field:task:completedAt": {
+      "kind": "field",
+      "name": "completedAt",
+      "table": "task",
+      "ddl": "DEFINE FIELD completedAt ON TABLE task TYPE option<datetime | null>;"
+    },
+    "field:task:createdBy": {
+      "kind": "field",
+      "name": "createdBy",
+      "table": "task",
+      "ddl": "DEFINE FIELD createdBy ON TABLE task TYPE record<user> DEFAULT $auth.id READONLY;"
+    },
+    "field:task:createdAt": {
+      "kind": "field",
+      "name": "createdAt",
+      "table": "task",
+      "ddl": "DEFINE FIELD createdAt ON TABLE task TYPE datetime DEFAULT time::now() READONLY;"
+    },
+    "field:task:updatedAt": {
+      "kind": "field",
+      "name": "updatedAt",
+      "table": "task",
+      "ddl": "DEFINE FIELD updatedAt ON TABLE task TYPE datetime VALUE time::now();"
+    },
+    "table::user": {
+      "kind": "table",
+      "name": "user",
+      "ddl": "DEFINE TABLE user TYPE NORMAL SCHEMAFULL COMMENT \"Application end users\" PERMISSIONS FOR select WHERE $auth.id != NONE FOR create NONE FOR update, delete WHERE id = $auth.id;"
+    },
+    "field:user:name": {
+      "kind": "field",
+      "name": "name",
+      "table": "user",
+      "ddl": "DEFINE FIELD name ON TABLE user TYPE string ASSERT string::len($value) >= 1;"
+    },
+    "field:user:email": {
+      "kind": "field",
+      "name": "email",
+      "table": "user",
+      "ddl": "DEFINE FIELD email ON TABLE user TYPE string ASSERT string::is_email($value);"
+    },
+    "index:user:user_email_idx": {
+      "kind": "index",
+      "name": "user_email_idx",
+      "table": "user",
+      "ddl": "DEFINE INDEX user_email_idx ON TABLE user FIELDS email UNIQUE;"
+    },
+    "field:user:passhash": {
+      "kind": "field",
+      "name": "passhash",
+      "table": "user",
+      "ddl": "DEFINE FIELD passhash ON TABLE user TYPE string PERMISSIONS NONE;"
+    },
+    "field:user:createdAt": {
+      "kind": "field",
+      "name": "createdAt",
+      "table": "user",
+      "ddl": "DEFINE FIELD createdAt ON TABLE user TYPE datetime DEFAULT time::now() READONLY COMMENT \"Signup time\";"
+    },
+    "table::depends_on": {
+      "kind": "table",
+      "name": "depends_on",
+      "ddl": "DEFINE TABLE depends_on TYPE RELATION FROM task TO task SCHEMAFULL PERMISSIONS FOR select, create, delete WHERE in.project.owner = $auth.id OR in.project IN $auth->member->project;"
+    },
+    "field:depends_on:kind": {
+      "kind": "field",
+      "name": "kind",
+      "table": "depends_on",
+      "ddl": "DEFINE FIELD kind ON TABLE depends_on TYPE \"blocks\" | \"relates_to\" DEFAULT \"blocks\";"
+    },
+    "table::member": {
+      "kind": "table",
+      "name": "member",
+      "ddl": "DEFINE TABLE member TYPE RELATION FROM user TO project SCHEMAFULL PERMISSIONS FOR select WHERE in = $auth.id OR out.owner = $auth.id FOR create, update WHERE out.owner = $auth.id FOR delete WHERE out.owner = $auth.id OR in = $auth.id;"
+    },
+    "field:member:role": {
+      "kind": "field",
+      "name": "role",
+      "table": "member",
+      "ddl": "DEFINE FIELD role ON TABLE member TYPE \"owner\" | \"editor\" | \"viewer\" DEFAULT \"viewer\";"
+    },
+    "field:member:since": {
+      "kind": "field",
+      "name": "since",
+      "table": "member",
+      "ddl": "DEFINE FIELD since ON TABLE member TYPE datetime DEFAULT time::now() READONLY;"
+    },
+    "table::watch": {
+      "kind": "table",
+      "name": "watch",
+      "ddl": "DEFINE TABLE watch TYPE RELATION FROM user TO task SCHEMAFULL PERMISSIONS FOR select, create, delete WHERE in = $auth.id;"
+    },
+    "field:watch:since": {
+      "kind": "field",
+      "name": "since",
+      "table": "watch",
+      "ddl": "DEFINE FIELD since ON TABLE watch TYPE datetime DEFAULT time::now() READONLY;"
+    }
+  }
+}

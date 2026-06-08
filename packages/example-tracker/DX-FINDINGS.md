@@ -228,3 +228,132 @@ pattern or a tiny `X.decode`-over-`LiveMessage` helper would round out the clien
 | 3 | ~~Adding permissions forces a full table `OVERWRITE` that restates TYPE/SCHEMAFULL/COMMENT~~ — RESOLVED: folded into the single `DEFINE TABLE` | Medium |
 | 4 | ~~Zod format refinements (email/url/min/regex) don't become DB `ASSERT`s~~ — RESOLVED: format builders bake `string::is_*`, `$`-constraints + `.$assert()` push fragments (opt-in by builder) | Medium |
 | 5 | `$value` (computed) fields are required in `Create`/`make()` input | Medium |
+
+---
+
+# Migration CLI dogfood (2026-06-08)
+
+Second dogfooding pass, this time of the **`surreal-zod` migration CLI** (`sz` / `lib/cli.js`,
+shipped from `packages/core`), driven from `packages/example-tracker` against a dedicated live
+SurrealDB **3.1.3** (`ns=tracker`, `db=main`). The CLI was added *alongside* the existing
+`setup.ts` direct-DDL flow (which still backs the 12 live tests) — `surreal-zod.config.ts`
+points `schema` at `./src`, so the declarative migration workflow reads the **same**
+`src/schema.ts` the app/tests use. The full command surface was exercised: `doctor`, `check`,
+`generate`, `migrate`, `status`, `diff --live/--full/--down`, `rollback`, `sync --dry-run`,
+`pull --force`, `new`, `unlock`, across five generated + one hand-written migration and three
+schema iterations (add `.unique()` index, add a field, add a table, change a field's type).
+
+These are **CLI/tooling** findings; they do not overlap with the library-level findings above.
+
+## What worked well (lead with the good)
+
+- **Zero-config schema discovery.** Pointing `config.schema` at `./src` (where the app already
+  exports its `TableDef`s) just worked — the loader scanned `./src`, picked up all 8
+  tables/relations, and ignored `src/db.ts` (which exports none). `sz check` reported
+  `8 tables, 38 fields, 2 indexes` with no DB connection. No need to move schemas into a
+  dedicated `database/schemas` dir; the existing isomorphic module *is* the migration source.
+- **Generated DDL matched the server with zero edits.** `sz generate initial` emitted exactly
+  the DDL the hand-written `setup.ts` applies — nested objects (`settings.*`), `array<record<user>>`,
+  enums/literals, `option<datetime | null>`, `DEFAULT`/`VALUE`/`ASSERT`/`READONLY`/`COMMENT`,
+  table+field `PERMISSIONS`, and `TYPE RELATION FROM..TO` — wrapped in a clean
+  `IF $direction = "up" { … } ELSE { … }` block with the down branch dropping tables in reverse
+  order. Timestamped filenames (`20260608194128_initial.surql`) sort chronologically.
+- **The live diff engine is canonicalization-aware.** `diff --live --full` showed the server's
+  normalized form (`IN`→`INSIDE`, enums re-sorted, `"x"`→`'x'`, merged `FOR a, b` perms expanded
+  to one clause per op), yet `diff --live` reported **none** of that as a change — it compares
+  semantically, so only genuine drift surfaces. This is the single most important thing a
+  schema-diff tool has to get right, and it does.
+- **migrate / rollback / re-migrate are correct and reversible.** `rollback` ran the `ELSE`
+  branch (verified live: `tag` dropped, `order` reverted `float`→`int`); re-`migrate` restored it.
+  `status` cleanly marks `✓ applied` / `· pending` / `⚠ drift`. `generate` and `migrate` are
+  idempotent (“No schema changes”, “Up to date”).
+- **`pull`'s type reconstruction is faithful.** From `INFO … STRUCTURE` it rebuilt accurate
+  `sz.*` chains — `record<user>` → `User.record()` with a cross-table `import { User } from "./user"`,
+  `array<…>`, `option<…>`/`| null`, nested `sz.object({…})`, string/numeric enums, unique indexes,
+  and relation `.from()/.to()` endpoints — one well-formed module per table. The regenerated
+  schema `sz check`-ed clean and, modulo the gaps below, diffed clean against live.
+- **`doctor` is a great first-run check** — prints resolved project paths + connection + server
+  version and a connectivity probe in one screen. `new` + `unlock` both did exactly what they say.
+
+## Ranked bugs
+
+### Critical
+
+**C1 — `pull` silently drops ALL `PERMISSIONS` and `.$internal()`; the pull→diff round-trip is not clean.**
+- Command: back up `./src`, `node ../core/lib/cli.js pull --force`, then `… diff --live`.
+- Observed: a **10-change** residual diff. Every one of the 8 tables comes back with its
+  row-level `.permissions({...})` gone, so it emits `PERMISSIONS NONE` (table default), e.g.
+  `DEFINE TABLE user … PERMISSIONS FOR select WHERE $auth.id != NONE … ; NONE;` (live vs pulled).
+  The `passhash` field loses `.$internal()` → `DEFINE FIELD passhash … PERMISSIONS NONE; FULL;`
+  (would flip it from hidden to selectable). `pull` renders `comment`/`index`/`from`/`to`/
+  `schemaless`/`typeAny` but never table- or field-level `PERMISSIONS` (see `renderTable`/
+  `renderField` in `cli/pull.ts`).
+- Expected: the round-trip should reproduce `.permissions(...)`/`.$internal()` (or `diff --live`
+  should be “No changes”). For a browser-direct app where row-level `PERMISSIONS` **are** the
+  security boundary, adopting the CLI on an existing DB via `pull` and then `sync`/`generate`
+  would **silently wipe all access control** and unhide `passhash`. This is a data-safety gap.
+
+### High
+
+**H1 — `diff --live` / `sync` never converge to clean: they always want to `REMOVE TABLE _migrations_lock`.**
+- Command: with the DB fully migrated and matching the schema, `… diff --live` (and `… sync --dry-run`).
+- Observed: `- REMOVE TABLE IF EXISTS _migrations_lock` → `1 change vs the live database`.
+  `sync --dry-run` (prune is the default) lists the same — i.e. a bare `sz sync` would **drop the
+  tool's own migration-lock table** on every run. `--no-prune` reports “Database already matches”.
+- Expected: the CLI excludes its bookkeeping tables from the live diff. It already does for
+  `_migrations`, and `pull` *correctly* excludes **both** `_migrations` and `_migrations_lock`
+  (`cli/pull.ts` passes `new Set([migrationsTable, \`${migrationsTable}_lock\`])`), but the
+  live-diff/sync path (`cli/introspect.ts`) only filters `_migrations`. The fix is the same
+  one-line exclusion that `pull` already has. Net effect today: `diff --live` can never say
+  “No changes”, undermining the tool's core “am I in sync?” signal.
+
+### Medium
+
+**M1 — `pull` is lossy on format/constraint builders (DDL-equivalent, but the app types regress).**
+- Command: `pull --force` after a schema using `sz.email()` / `.$min(1)`.
+- Observed: `email: sz.email()` → `sz.string().$assert(surql\`string::is_email($value)\`)` and
+  `name: sz.string().$min(1)` → `sz.string().$assert(surql\`string::len($value) >= 1\`)`.
+- Expected (or at least documented): because the DB only stores the baked `ASSERT`, the round-trip
+  can't recover the builder, so the regenerated TS loses the **app-side** Zod format/length checks
+  (`decode`/`encode` would no longer reject a malformed email client-side). The DDL is identical
+  (so `diff --live` stays clean on these), but the pulled schema is a weaker app contract.
+
+### Low
+
+**L1 — Word-level inline diffs are ambiguous in non-TTY / no-color output.**
+- Command: any `generate`/`diff` that *changes* (not adds) a statement, captured to a pipe.
+- Observed: a type change prints `… TYPE int float DEFAULT 0;` and a perms change prints
+  `… FOR delete WHERE author = $auth.id; NONE;` — the old and new tokens run together and read
+  like malformed SQL. (The written `.surql` is correct: `DEFINE FIELD OVERWRITE order … TYPE float`.)
+- Expected: with color these are red/green; without it, a `-/+` two-line form (or `old → new`)
+  would be unambiguous. Cosmetic, but the headline “changes to migrate” preview is the thing you
+  read before approving.
+
+## DX papercuts
+
+- **Two env-var naming schemes.** The example's `src/db.ts` reads `SURREAL_NS`/`SURREAL_DB`; the
+  CLI config reads `SURREAL_NAMESPACE`/`SURREAL_DATABASE`. To drive both the app/tests and the CLI
+  from one `.env` against `tracker/main`, I had to set **both** pairs. A documented single
+  convention (or having the CLI also accept `SURREAL_NS`/`SURREAL_DB`) would remove the foot-gun.
+- **`pull` writes into the schema dir without clearing it.** It emits one `<table>.ts` per table
+  but leaves any pre-existing multi-table `schema.ts` in place, so the loader then sees **two**
+  definitions per table (“last file wins” by sort order) — a silent mix. To get a clean round-trip
+  I had to move the hand-authored `schema.ts` aside first. A `pull` that warns on/overwrites the
+  existing layout (or writes to a staging dir) would be safer.
+- **Hand-written (`sz new`) migrations are invisible to the snapshot.** The `task_status_idx`
+  index added via `sz new` applied fine, but `meta/_snapshot.json` (which `generate`/`diff` compare
+  against) doesn't know about it — by design, but it means declarative and hand-written DDL can
+  drift apart with no warning. Worth calling out in docs.
+- **Setup nit (porting, not the CLI):** `setup.ts` used `defineTable(t, { exists })` in its *old*
+  DDL-emitter sense; in this API that constructor is `emitTable(t, …)`. Easy to miss because the
+  name `defineTable` now means “build a `TableDef`”, not “emit DDL”.
+
+## Pull round-trip result
+
+**Not clean.** After `pull --force`, `sz diff --live` reported 10 residual changes (verbatim
+above in C1): all 8 tables reset to `PERMISSIONS NONE`, `passhash` field perms `NONE → FULL`, plus
+the spurious `- REMOVE TABLE IF EXISTS _migrations_lock` from H1. Restoring the hand-authored
+`src/schema.ts` returned `diff --live` to the steady state of a **single** spurious change
+(`_migrations_lock`), confirming the only *non-tooling-bug* losses are the dropped `PERMISSIONS`/
+`.$internal()` (C1) and the lossy format builders (M1). The 12 live integration tests and
+`tsc --noEmit` remained green throughout.

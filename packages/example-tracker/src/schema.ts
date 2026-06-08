@@ -1,5 +1,5 @@
 import { surql } from "surrealdb";
-import { type App, relation, sz, table, type Wire } from "surreal-zod";
+import { type App, defineRelation, defineTable, sz, type Wire } from "surreal-zod";
 
 /**
  * Shared, isomorphic data model for the project/task tracker. Imported by the
@@ -23,10 +23,11 @@ import { type App, relation, sz, table, type Wire } from "surreal-zod";
  */
 
 /** End users. `id` omitted -> `record<user>` with a DB-generated id. */
-export const User = table("user", {
+export const User = defineTable("user", {
   name: sz.string().$min(1),
   // sz.email() bakes `ASSERT string::is_email($value)` for free (3.x validator).
-  email: sz.email(),
+  // .unique() adds a DEFINE INDEX so the DB enforces one account per address.
+  email: sz.email().unique(),
   // DB-managed, client-hidden: written by the record-access SIGNUP block, never exposed.
   passhash: sz.string().$internal(),
   createdAt: sz.datetime().$default(surql`time::now()`).$readonly().$comment("Signup time"),
@@ -40,11 +41,13 @@ export const User = table("user", {
   });
 
 /** Projects owned by a user; `owner` defaults to the signed-in user and is fixed. */
-export const Project = table("project", {
+export const Project = defineTable("project", {
   owner: User.record().$default(surql`$auth.id`).$readonly(),
   name: sz.string().$min(1),
   description: sz.string().optional(),
   color: sz.string().$default("#6366f1"),
+  // Manual sort order in the project list (added in migration 2; widened int -> float in 3).
+  order: sz.float().$default(0),
   tags: sz.string().array().$default(surql`[]`),
   // Nested create-optionality: each nested `$default` field is optional in the create input,
   // so a client may supply a PARTIAL `settings` (e.g. `{ defaultView: "board" }`) and the DB
@@ -67,7 +70,7 @@ export const Project = table("project", {
   });
 
 /** Tasks within a project. Demonstrates enums, duration, links + arrays of links. */
-export const Task = table("task", {
+export const Task = defineTable("task", {
   project: Project.record(),
   title: sz.string().$min(1).$comment("Short summary"),
   description: sz.string().optional(),
@@ -94,7 +97,7 @@ export const Task = table("task", {
   });
 
 /** Comments on a task; `author` defaults to the signed-in user and is fixed. */
-export const Comment = table("comment", {
+export const Comment = defineTable("comment", {
   task: Task.record(),
   author: User.record().$default(surql`$auth.id`).$readonly(),
   body: sz.string().$min(1),
@@ -109,8 +112,22 @@ export const Comment = table("comment", {
     delete: "same as update",
   });
 
+/** Reusable, per-workspace labels (added in migration 3). */
+export const Tag = defineTable("tag", {
+  project: Project.record(),
+  name: sz.string().$min(1).unique(),
+  color: sz.string().$default("#999999"),
+})
+  .comment("Reusable task labels")
+  .permissions({
+    select: surql`project.owner = $auth.id OR project IN $auth->member->project`,
+    create: "same as select",
+    update: "same as select",
+    delete: "same as select",
+  });
+
 /** Graph: user ->member-> project, carrying a membership role. */
-export const Member = relation("member", {
+export const Member = defineRelation("member", {
   role: sz.enum(["owner", "editor", "viewer"]).$default("viewer"),
   since: sz.datetime().$default(surql`time::now()`).$readonly(),
 })
@@ -125,7 +142,7 @@ export const Member = relation("member", {
   });
 
 /** Graph: user ->watch-> task (notifications / follows). */
-export const Watch = relation("watch", {
+export const Watch = defineRelation("watch", {
   since: sz.datetime().$default(surql`time::now()`).$readonly(),
 })
   .from(User)
@@ -138,7 +155,7 @@ export const Watch = relation("watch", {
   });
 
 /** Graph: task ->depends_on-> task. */
-export const DependsOn = relation("depends_on", {
+export const DependsOn = defineRelation("depends_on", {
   kind: sz.enum(["blocks", "relates_to"]).$default("blocks"),
 })
   .from(Task)
@@ -151,7 +168,7 @@ export const DependsOn = relation("depends_on", {
   });
 
 /** Every table/relation, in dependency order, for migrations. */
-export const tables = [User, Project, Task, Comment, Member, Watch, DependsOn];
+export const tables = [User, Project, Task, Comment, Tag, Member, Watch, DependsOn];
 
 // --- App (decoded) and Wire (DB) types ---
 export type User = App<typeof User>;
@@ -161,6 +178,7 @@ export type ProjectRow = Wire<typeof Project>;
 export type Task = App<typeof Task>;
 export type TaskRow = Wire<typeof Task>;
 export type Comment = App<typeof Comment>;
+export type Tag = App<typeof Tag>;
 export type Member = App<typeof Member>;
 export type Watch = App<typeof Watch>;
 export type DependsOn = App<typeof DependsOn>;
