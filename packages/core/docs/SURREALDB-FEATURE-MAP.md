@@ -30,13 +30,26 @@
 
 ---
 
+## ✅ Closed in batch 1 (`b76269d`)
+
+Four gaps below are now supported (live-verified round-trip on 3.1.3):
+
+```ts
+sz.set(sz.string())                                  //→ TYPE set<string>   (was lossy → array)
+sz.string().$computed(surql`string::concat(a," ",b)`) //→ … TYPE string COMPUTED string::concat(a, ' ', b)
+defineTable("t", {…}).changefeed("3d", { includeOriginal: true }) //→ … CHANGEFEED 3d INCLUDE ORIGINAL
+defineTable("t", {…}).index("rows", [], { count: true })          //→ DEFINE INDEX rows ON TABLE t COUNT
+```
+
+The matrix rows and the 🆕-gaps section below are annotated `✅ batch 1` where closed.
+
 ## Summary — counts per status
 
 | Status | Meaning | Count (schema-relevant features) |
 |---|---|---|
-| ✅ | Supported by surreal-zod today | ~70 |
-| ⚠️ | Partial / lossy | 3 (`set<T>`→array, object-literal union→object, variadic tuple→array) |
-| ❌ | **Schema-layer gap** (DDL the DB accepts, no `sz.*` builder) | **24** |
+| ✅ | Supported by surreal-zod today | ~74 (incl. batch 1: `set<T>`, `COMPUTED`, `CHANGEFEED`, `COUNT`) |
+| ⚠️ | Partial / lossy | 2 (object-literal union→object, variadic tuple→array) |
+| ❌ | **Schema-layer gap** (DDL the DB accepts, no `sz.*` builder) | **20** (was 24; batch 1 closed 4) |
 | 🔮 | Future ORM/query-layer (DML, ~570 functions, operators, params, graph) | ~620 (cataloged, not DDL) |
 | 🚫 | Out-of-scope (clients, protocols, deployment, cloud, CLI-admin) | ~470 doc pages |
 
@@ -44,11 +57,11 @@
 
 | Category | Features cataloged | Schema-relevant status spread |
 |---|---|---|
-| Data types | 28 types + subtypes | mostly ✅; 5 ❌ (set distinct, range, regex, sized array/set, literal-object-union) |
+| Data types | 28 types + subtypes | mostly ✅ (set<T> ✅ batch 1); 4 ❌ (range, regex, sized array/set, literal-object-union) |
 | `DEFINE` statements | 21 kinds | 6 ✅, 1 ⚠️, **14 ❌** |
-| Table clauses | 11 | 8 ✅, **3 ❌** |
-| Field clauses | 11 | 8 ✅, **3 ❌** |
-| Index kinds | 9 | 3 ✅, **6 ❌** |
+| Table clauses | 11 | 9 ✅ (CHANGEFEED batch 1), **2 ❌** |
+| Field clauses | 11 | 9 ✅ (COMPUTED batch 1), **2 ❌** |
+| Index kinds | 9 | 4 ✅ (COUNT batch 1), **5 ❌** |
 | Analyzer tokenizers/filters | 4 + 7 | **0 ✅** (whole `DEFINE ANALYZER` is ❌) |
 | Function namespaces | 26 (~570 sigs) | 🔮 (query-layer; 5 string `is_*` baked as ASSERT) |
 | Operators | ~55 | 🔮 |
@@ -65,15 +78,14 @@ tables (`AS SELECT`), and the un-covered `DEFINE` objects (param/user/sequence/c
 model). **All re-confirmed live below.** The genuinely *new* gaps (ranked by schema-author value)
 are:
 
-1. **`COMPUTED` field clause** 🆕 (❌, **high value**) — a *first-class `DEFINE FIELD` clause* in
-   this version, not just a query/back-reference idiom (`PARITY.md` listed `COMPUTED <~person` only
-   as out-of-scope graph). The DB accepts and round-trips a computed/derived column:
+1. **`COMPUTED` field clause** ✅ **batch 1** (was ❌, high value) — a *first-class `DEFINE FIELD`
+   clause* in this version, not just a query/back-reference idiom (`PARITY.md` listed `COMPUTED
+   <~person` only as out-of-scope graph). The DB accepts and round-trips a computed/derived column:
    ```surql
    DEFINE FIELD full_name ON person TYPE string COMPUTED string::concat(first, " ", last);
    ```
-   *Live-verified on 3.1.3* (`INFO FOR TABLE` keeps `... TYPE string COMPUTED string::uppercase('x')`).
-   Suggested API: `sz.string().$computed(surql\`string::concat(first," ",last)\`)`. This mutually
-   excludes `DEFAULT`/`VALUE`/`READONLY`.
+   *Live-verified on 3.1.3.* **Now supported:** `sz.string().$computed(surql\`string::concat(first," ",last)\`)`
+   (derived, read-only/create-optional column).
 
 2. **`DEFINE EVENT … ASYNC [RETRY n] [MAXDEPTH n]`** 🆕 (❌, medium) — async/retrying events are a
    new clause; surreal-zod's `defineEvent`/`.event()` only emit `WHEN/THEN`. Also missing:
@@ -82,8 +94,8 @@ are:
    DEFINE EVENT audit ON TABLE order ASYNC RETRY 3 MAXDEPTH 2 WHEN $event="UPDATE" THEN { … };
    ```
 
-3. **`COUNT` index** 🆕 (❌, medium) — a materialized row-count index (`PARITY.md` listed it under
-   "COUNT" but only as a one-liner; it's a distinct index kind with its own use case). *Live-verified.*
+3. **`COUNT` index** ✅ **batch 1** (was ❌, medium) — a materialized row-count index, a distinct
+   index kind. *Live-verified.* **Now supported:** `.index("users_count", [], { count: true })`.
    ```surql
    DEFINE INDEX users_count ON TABLE user COUNT;
    ```
@@ -121,8 +133,9 @@ are:
 11. **`set<T, N>` sized set** 🆕 (❌, low) — `PARITY.md` flagged `array<T,N>`; the sized form also
     applies to sets. *Live-verified* `set<int, 5>` round-trips.
 
-> Of these, **#1 (`COMPUTED`)** is the standout: it's a brand-new, high-value, schema-author-facing
-> field clause the prior audit treated as out-of-scope query syntax.
+> **#1 (`COMPUTED`)** was the standout — a high-value, schema-author-facing field clause the prior
+> audit treated as out-of-scope query syntax. **Closed in batch 1** (along with `COUNT` index, plus
+> `set<T>` and `CHANGEFEED` from the original `PARITY.md` list).
 
 ### Biggest categories the prior audit missed
 
@@ -172,7 +185,7 @@ Docs root: https://surrealdb.com/docs/reference/query-language/language-primitiv
 | intersection | merged `object` | `sz.intersection(a,b)` | ✅ | (DDL merge) |
 | optional / nullable / nullish | `option<T>` / `T\|null` / `option<T\|null>` | `.optional()/.nullable()/.nullish()` | ✅ | …/data-types/none-and-null |
 | none / null | `none` / `null` | `sz.null()` (none via optionality) | ✅ | …/data-types/none-and-null |
-| **set (dedup)** | `set<T>` | `sz.set(x)` → `array<x>` | ⚠️ | **lossy.** Live: `set<string>` is DISTINCT, round-trips. …/data-types/sets |
+| set (dedup) | `set<T>` | `sz.set(x)` | ✅ batch 1 | emits `set<T>`, round-trips (was lossy → `array`). …/data-types/sets |
 | **sized array / set** | `array<T,N>` / `set<T,N>` | — | ❌ | **Live-verified** `array<float,3>`, `set<int,5>` round-trip. …/data-types/arrays |
 | **object-literal union** | `{a:..} \| {b:..}` (any shapes) | `sz.union`/`discriminatedUnion` of objects → `object` | ⚠️ | **lossy.** Live: full per-branch structure round-trips. …/data-types/literals |
 | **range** | `range` | — | ❌ | **Live-verified** bare `range` valid field type. …/data-types/ranges |
@@ -195,9 +208,9 @@ Docs root: https://surrealdb.com/docs/reference/query-language/statements/define
 
 | Statement | surreal-zod | Status | Notes (live-verified syntax on 3.1.3) |
 |---|---|---|---|
-| DEFINE TABLE | `defineTable`/`defineRelation` | ✅ | head clauses below; **`AS SELECT`/`CHANGEFEED`/`ENFORCED` ❌** |
-| DEFINE FIELD | `sz.*` + `$`-clauses | ✅ | **`REFERENCE`/`COMPUTED` ❌** (below) |
-| DEFINE INDEX | `.index()/.unique()/.index(name,fields,{unique})` | ✅ (plain/unique/composite) | **FULLTEXT/HNSW/DISKANN/COUNT/CONCURRENTLY/DEFER ❌** |
+| DEFINE TABLE | `defineTable`/`defineRelation` | ✅ | head clauses below; `CHANGEFEED` ✅ batch 1; **`AS SELECT`/`ENFORCED` ❌** |
+| DEFINE FIELD | `sz.*` + `$`-clauses | ✅ | `COMPUTED` ✅ batch 1; **`REFERENCE` ❌** (below) |
+| DEFINE INDEX | `.index()/.unique()/.index(name,fields,{unique\|count})` | ✅ (plain/unique/composite/count) | `COUNT` ✅ batch 1; **FULLTEXT/HNSW/DISKANN/CONCURRENTLY/DEFER ❌** |
 | DEFINE EVENT | `.event()` / `defineEvent()` | ✅ (WHEN/THEN) | **`ASYNC RETRY/MAXDEPTH` 🆕❌, `COMMENT` ❌** |
 | DEFINE FUNCTION | `defineFunction()` | ✅ | args/returns/body/permissions/comment all supported |
 | DEFINE ACCESS | `defineAccess()` | ✅ (RECORD/JWT/BEARER + DURATION) | **`WITH JWT`/`WITH ISSUER` on RECORD 🆕❌** |
@@ -231,7 +244,7 @@ Full syntax (verbatim): `DEFINE TABLE [OVERWRITE|IF NOT EXISTS] @name [DROP] [SC
 | PERMISSIONS (select/create/update/delete) | `.permissions()` (+ `same as`) | ✅ |
 | OVERWRITE / IF NOT EXISTS | `{ exists: "overwrite"\|"ignore" }` | ✅ |
 | **AS SELECT (pre-computed view)** | — | ❌ (live ✅; needs source table) |
-| **CHANGEFEED @dur [INCLUDE ORIGINAL]** | — | ❌ (live ✅) |
+| CHANGEFEED @dur [INCLUDE ORIGINAL] | `.changefeed("3d", { includeOriginal })` | ✅ batch 1 |
 
 ### Field clauses — https://surrealdb.com/docs/reference/query-language/statements/define/field
 Full syntax (verbatim): `DEFINE FIELD … ON [TABLE] @t [TYPE @type | object [FLEXIBLE]]
@@ -249,7 +262,7 @@ Full syntax (verbatim): `DEFINE FIELD … ON [TABLE] @t [TYPE @type | object [FL
 | COMMENT | `.$comment()` | ✅ |
 | PERMISSIONS (select/create/update) + `$internal()` | `.$permissions()` | ✅ |
 | **REFERENCE [ON DELETE REJECT\|CASCADE\|IGNORE\|UNSET\|THEN]** | — | ❌ (live ✅) |
-| **COMPUTED @expr** 🆕 | — | ❌ (live ✅; derived/computed column, excludes DEFAULT/VALUE/READONLY) |
+| COMPUTED @expr 🆕 | `.$computed(surql`…`)` | ✅ batch 1 (derived/read-only column) |
 
 ### Index kinds — https://surrealdb.com/docs/reference/query-language/statements/define/indexes
 Full special-clause grammar (verbatim): `UNIQUE | COUNT | FULLTEXT ANALYZER @a [BM25 [(@k1,@b)]]
@@ -260,7 +273,7 @@ Full special-clause grammar (verbatim): `UNIQUE | COUNT | FULLTEXT ANALYZER @a [
 | Kind | surreal-zod | Status |
 |---|---|---|
 | plain / UNIQUE / composite | `.index()/.unique()/.index(name,[…],{unique})` | ✅ |
-| **COUNT** 🆕 | — | ❌ (live ✅: `DEFINE INDEX x ON t COUNT`) |
+| COUNT 🆕 | `.index(name, [], { count: true })` | ✅ batch 1 |
 | **FULLTEXT ANALYZER … BM25 HIGHLIGHTS** | — | ❌ (live ✅; DB expands `BM25`→`BM25(1.2,0.75)`) |
 | **SEARCH ANALYZER … BM25 HIGHLIGHTS DEFER** (legacy form) | — | ❌ |
 | **HNSW DIMENSION … DIST … TYPE …** | — | ❌ (live ✅; DB fills EFC/M/M0/LM defaults) |

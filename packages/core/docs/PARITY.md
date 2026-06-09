@@ -26,8 +26,31 @@ The gaps below are missing *expressiveness*, not broken output.
 
 The optionality model is also correct: `option<T>` is emitted, the DB desugars it to
 `none | T` (equivalent), and `.optional().nullable()`/`.nullish()` fold to
-`option<T | null>`. A DB-side `DEFAULT`/`VALUE` correctly strips a leading `option<>`
-(the column is always populated). `option<any>` is suppressed (invalid SurQL).
+`option<T | null>`. A DB-side `DEFAULT`/`VALUE`/`COMPUTED` correctly strips a leading
+`option<>` (the column is always populated). `option<any>` is suppressed (invalid SurQL).
+
+### ✅ Recently closed — batch 1
+
+Four gaps from this audit are now supported, each live-verified round-trip
+(sync/diff/pull) on SurrealDB 3.1.3:
+
+```ts
+// set<T> — distinct dedup collection (was lossy → array<T>; pull reverses set<T> → sz.set(...))
+sz.set(sz.string())
+//→ DEFINE FIELD tags ON TABLE t TYPE set<string>;
+
+// COMPUTED — a derived, read-only / create-optional column
+sz.string().$computed(surql`string::concat(first, " ", last)`)
+//→ DEFINE FIELD full ON TABLE person TYPE string COMPUTED string::concat(first, ' ', last);
+
+// CHANGEFEED — per-table change tracking, folded into the DEFINE TABLE head
+defineTable("reading", { /* … */ }).changefeed("3d", { includeOriginal: true })
+//→ DEFINE TABLE reading TYPE NORMAL SCHEMAFULL CHANGEFEED 3d INCLUDE ORIGINAL;
+
+// COUNT — materialized row-count index (no FIELDS clause)
+defineTable("t", { /* … */ }).index("t_count", [], { count: true })
+//→ DEFINE INDEX t_count ON TABLE t COUNT;
+```
 
 ### Prioritized schema-layer gaps that SHOULD be closed (ranked by value)
 
@@ -40,46 +63,38 @@ The optionality model is also correct: `option<T>` is emitted, the DB desugars i
    ```
    Suggested API: `sz.recordId("person").reference({ onDelete: "cascade" })`.
 
-2. **`set<T>` dedup type** (⚠️→❌ lossy, high value). `sz.set(x)` emits `array<x>`, but
-   SurrealDB has a **distinct, round-tripping** `set<T>` (verified: `INFO … STRUCTURE`
-   keeps `set<string>`, not normalized to `array`). Dedup semantics are silently lost.
-   SurQL needed: `DEFINE FIELD tags ON t TYPE set<string>;`
-   Fix is local: in `inferField`, the `set` case should emit `set<elem>` (not `array<elem>`).
-
-3. **Full-text search + analyzers** (❌, high value for search apps).
+2. **Full-text search + analyzers** (❌, high value for search apps).
    `DEFINE ANALYZER` (prerequisite) and `DEFINE INDEX … FULLTEXT ANALYZER … BM25 HIGHLIGHTS`.
    ```surql
    DEFINE ANALYZER ascii TOKENIZERS class FILTERS lowercase, ascii;
    DEFINE INDEX nameIdx ON TABLE user FIELDS name FULLTEXT ANALYZER ascii BM25 HIGHLIGHTS;
    ```
 
-4. **Vector indexes — HNSW / MTREE / DISKANN** (❌, high value for AI/RAG).
+3. **Vector indexes — HNSW / MTREE / DISKANN** (❌, high value for AI/RAG).
    ```surql
    DEFINE INDEX emb ON document FIELDS embedding HNSW DIMENSION 768 DIST COSINE TYPE F32;
    ```
 
-5. **`CHANGEFEED`** (❌, medium). Per-table change tracking.
-   ```surql
-   DEFINE TABLE reading TYPE NORMAL SCHEMAFULL CHANGEFEED 3d INCLUDE ORIGINAL;
-   ```
-
-6. **`TYPE RELATION … ENFORCED`** (❌, medium). Enforce endpoint existence on RELATE.
+4. **`TYPE RELATION … ENFORCED`** (❌, medium). Enforce endpoint existence on RELATE.
    `defineRelation(...).from(A).to(B)` should support an `.enforced()` toggle.
 
-7. **Object-literal unions** (⚠️ lossy, medium). A discriminated/object union collapses to
+5. **Object-literal unions** (⚠️ lossy, medium). A discriminated/object union collapses to
    plain `object`, losing per-branch structure. The DB accepts:
    ```surql
    DEFINE FIELD r ON t TYPE { kind: "a", x: string } | { kind: "b", y: number };
    ```
 
-8. **`array<T, N>` / `set<T, N>` max-size param** (❌, low). No API.
+6. **`array<T, N>` / `set<T, N>` max-size param** (❌, low). No API.
    `DEFINE FIELD pts ON t TYPE array<float, 3>;`
 
-9. **Computed / view tables — `AS SELECT … FROM …`** (❌, low; arguably ORM scope).
+7. **Computed / view tables — `AS SELECT … FROM …`** (❌, low; arguably ORM scope).
 
-10. **Other `DEFINE` objects**: `PARAM`, `USER`, `SEQUENCE`, `CONFIG`, `API`, `BUCKET`,
-    `MODEL`, `NAMESPACE`, `DATABASE` (❌). Mostly out of the per-table schema-author scope,
-    but `DEFINE PARAM` and `DEFINE SEQUENCE` are reasonable near-term additions.
+8. **Other `DEFINE` objects**: `PARAM`, `USER`, `SEQUENCE`, `CONFIG`, `API`, `BUCKET`,
+   `MODEL`, `NAMESPACE`, `DATABASE` (❌). Mostly out of the per-table schema-author scope,
+   but `DEFINE PARAM` and `DEFINE SEQUENCE` are reasonable near-term additions.
+
+> **Closed in batch 1** (`b76269d`): `set<T>`, `COMPUTED`, `CHANGEFEED`, `COUNT` index — see
+> the examples above and the ✅ matrix rows below.
 
 ### What is solidly covered (✅)
 
@@ -93,16 +108,18 @@ The optionality model is also correct: `option<T>` is emitted, the DB desugars i
 - **Literals / enums / unions / tuples**: literal scalars, `enum`, `nativeEnum`
   (string + numeric), scalar unions, `[a, b]` tuples.
 - **Collections**: nested `object` (path-qualified subfields), arrays of objects (`.*`
-  subfields), open-keyed `record`/`map` (`.* ` value field), deep nesting, intersection
-  merge, `FLEXIBLE`.
-- **Field clauses**: `DEFAULT` (+ `ALWAYS`), `VALUE`, `ASSERT` (custom surql + derived from
-  `$min/$max/$length/$regex/$gt/$gte/$lt/$lte`, AND-combined), `READONLY`, `COMMENT`,
-  per-op `PERMISSIONS` (incl. `same as`), `$internal()` → `PERMISSIONS NONE`.
+  subfields), `set<T>` (dedup, batch 1), open-keyed `record`/`map` (`.* ` value field),
+  deep nesting, intersection merge, `FLEXIBLE`.
+- **Field clauses**: `DEFAULT` (+ `ALWAYS`), `VALUE`, `COMPUTED` (`.$computed(surql\`…\`)` —
+  batch 1), `ASSERT` (custom surql + derived from `$min/$max/$length/$regex/$gt/$gte/$lt/$lte`,
+  AND-combined), `READONLY`, `COMMENT`, per-op `PERMISSIONS` (incl. `same as`),
+  `$internal()` → `PERMISSIONS NONE`.
 - **String formats**: `string::is_email/url/ipv4/ipv6/ulid` baked as ASSERT (validated to
   exist on 3.1.3); non-bakeable formats (jwt/cuid/nanoid/base64/…) stay assert-free.
 - **Table clauses**: `TYPE NORMAL/ANY/RELATION` (with `FROM`/`TO`), `SCHEMAFULL`/`SCHEMALESS`,
-  `DROP`, `COMMENT`, table-level `PERMISSIONS`, `OVERWRITE` / `IF NOT EXISTS`.
-- **Indexes**: single-field `.index()`/`.unique()`, composite `.index(name, fields, {unique})`.
+  `DROP`, `COMMENT`, table-level `PERMISSIONS`, `CHANGEFEED` (batch 1), `OVERWRITE` / `IF NOT EXISTS`.
+- **Indexes**: single-field `.index()`/`.unique()`, composite `.index(name, fields, {unique})`,
+  `COUNT` (`.index(name, [], { count: true })` — batch 1).
 - **DEFINE statements**: `EVENT` (WHEN/THEN, multi-then), `FUNCTION` (args/returns/body/
   permissions/comment), `ACCESS` (RECORD signup/signin/authenticate + DURATION, JWT
   alg/key/url, BEARER for record/user).
@@ -147,7 +164,7 @@ The optionality model is also correct: `option<T>` is emitted, the DB desugars i
 | nullish | `option<T \| null>` | `.nullish()` | ✅ | folds correctly |
 | string formats (bakeable) | `string ASSERT string::is_*($value)` | `sz.email()/url()/ipv4()/ipv6()/ulid()` | ✅ | validators confirmed on 3.1.3 |
 | string formats (other) | `string` | `sz.jwt()/cuid()/nanoid()/base64()/…` | ✅ | no fabricated regex |
-| **set (dedup)** | `set<T>` | `sz.set(x)` → `array<x>` | ⚠️ | **lossy: emits array, DB keeps a distinct `set<T>`** |
+| set (dedup) | `set<T>` | `sz.set(x)` | ✅ | batch 1 — emits `set<T>`, round-trips (was lossy → `array`) |
 | **object-literal union** | `{a:..}\|{b:..}` | `sz.discriminatedUnion(...)` → `object` | ⚠️ | per-branch structure lost |
 | **range** | `range` | — | ❌ | no `sz.range()` (bare `range` is a valid field type) |
 | **regex** | `regex` | — | ❌ | no `sz.regexType()` |
@@ -159,7 +176,7 @@ The optionality model is also correct: `option<T>` is emitted, the DB desugars i
 |---|---|---|---|
 | DEFINE TABLE | `defineTable` / `defineRelation` | ✅ | |
 | DEFINE FIELD | shape fields (`sz.*` + `$`-clauses) | ✅ | |
-| DEFINE INDEX | `.index()` / `.unique()` / `.index(name,fields,{unique})` | ✅ (plain/unique/composite) | search & vector kinds ❌ |
+| DEFINE INDEX | `.index()` / `.unique()` / `.index(name,fields,{unique\|count})` | ✅ (plain/unique/composite/count) | search & vector kinds ❌ |
 | DEFINE EVENT | `.event(...)` / `defineEvent(...)` | ✅ | WHEN/THEN, multi-then |
 | DEFINE FUNCTION | `defineFunction(...)` | ✅ | args/returns/body/permissions/comment |
 | DEFINE ACCESS | `defineAccess(...)` | ✅ | RECORD / JWT / BEARER (+DURATION) |
@@ -187,7 +204,7 @@ The optionality model is also correct: `option<T>` is emitted, the DB desugars i
 | COMMENT | `COMMENT "…"` | `.comment(...)` | ✅ |
 | PERMISSIONS | `PERMISSIONS FOR … [FULL\|NONE\|WHERE]` | `.permissions(...)` | ✅ |
 | OVERWRITE / IF NOT EXISTS | both | `{ exists: "overwrite" \| "ignore" }` | ✅ |
-| **CHANGEFEED** | `CHANGEFEED 1d [INCLUDE ORIGINAL]` | — | ❌ |
+| CHANGEFEED | `CHANGEFEED 1d [INCLUDE ORIGINAL]` | `.changefeed("1d", { includeOriginal })` | ✅ batch 1 |
 | **AS SELECT (view)** | `AS SELECT … FROM …` | — | ❌ |
 
 ### Field clauses
@@ -204,8 +221,8 @@ The optionality model is also correct: `option<T>` is emitted, the DB desugars i
 | COMMENT | `COMMENT "…"` | `.$comment(...)` | ✅ |
 | PERMISSIONS | `PERMISSIONS FOR select/create/update …` | `.$permissions(...)` (+ `same as`) | ✅ |
 | internal (hidden) | `PERMISSIONS NONE` | `.$internal()` | ✅ |
+| COMPUTED | `COMPUTED <expr>` | `.$computed(surql`…`)` | ✅ batch 1 |
 | **REFERENCE / ON DELETE** | `REFERENCE [ON DELETE CASCADE\|REJECT\|IGNORE\|UNSET\|THEN …]` | — | ❌ |
-| **COMPUTED (`<~`)** | `COMPUTED <~person` (back-references) | — | ❌ (query/computed scope) |
 
 ### Indexes
 
@@ -218,7 +235,7 @@ The optionality model is also correct: `option<T>` is emitted, the DB desugars i
 | **HNSW (vector)** | `… HNSW DIMENSION n DIST … TYPE …` | — | ❌ |
 | **MTREE (vector)** | `… MTREE DIMENSION n` | — | ❌ |
 | **DISKANN (vector, 3.1+)** | `… DISKANN DIMENSION n …` | — | ❌ |
-| **COUNT** | `… COUNT` | — | ❌ |
+| COUNT | `… COUNT` | `.index(name, [], { count: true })` | ✅ batch 1 |
 | **CONCURRENTLY / DEFER** | modifiers | — | ❌ |
 
 ---
@@ -251,8 +268,8 @@ used internally by the CLI/migration layer, but are not part of the authoring su
   3 access kinds all applied to SurrealDB 3.1.3 with zero errors.
 - **`option<T>` ↔ `none | T`**: the DB reports `option<string>` as `none | string` in
   `INFO … STRUCTURE`. Equivalent; just a canonicalization the migration diff already handles.
-- **`set<T>` is real and distinct** on 3.1.3 (not normalized to `array`). This makes the
-  `sz.set()` → `array` behavior the single highest-value, lowest-effort correctness fix.
+- **`set<T>` is real and distinct** on 3.1.3 (not normalized to `array`). Batch 1 fixed
+  `sz.set()` to emit `set<T>` and pull to reverse it back to `sz.set(...)`.
 - **`string::is_*` validators** for email/url/ipv4/ipv6/ulid (and uuid/datetime) all exist on
   3.1.3 — the baked asserts are correct. (3.x uses the underscore form, e.g. `string::is_email`.)
 - **`range<int>` is invalid DDL** — only bare `range` is a field type. `references` /
