@@ -11,6 +11,12 @@ import {
   renderMigration,
 } from "./diff";
 import {
+  type Filter,
+  filterSnapshot,
+  mergeSnapshot,
+  parseFilter,
+} from "./filter";
+import {
   checksum,
   listMigrations,
   type Migration,
@@ -40,11 +46,17 @@ export interface MigrationPlan {
 /** Compute the pending diff (schemas vs snapshot) WITHOUT writing anything. */
 export async function planMigration(
   config: ResolvedConfig,
+  filter: Filter = parseFilter({}),
 ): Promise<MigrationPlan> {
   const { tables, defs } = await loadDefs(config.schemaPath);
   const next = buildSnapshot(tables, defs);
-  const diff = diffSnapshots(readSnapshot(config.metaDir), next);
-  return { diff, next };
+  const prev = readSnapshot(config.metaDir);
+  const diff = diffSnapshots(
+    filterSnapshot(prev, filter),
+    filterSnapshot(next, filter),
+  );
+  // Persist only the generated kinds; excluded kinds (e.g. access) keep their prior snapshot state.
+  return { diff, next: mergeSnapshot(prev, next, filter) };
 }
 
 /**

@@ -64,11 +64,12 @@ export function isEmptyDiff(diff: Diff): boolean {
 // Within a table, create order is table -> field -> index (each depends on the prior); drop
 // order is the reverse. Statements are grouped by table (see `diffSnapshots`).
 const RANK: Record<DefineStatement["kind"], number> = {
-  table: 0,
-  field: 1,
-  index: 2,
-  event: 3,
-  function: 4,
+  function: 0, // db-level; defined first (tables/events may reference fn::…)
+  table: 1,
+  field: 2,
+  index: 3,
+  event: 4,
+  access: 5, // db-level; defined last (SIGNUP/SIGNIN reference tables)
 };
 const tableOf = (s: DefineStatement) => s.table ?? s.name;
 
@@ -394,11 +395,19 @@ export function formatDiff(
 }
 
 /** The kind of object a statement targets, for count summaries. */
-type CountKind = "table" | "field" | "index" | "event" | "function" | "other";
+type CountKind =
+  | "table"
+  | "field"
+  | "index"
+  | "event"
+  | "function"
+  | "access"
+  | "other";
 function kindOf(stmt: string): CountKind {
-  const m = /^(?:DEFINE|REMOVE)\s+(TABLE|FIELD|INDEX|EVENT|FUNCTION)\b/.exec(
-    stmt,
-  );
+  const m =
+    /^(?:DEFINE|REMOVE)\s+(TABLE|FIELD|INDEX|EVENT|FUNCTION|ACCESS)\b/.exec(
+      stmt,
+    );
   return m ? (m[1].toLowerCase() as CountKind) : "other";
 }
 
@@ -410,6 +419,7 @@ export function summarizeKinds(stmts: string[]): string {
     index: 0,
     event: 0,
     function: 0,
+    access: 0,
     other: 0,
   };
   for (const s of stmts) counts[kindOf(s)]++;
@@ -420,6 +430,8 @@ export function summarizeKinds(stmts: string[]): string {
     parts.push(plural(counts.index, "index").replace("indexs", "indexes"));
   if (counts.event) parts.push(plural(counts.event, "event"));
   if (counts.function) parts.push(plural(counts.function, "function"));
+  if (counts.access)
+    parts.push(plural(counts.access, "access").replace("accesss", "accesses"));
   if (counts.other) parts.push(plural(counts.other, "object"));
   return parts.join(", ");
 }

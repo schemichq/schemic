@@ -2,6 +2,7 @@ import type { DefineStatement } from "surreal-zod";
 import { escapeIdent, type Surreal } from "surrealdb";
 import type { ResolvedConfig } from "./config";
 import { buildSnapshot, type Diff, diffSnapshots } from "./diff";
+import { type Filter, filterSnapshot, parseFilter } from "./filter";
 import type { Snapshot } from "./meta";
 import { loadDefs } from "./schema";
 import { introspectStructured, structuredSnapshot } from "./structure";
@@ -10,11 +11,12 @@ const SHADOW_DB = "__surreal_zod_shadow";
 
 // Apply order: tables, then fields, then indexes.
 const RANK: Record<DefineStatement["kind"], number> = {
-  table: 0,
-  field: 1,
-  index: 2,
-  event: 3,
-  function: 4,
+  function: 0, // db-level; defined first (tables/events may reference fn::…)
+  table: 1,
+  field: 2,
+  index: 3,
+  event: 4,
+  access: 5, // db-level; defined last (SIGNUP/SIGNIN reference tables)
 };
 const byCreate = (a: DefineStatement, b: DefineStatement) =>
   RANK[a.kind] - RANK[b.kind];
@@ -40,6 +42,7 @@ export async function introspect(
 export async function diffAgainstDb(
   db: Surreal,
   config: ResolvedConfig,
+  filter: Filter = parseFilter({}),
 ): Promise<Diff> {
   const { namespace, database } = config.db;
   // Exclude the CLI's own bookkeeping tables — they're not part of the schema (pull excludes
@@ -67,8 +70,12 @@ export async function diffAgainstDb(
     await db.query(`REMOVE DATABASE IF EXISTS ${escapeIdent(SHADOW_DB)};`);
   }
 
-  // up = statements that would bring the live database in line with the schema.
-  return diffSnapshots(target, desired);
+  // up = statements that would bring the live database in line with the schema. The filter drops
+  // both sides' excluded kinds (access is off by default) so they're neither applied nor pruned.
+  return diffSnapshots(
+    filterSnapshot(target, filter),
+    filterSnapshot(desired, filter),
+  );
 }
 
 /**

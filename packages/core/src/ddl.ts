@@ -332,7 +332,7 @@ export function renderPermissions(
  * individually. `emitTable`/`emitField` are the string-joined views of these.
  */
 export interface DefineStatement {
-  kind: "table" | "field" | "index" | "event" | "function";
+  kind: "table" | "field" | "index" | "event" | "function" | "access";
   name: string;
   table?: string;
   ddl: string;
@@ -638,6 +638,9 @@ export function removeStatement(
   }
   if (s.kind === "function") {
     return `REMOVE FUNCTION IF EXISTS fn::${escapeIdent(s.name)};`;
+  }
+  if (s.kind === "access") {
+    return `REMOVE ACCESS IF EXISTS ${escapeIdent(s.name)} ON DATABASE;`;
   }
   return `REMOVE FIELD IF EXISTS ${s.name} ON TABLE ${escapeIdent(s.table ?? "")};`;
 }

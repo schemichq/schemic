@@ -19,6 +19,7 @@ import {
   isEmptyDiff,
   summarizeKinds,
 } from "./diff";
+import { type FilterOpts, kindFlags, parseFilter } from "./filter";
 import { init } from "./init";
 import { applyStatements, diffAgainstDb, syncPlan } from "./introspect";
 import {
@@ -240,10 +241,12 @@ program
     );
   });
 
-dbFlags(
-  program
-    .command("diff")
-    .description("Show pending schema changes without writing a migration"),
+kindFlags(
+  dbFlags(
+    program
+      .command("diff")
+      .description("Show pending schema changes without writing a migration"),
+  ),
 )
   .option("--down", "also show the rollback (down) statements")
   .option("--live", "diff against the live database instead of the snapshot")
@@ -261,18 +264,20 @@ dbFlags(
   .option("--json", "output the diff as JSON")
   .action(
     (
-      opts: CommonOpts & {
-        down?: boolean;
-        live?: boolean;
-        watch?: boolean;
-        full?: boolean;
-        patch?: boolean;
-        pager?: string | boolean;
-        json?: boolean;
-      },
+      opts: CommonOpts &
+        FilterOpts & {
+          down?: boolean;
+          live?: boolean;
+          watch?: boolean;
+          full?: boolean;
+          patch?: boolean;
+          pager?: string | boolean;
+          json?: boolean;
+        },
     ) => {
       run(async () => {
         const config = await loadConfig({ config: opts.config });
+        const filter = parseFilter(opts);
         // Seamlessly route through the user's git diff viewer (e.g. delta) when interactive:
         // a TTY, not watching, paging not disabled, and a pager resolves. `--patch` forces the
         // unified-diff format (to the pager, or to stdout when piped / `--no-pager`).
@@ -306,7 +311,7 @@ dbFlags(
           if (opts.live) {
             const db = persistent ?? (await connect(config, opts));
             try {
-              const diff = await diffAgainstDb(db, config);
+              const diff = await diffAgainstDb(db, config, filter);
               const pending = (await status(db, config)).filter(
                 (r) => !r.applied,
               ).length;
@@ -315,7 +320,7 @@ dbFlags(
               if (!persistent) await db.close();
             }
           } else {
-            await emit((await planMigration(config)).diff);
+            await emit((await planMigration(config, filter)).diff);
           }
         };
         if (!opts.watch) return once();
@@ -328,30 +333,38 @@ dbFlags(
     },
   );
 
-configFlag(
-  program
-    .command("generate [name]")
-    .description("Diff schemas, preview the changes, and write a migration"),
+kindFlags(
+  configFlag(
+    program
+      .command("generate [name]")
+      .alias("gen")
+      .description("Diff schemas, preview the changes, and write a migration"),
+  ),
 )
   .option("-y, --yes", "use the given/default name without prompting")
-  .action((name: string | undefined, opts: CommonOpts & { yes?: boolean }) => {
-    run(async () => {
-      const config = await loadConfig({ config: opts.config });
-      const plan = await planMigration(config);
-      if (isEmptyDiff(plan.diff)) {
-        console.log(ok("No schema changes — nothing to generate."));
-        return;
-      }
-      console.log("Changes to migrate:\n");
-      console.log(formatDiff(plan.diff));
-      console.log("");
-      const title = name ?? (opts.yes ? undefined : await promptTitle());
-      const res = writeMigration(config, plan, title);
-      console.log(
-        `${ok(res.file ?? "migration written")}  ${style.dim(`(+${res.up} up / ${res.down} down)`)}`,
-      );
-    });
-  });
+  .action(
+    (
+      name: string | undefined,
+      opts: CommonOpts & FilterOpts & { yes?: boolean },
+    ) => {
+      run(async () => {
+        const config = await loadConfig({ config: opts.config });
+        const plan = await planMigration(config, parseFilter(opts));
+        if (isEmptyDiff(plan.diff)) {
+          console.log(ok("No schema changes — nothing to generate."));
+          return;
+        }
+        console.log("Changes to migrate:\n");
+        console.log(formatDiff(plan.diff));
+        console.log("");
+        const title = name ?? (opts.yes ? undefined : await promptTitle());
+        const res = writeMigration(config, plan, title);
+        console.log(
+          `${ok(res.file ?? "migration written")}  ${style.dim(`(+${res.up} up / ${res.down} down)`)}`,
+        );
+      });
+    },
+  );
 
 dbFlags(
   program
@@ -551,24 +564,28 @@ dbFlags(
   );
 });
 
-dbFlags(
-  program
-    .command("sync")
-    .alias("push")
-    .description(
-      "Reconcile the live database with your schema (no migration files)",
-    )
-    .option("--no-prune", "keep objects that were removed from the schema")
-    .option("--dry-run", "preview the changes without applying them")
-    .option("--watch", "re-sync on schema changes"),
+kindFlags(
+  dbFlags(
+    program
+      .command("sync")
+      .alias("push")
+      .description(
+        "Reconcile the live database with your schema (no migration files)",
+      )
+      .option("--no-prune", "keep objects that were removed from the schema")
+      .option("--dry-run", "preview the changes without applying them")
+      .option("--watch", "re-sync on schema changes"),
+  ),
 ).action(
   (
-    opts: CommonOpts & { prune?: boolean; dryRun?: boolean; watch?: boolean },
+    opts: CommonOpts &
+      FilterOpts & { prune?: boolean; dryRun?: boolean; watch?: boolean },
   ) => {
     run(async () => {
       const config = await loadConfig({ config: opts.config });
+      const filter = parseFilter(opts);
       const once = async (db: Surreal) => {
-        const diff = await diffAgainstDb(db, config);
+        const diff = await diffAgainstDb(db, config, filter);
         const stmts = syncPlan(diff, opts.prune);
         if (!stmts.length) {
           console.log(ok("Database already matches the schema."));
@@ -617,15 +634,20 @@ dbFlags(
   );
 });
 
-dbFlags(
-  program
-    .command("pull")
-    .description("Generate Zod schema files from the live database")
-    .option("--force", "overwrite existing schema files"),
-).action((opts: CommonOpts & { force?: boolean }) => {
+kindFlags(
+  dbFlags(
+    program
+      .command("pull")
+      .description("Generate Zod schema files from the live database")
+      .option("--force", "overwrite existing schema files"),
+  ),
+).action((opts: CommonOpts & FilterOpts & { force?: boolean }) => {
   run(() =>
     withDb(opts, async (db, config) => {
-      const { files, skipped } = await pull(db, config, { force: opts.force });
+      const { files, skipped } = await pull(db, config, {
+        force: opts.force,
+        filter: parseFilter(opts),
+      });
       for (const f of files) console.log(`  ${style.green("+")} ${f}`);
       for (const f of skipped)
         console.log(style.dim(`  · ${f} (exists — use --force)`));

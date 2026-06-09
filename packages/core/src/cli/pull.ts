@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import type { Surreal } from "surrealdb";
 import type { ResolvedConfig } from "./config";
+import { type Filter, filterStructured, parseFilter } from "./filter";
 import { existingTables } from "./schema";
 import {
   type DbStructured,
@@ -539,11 +540,15 @@ export interface PullResult {
 export async function pull(
   db: Surreal,
   config: ResolvedConfig,
-  opts: { force?: boolean } = {},
+  opts: { force?: boolean; filter?: Filter } = {},
 ): Promise<PullResult> {
-  const { tables, functions } = await introspectStructured(
+  const introspected = await introspectStructured(
     db,
     new Set([config.migrationsTable, `${config.migrationsTable}_lock`]),
+  );
+  const { tables, functions } = filterStructured(
+    introspected,
+    opts.filter ?? parseFilter({}),
   );
 
   // Reference graph (record<…> targets + relation endpoints) → cycle-aware imports / ordering.
