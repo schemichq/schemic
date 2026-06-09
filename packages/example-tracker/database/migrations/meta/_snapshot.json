@@ -207,6 +207,12 @@
       "table": "task",
       "ddl": "DEFINE FIELD updatedAt ON TABLE task TYPE datetime VALUE time::now();"
     },
+    "event:task:stamp_completed_at": {
+      "kind": "event",
+      "name": "stamp_completed_at",
+      "table": "task",
+      "ddl": "DEFINE EVENT stamp_completed_at ON TABLE task WHEN $before.status != $after.status THEN IF $after.status = \"done\" AND $after.completedAt = NONE {\n        UPDATE $after.id SET completedAt = time::now();\n      } ELSE IF $after.status != \"done\" AND $after.completedAt != NONE {\n        UPDATE $after.id SET completedAt = NONE;\n      };"
+    },
     "table::user": {
       "kind": "table",
       "name": "user",
@@ -280,6 +286,11 @@
       "name": "since",
       "table": "watch",
       "ddl": "DEFINE FIELD since ON TABLE watch TYPE datetime DEFAULT time::now() READONLY;"
+    },
+    "access::account": {
+      "kind": "access",
+      "name": "account",
+      "ddl": "DEFINE ACCESS account ON DATABASE TYPE RECORD SIGNUP { RETURN CREATE user CONTENT {\n      name: $name,\n      email: $email,\n      passhash: crypto::argon2::generate($pass)\n    }; } SIGNIN { LET $user = SELECT * FROM ONLY user WHERE email = $email LIMIT 1;\n    IF $user.id != NONE AND crypto::argon2::compare($user.passhash, $pass) {\n      RETURN $user\n    } ELSE {\n      THROW \"Invalid email or password\"\n    }; } DURATION FOR TOKEN 1h, FOR SESSION 12h;"
     }
   }
 }

@@ -1,5 +1,12 @@
-import { surql } from "surrealdb";
-import { type App, defineRelation, defineTable, sz, type Wire } from "surreal-zod";
+import {
+  type App,
+  defineAccess,
+  defineRelation,
+  defineTable,
+  surql,
+  sz,
+  type Wire,
+} from "surreal-zod";
 
 /**
  * Shared, isomorphic data model for the project/task tracker. Imported by the
@@ -19,7 +26,11 @@ import { type App, defineRelation, defineTable, sz, type Wire } from "surreal-zo
  * NOTE: per-table `PERMISSIONS` now live here via `.permissions({...})` and are folded
  * into the single generated `DEFINE TABLE` (no more raw `DEFINE TABLE OVERWRITE …
  * PERMISSIONS` in `setup.ts`). Omitted ops default to NONE (deny) at the table level.
- * `DEFINE ACCESS` (record signup/signin) is still raw in `setup.ts`. See DX-FINDINGS.md #1/#3.
+ *
+ * NOTE: the record `DEFINE ACCESS` (signup/signin) now lives here too, as the exported
+ * `account` `defineAccess(...)` below — no longer raw in `setup.ts`. The migration CLI
+ * picks it up with the opt-in `--access` flag (`generate/diff/sync --access`), and
+ * `setup.ts`/the tests emit it from this same object. See DX-FINDINGS.md #1/#3.
  */
 
 /** End users. `id` omitted -> `record<user>` with a DB-generated id. */
@@ -88,6 +99,18 @@ export const Task = defineTable("task", {
   updatedAt: sz.datetime().$value(surql`time::now()`, { optional: true }),
 })
   .comment("Project tasks")
+  // Stamp/clear `completedAt` as `status` crosses the "done" line. Only fires when the
+  // status actually changed, and leaves an already-set timestamp untouched on re-saves.
+  .event("stamp_completed_at", {
+    when: surql`$before.status != $after.status`,
+    then: surql`
+      IF $after.status = "done" AND $after.completedAt = NONE {
+        UPDATE $after.id SET completedAt = time::now();
+      } ELSE IF $after.status != "done" AND $after.completedAt != NONE {
+        UPDATE $after.id SET completedAt = NONE;
+      }
+    `,
+  })
   .permissions({
     // Visibility derives from the parent project; writes need owner/membership.
     select: surql`project.owner = $auth.id OR project.settings.isPublic = true OR project IN $auth->member->project`,
@@ -166,6 +189,35 @@ export const DependsOn = defineRelation("depends_on", {
     create: "same as select",
     delete: "same as select",
   });
+
+/**
+ * Record access: end users sign up / sign in directly (used by the browser app and the
+ * tests). SIGNUP hashes the password with argon2 and writes the `user`; SIGNIN looks the
+ * user up by email and verifies the hash. The `surql\`…\`` blocks carry SurrealDB params
+ * (`$name`/`$email`/`$pass`) through verbatim — `surql` only inlines `${…}` JS bindings —
+ * and `defineAccess` auto-wraps each body in `{ … }`, so no outer braces here.
+ *
+ * The CLI includes this only with the opt-in `--access` flag; `setup.ts`/the tests emit it
+ * from this same object via `emitDefStatement`.
+ */
+export const account = defineAccess("account")
+  .record()
+  .signup(surql`
+    RETURN CREATE user CONTENT {
+      name: $name,
+      email: $email,
+      passhash: crypto::argon2::generate($pass)
+    };
+  `)
+  .signin(surql`
+    LET $user = SELECT * FROM ONLY user WHERE email = $email LIMIT 1;
+    IF $user.id != NONE AND crypto::argon2::compare($user.passhash, $pass) {
+      RETURN $user
+    } ELSE {
+      THROW "Invalid email or password"
+    };
+  `)
+  .duration({ token: "1h", session: "12h" });
 
 /** Every table/relation, in dependency order, for migrations. */
 export const tables = [User, Project, Task, Comment, Tag, Member, Watch, DependsOn];
