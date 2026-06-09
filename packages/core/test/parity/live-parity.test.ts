@@ -259,9 +259,9 @@ live("known gaps (DB supports these; surreal-zod does not)", () => {
     expect(rejected).toEqual([]);
   });
 
-  test.todo("GAP: sz.set() should emit set<T> — see PARITY.md");
-  test.todo("GAP: .reference()/ON DELETE record-reference builder — see PARITY.md");
-  test.todo("GAP: FULLTEXT / vector (HNSW) indexes + DEFINE ANALYZER — see PARITY.md");
+  test.todo("GAP: sz.set() should emit set<T> — see PARITY.md", () => {});
+  test.todo("GAP: .reference()/ON DELETE record-reference builder — see PARITY.md", () => {});
+  test.todo("GAP: FULLTEXT / vector (HNSW) indexes + DEFINE ANALYZER — see PARITY.md", () => {});
 });
 
 afterAll(async () => {

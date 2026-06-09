@@ -68,6 +68,8 @@ export interface SurrealMeta {
   default?: BoundQuery;
   defaultAlways?: boolean;
   value?: BoundQuery;
+  /** `COMPUTED <expr>` — a derived, read-only column (computed on read; never written). */
+  computed?: BoundQuery;
   /**
    * `ASSERT` fragments that AND-combine into one clause. Computed checks (format
    * builders, `$`-constraints, `.$assert()`-derived) are plain strings; a custom
@@ -395,6 +397,13 @@ export class SField<
     opts?: { optional?: O },
   ): SField<S, O extends true ? Flags | "create" : Flags> {
     return new SField(this.schema, { ...this.surreal, value: expr });
+  }
+  /**
+   * `COMPUTED <expr>` — a derived, read-only column computed from other fields. Never written, so
+   * it's create-OPTIONAL: `sz.string().$computed(surql\`string::concat(first, " ", last)\`)`.
+   */
+  $computed(expr: BoundQuery): SField<S, Flags | "create"> {
+    return new SField(this.schema, { ...this.surreal, computed: expr });
   }
   /**
    * Add an `ASSERT` fragment (fragments AND-combine into one clause):
@@ -933,13 +942,17 @@ export interface TableConfig {
   indexes?: TableIndex[];
   /** Row-change events. See `.event(name, { when?, then })`. */
   events?: TableEvent[];
+  /** `CHANGEFEED <dur> [INCLUDE ORIGINAL]`. See `.changefeed(dur, opts?)`. */
+  changefeed?: { expiry: string; includeOriginal?: boolean };
 }
 
-/** A table index definition (single- or multi-field). */
+/** A table index definition (single- or multi-field, or a row-count index). */
 export interface TableIndex {
   name: string;
   fields: string[];
   unique?: boolean;
+  /** A materialized row-count index (`DEFINE INDEX … COUNT`, no fields). */
+  count?: boolean;
 }
 
 /** A SurrealQL expression: a `surql\`…\`` bound query (bindings inlined) or a raw string. */
@@ -1449,13 +1462,27 @@ export class TableDef<Name extends string, S extends Shape> {
   permissions(spec: TablePermissions) {
     return this.withConfig({ permissions: spec });
   }
-  /** Add a composite index: `DEFINE INDEX <name> ON TABLE <table> FIELDS <fields> [UNIQUE]`. */
+  /** `CHANGEFEED <dur> [INCLUDE ORIGINAL]` — track row changes for `SHOW CHANGES`. */
+  changefeed(expiry: string, opts: { includeOriginal?: boolean } = {}) {
+    return this.withConfig({
+      changefeed: { expiry, includeOriginal: opts.includeOriginal },
+    });
+  }
+  /**
+   * Add a composite index: `DEFINE INDEX <name> ON TABLE <table> FIELDS <fields> [UNIQUE]`, or a
+   * materialized row-count index with `{ count: true }` (no fields → `DEFINE INDEX <name> … COUNT`).
+   */
   index(
     name: string,
     fields: (keyof S & string)[],
-    opts: { unique?: boolean } = {},
+    opts: { unique?: boolean; count?: boolean } = {},
   ) {
-    const index: TableIndex = { name, fields, unique: opts.unique };
+    const index: TableIndex = {
+      name,
+      fields,
+      unique: opts.unique,
+      count: opts.count,
+    };
     return this.withConfig({
       indexes: [...(this.config.indexes ?? []), index],
     });

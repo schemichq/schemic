@@ -181,7 +181,9 @@ function inferField(
         elem.children.length > 0 || elem.type === "object"
           ? [{ suffix: ".*", info: elem }]
           : [];
-      return { type: `array<${elem.type}>`, flexible: false, children };
+      // `set<T>` is distinct from `array<T>` in SurrealDB (dedup) and round-trips — preserve it.
+      const kw = def.type === "set" ? "set" : "array";
+      return { type: `${kw}<${elem.type}>`, flexible: false, children };
     }
 
     case "record":
@@ -484,8 +486,11 @@ function emit(
   forceOverwrite = false,
 ): void {
   let type = info.type;
-  // A DB-side DEFAULT/VALUE means the column is always populated -> drop a leading option<>.
-  if ((surreal?.default || surreal?.value) && type.startsWith("option<")) {
+  // A DB-side DEFAULT/VALUE/COMPUTED means the column is always populated -> drop a leading option<>.
+  if (
+    (surreal?.default || surreal?.value || surreal?.computed) &&
+    type.startsWith("option<")
+  ) {
     type = type.slice("option<".length, -1);
   }
   // An array element is auto-created by SurrealDB, so a (kept) element DEFINE must OVERWRITE it.
@@ -500,6 +505,7 @@ function emit(
     );
   }
   if (surreal?.value) parts.push(`VALUE ${inline(surreal.value)}`);
+  if (surreal?.computed) parts.push(`COMPUTED ${inline(surreal.computed)}`);
   const assertClause = renderAsserts(surreal?.asserts);
   if (assertClause) parts.push(assertClause);
   if (surreal?.readonly) parts.push("READONLY");
@@ -615,6 +621,10 @@ export function emitStatements(
   ];
   if (t.config.drop) head.push("DROP");
   head.push(t.config.schemafull ? "SCHEMAFULL" : "SCHEMALESS");
+  if (t.config.changefeed) {
+    head.push(`CHANGEFEED ${t.config.changefeed.expiry}`);
+    if (t.config.changefeed.includeOriginal) head.push("INCLUDE ORIGINAL");
+  }
   if (t.config.comment)
     head.push(`COMMENT ${JSON.stringify(t.config.comment)}`);
   // Fold permissions into the single DEFINE TABLE head (no separate OVERWRITE … PERMISSIONS).
@@ -635,14 +645,16 @@ export function emitStatements(
     if (implicit.has(name)) continue;
     out.push(...emitFieldStatements(name, t.name, field as SField, opts));
   }
-  // Composite indexes declared via `.index(name, fields, …)`.
+  // Composite indexes declared via `.index(name, fields, …)`. A `count` index has no FIELDS.
   for (const idx of t.config.indexes ?? []) {
-    const unique = idx.unique ? " UNIQUE" : "";
+    const spec = idx.count
+      ? "COUNT"
+      : `FIELDS ${idx.fields.map(escapeIdent).join(", ")}${idx.unique ? " UNIQUE" : ""}`;
     out.push({
       kind: "index",
       name: idx.name,
       table: t.name,
-      ddl: `DEFINE INDEX ${existsPrefix(opts)}${escapeIdent(idx.name)} ON TABLE ${escapeIdent(t.name)} FIELDS ${idx.fields.map(escapeIdent).join(", ")}${unique};`,
+      ddl: `DEFINE INDEX ${existsPrefix(opts)}${escapeIdent(idx.name)} ON TABLE ${escapeIdent(t.name)} ${spec};`,
     });
   }
   // Row-change events declared via `.event(name, { when?, then })`.

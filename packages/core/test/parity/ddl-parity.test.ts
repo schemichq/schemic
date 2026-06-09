@@ -14,7 +14,12 @@
 import { describe, expect, test } from "bun:test";
 import { surql } from "surrealdb";
 import { z } from "zod";
-import { emitDefStatement, emitField, emitTable, fieldType } from "../../src/ddl";
+import {
+  emitDefStatement,
+  emitField,
+  emitTable,
+  fieldType,
+} from "../../src/ddl";
 import {
   defineAccess,
   defineFunction,
@@ -101,8 +106,12 @@ describe("types — string formats (string::is_* baked when the DB has the valid
     // The DB has no string::is_<fmt> for these — surreal-zod leaves them assert-free.
     expect(fieldDdl(sz.jwt())).toBe("DEFINE FIELD f ON TABLE t TYPE string;");
     expect(fieldDdl(sz.cuid())).toBe("DEFINE FIELD f ON TABLE t TYPE string;");
-    expect(fieldDdl(sz.nanoid())).toBe("DEFINE FIELD f ON TABLE t TYPE string;");
-    expect(fieldDdl(sz.base64())).toBe("DEFINE FIELD f ON TABLE t TYPE string;");
+    expect(fieldDdl(sz.nanoid())).toBe(
+      "DEFINE FIELD f ON TABLE t TYPE string;",
+    );
+    expect(fieldDdl(sz.base64())).toBe(
+      "DEFINE FIELD f ON TABLE t TYPE string;",
+    );
   });
 });
 
@@ -139,7 +148,9 @@ describe("types — literals / enums / unions / tuples", () => {
     expect(typeOf(sz.union([sz.string(), sz.number()]))).toBe(
       "string | number",
     );
-    expect(typeOf(sz.tuple([sz.string(), sz.number()]))).toBe("[string, number]");
+    expect(typeOf(sz.tuple([sz.string(), sz.number()]))).toBe(
+      "[string, number]",
+    );
   });
 });
 
@@ -158,7 +169,9 @@ describe("types — collections (objects / arrays / maps)", () => {
   });
 
   test("array of object emits the element via .* subfields", () => {
-    const ddl = fieldDdl(sz.array(sz.object({ x: sz.string(), y: sz.number() })));
+    const ddl = fieldDdl(
+      sz.array(sz.object({ x: sz.string(), y: sz.number() })),
+    );
     expect(ddl).toBe(
       [
         "DEFINE FIELD f ON TABLE t TYPE array<object>;",
@@ -219,12 +232,10 @@ describe("types — optionality folding", () => {
 });
 
 describe("types — GAPS (confirmed against the DB)", () => {
-  // sz.set() infers array<T>, but SurrealDB 3.1.3 has a DISTINCT, round-tripping `set<T>`
-  // type (INFO FOR TABLE keeps `set<string>`). So dedup semantics are LOST. See PARITY.md.
-  test("set is lossy: sz.set(x) -> array<x>, not set<x>", () => {
-    expect(typeOf(sz.set(sz.string()))).toBe("array<string>"); // documents the lossy behavior
+  // FIXED (batch 1): sz.set() now emits the distinct, round-tripping `set<T>` (not `array<T>`).
+  test("set<T> is preserved (was lossy → array<T>)", () => {
+    expect(typeOf(sz.set(sz.string()))).toBe("set<string>");
   });
-  test.todo("GAP: sz.set() should emit `set<T>` (DB: DEFINE FIELD f ... TYPE set<string>)");
 
   // Object-LITERAL unions: the DB accepts
   //   TYPE { kind: "a", x: string } | { kind: "b", y: number }
@@ -238,15 +249,13 @@ describe("types — GAPS (confirmed against the DB)", () => {
     );
     expect(ddl).toBe("DEFINE FIELD f ON TABLE t TYPE object;");
   });
-  test.todo(
-    'GAP: object-literal union should emit `{ kind: "a", x: string } | { kind: "b", y: number }`',
-  );
+  test.todo('GAP: object-literal union should emit `{ kind: "a", x: string } | { kind: "b", y: number }`', () => {});
 
   // array<T, N> / set<T, N> max-size param: no surreal-zod API.
-  test.todo("GAP: array/set max-size param (DB: TYPE array<string, 3> / set<int, 5>)");
+  test.todo("GAP: array/set max-size param (DB: TYPE array<string, 3> / set<int, 5>)", () => {});
 
   // range / regex / point(bare) / function — valid DB field types with no sz.* type.
-  test.todo("GAP: no sz.range() (DB: TYPE range), sz.regex() (TYPE regex)");
+  test.todo("GAP: no sz.range() (DB: TYPE range), sz.regex() (TYPE regex)", () => {});
 });
 
 // ===========================================================================
@@ -275,9 +284,9 @@ describe("table clauses", () => {
   });
 
   test("drop() + comment()", () => {
-    expect(
-      head(defineTable("t", { id: z.string() }).schemaless().drop()),
-    ).toBe("DEFINE TABLE t TYPE NORMAL DROP SCHEMALESS;");
+    expect(head(defineTable("t", { id: z.string() }).schemaless().drop())).toBe(
+      "DEFINE TABLE t TYPE NORMAL DROP SCHEMALESS;",
+    );
     expect(head(defineTable("t", { id: z.string() }).comment("hi"))).toBe(
       'DEFINE TABLE t TYPE NORMAL SCHEMAFULL COMMENT "hi";',
     );
@@ -303,19 +312,23 @@ describe("table clauses", () => {
     );
   });
 
-  test.todo("GAP: CHANGEFEED clause (DB: DEFINE TABLE ... CHANGEFEED 1d [INCLUDE ORIGINAL])");
-  test.todo(
-    "GAP: TYPE RELATION ... ENFORCED (referential integrity on relate endpoints)",
-  );
-  test.todo("GAP: computed/view tables (DB: DEFINE TABLE ... AS SELECT ... FROM ...)");
+  test("CHANGEFEED clause (FIXED batch 1)", () => {
+    expect(
+      emitTable(
+        defineTable("cf", { id: sz.string() }).changefeed("1d", {
+          includeOriginal: true,
+        }),
+      ).split("\n")[0],
+    ).toContain("CHANGEFEED 1d INCLUDE ORIGINAL");
+  });
+  test.todo("GAP: TYPE RELATION ... ENFORCED (referential integrity on relate endpoints)", () => {});
+  test.todo("GAP: computed/view tables (DB: DEFINE TABLE ... AS SELECT ... FROM ...)", () => {});
 });
 
 describe("relations", () => {
   test("restricted endpoints -> TYPE RELATION FROM a TO b", () => {
     const A = defineTable("usr", { id: z.string() });
-    const rel = defineRelation("friend", { weight: sz.number() })
-      .from(A)
-      .to(A);
+    const rel = defineRelation("friend", { weight: sz.number() }).from(A).to(A);
     const lines = emitTable(rel).split("\n");
     expect(lines[0]).toBe(
       "DEFINE TABLE friend TYPE RELATION FROM usr TO usr SCHEMAFULL;",
@@ -383,7 +396,9 @@ describe("field clauses", () => {
   });
 
   test("field PERMISSIONS: per-op object + `same as` references", () => {
-    expect(fieldDdl(sz.string().$permissions({ select: true, update: false }))).toBe(
+    expect(
+      fieldDdl(sz.string().$permissions({ select: true, update: false })),
+    ).toBe(
       "DEFINE FIELD f ON TABLE t TYPE string PERMISSIONS FOR select FULL FOR update NONE;",
     );
     expect(
@@ -408,9 +423,7 @@ describe("field clauses", () => {
   // GAP: record references — REFERENCE [ON DELETE ...]. The DB accepts
   //   DEFINE FIELD author ON comment TYPE record<person> REFERENCE ON DELETE CASCADE;
   // surreal-zod has no `.reference()` / ON DELETE builder.
-  test.todo(
-    "GAP: REFERENCE / ON DELETE (CASCADE|REJECT|IGNORE|UNSET|THEN) on record fields",
-  );
+  test.todo("GAP: REFERENCE / ON DELETE (CASCADE|REJECT|IGNORE|UNSET|THEN) on record fields", () => {});
 });
 
 // ===========================================================================
@@ -421,9 +434,7 @@ describe("indexes", () => {
     const ddl = emitTable(
       defineTable("t", { id: z.string(), email: sz.string().index() }),
     );
-    expect(ddl).toContain(
-      "DEFINE INDEX t_email_idx ON TABLE t FIELDS email;",
-    );
+    expect(ddl).toContain("DEFINE INDEX t_email_idx ON TABLE t FIELDS email;");
   });
 
   test("single-field UNIQUE via .unique()", () => {
@@ -443,16 +454,12 @@ describe("indexes", () => {
         b: sz.string(),
       }).index("ab_idx", ["a", "b"], { unique: true }),
     );
-    expect(ddl).toContain(
-      "DEFINE INDEX ab_idx ON TABLE t FIELDS a, b UNIQUE;",
-    );
+    expect(ddl).toContain("DEFINE INDEX ab_idx ON TABLE t FIELDS a, b UNIQUE;");
   });
 
-  test.todo(
-    "GAP: FULLTEXT search index (DB: DEFINE INDEX ... FULLTEXT ANALYZER x BM25 HIGHLIGHTS)",
-  );
-  test.todo("GAP: HNSW / MTREE / DISKANN vector indexes (DB: ... HNSW DIMENSION n ...)");
-  test.todo("GAP: CONCURRENTLY / DEFER / COUNT index modifiers");
+  test.todo("GAP: FULLTEXT search index (DB: DEFINE INDEX ... FULLTEXT ANALYZER x BM25 HIGHLIGHTS)", () => {});
+  test.todo("GAP: HNSW / MTREE / DISKANN vector indexes (DB: ... HNSW DIMENSION n ...)", () => {});
+  test.todo("GAP: CONCURRENTLY / DEFER / COUNT index modifiers", () => {});
 });
 
 // ===========================================================================
@@ -489,7 +496,7 @@ describe("DEFINE statements", () => {
     );
   });
 
-  test.todo("GAP: DEFINE ANALYZER (needed to back a FULLTEXT index)");
-  test.todo("GAP: DEFINE PARAM ($global = value)");
-  test.todo("GAP: DEFINE USER / SEQUENCE / CONFIG / API / BUCKET / MODEL");
+  test.todo("GAP: DEFINE ANALYZER (needed to back a FULLTEXT index)", () => {});
+  test.todo("GAP: DEFINE PARAM ($global = value)", () => {});
+  test.todo("GAP: DEFINE USER / SEQUENCE / CONFIG / API / BUCKET / MODEL", () => {});
 });

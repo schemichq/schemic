@@ -99,7 +99,7 @@ describe("wrappers", () => {
 
   test("array / set", () => {
     expect(typeOf(sz.string().array())).toBe("array<string>");
-    expect(typeOf(sz.set(sz.int()))).toBe("array<int>");
+    expect(typeOf(sz.set(sz.int()))).toBe("set<int>"); // set<T> is distinct from array<T>
   });
 
   test("optional/nullable any collapse to any (no invalid option<any>)", () => {

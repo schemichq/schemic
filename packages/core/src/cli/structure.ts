@@ -29,6 +29,8 @@ export interface StructField {
   default?: string;
   default_always?: boolean;
   value?: string;
+  /** `COMPUTED <expr>` — a derived, read-only column. */
+  computed?: string;
   assert?: string;
   comment?: string;
   reference?: unknown;
@@ -99,6 +101,8 @@ export interface StructTable {
   schemafull: boolean;
   drop?: boolean;
   comment?: string;
+  /** `CHANGEFEED <expiry> [INCLUDE ORIGINAL]`. */
+  changefeed?: { expiry: string; original: boolean };
   permissions?: StructPermissions;
   fields: StructField[];
   indexes: StructIndex[];
@@ -201,6 +205,7 @@ function canonicalField(f: StructField): string {
   if (f.default !== undefined)
     parts.push(`DEFAULT ${f.default_always ? "ALWAYS " : ""}${f.default}`);
   if (f.value !== undefined) parts.push(`VALUE ${f.value}`);
+  if (f.computed !== undefined) parts.push(`COMPUTED ${f.computed}`);
   if (f.assert !== undefined) parts.push(`ASSERT ${f.assert}`);
   if (f.readonly) parts.push("READONLY");
   if (f.comment !== undefined)
@@ -227,6 +232,10 @@ function canonicalTableHead(t: StructTable): string {
     t.schemafull ? "SCHEMAFULL" : "SCHEMALESS",
   ];
   if (t.drop) parts.push("DROP");
+  if (t.changefeed) {
+    parts.push(`CHANGEFEED ${t.changefeed.expiry}`);
+    if (t.changefeed.original) parts.push("INCLUDE ORIGINAL");
+  }
   if (t.comment !== undefined)
     parts.push(`COMMENT ${JSON.stringify(t.comment)}`);
   const perms = canonicalPerms(t.permissions, [
@@ -241,8 +250,10 @@ function canonicalTableHead(t: StructTable): string {
 
 /** Canonical `DEFINE INDEX …` (`index` is `"UNIQUE"`, `""`, or a `SEARCH …`/`MTREE …` spec). */
 function canonicalIndex(t: StructTable, idx: StructIndex): string {
+  // A COUNT index has no columns → no `FIELDS` clause (`idx.index` carries `COUNT`).
+  const fields = idx.cols.length ? ` FIELDS ${idx.cols.join(", ")}` : "";
   const spec = idx.index ? ` ${idx.index}` : "";
-  return `DEFINE INDEX ${idx.name} ON ${t.name} FIELDS ${idx.cols.join(", ")}${spec};`;
+  return `DEFINE INDEX ${idx.name} ON ${t.name}${fields}${spec};`;
 }
 
 /**
@@ -469,6 +480,7 @@ export async function introspectStructured(
       schemafull: t.schemafull,
       drop: t.drop,
       comment: t.comment,
+      changefeed: t.changefeed,
       permissions: t.permissions,
       fields: tinfo.fields ?? [],
       indexes: tinfo.indexes ?? [],

@@ -21,6 +21,7 @@ interface ParsedField {
   default?: string;
   defaultAlways?: boolean;
   value?: string;
+  computed?: string;
   assert?: string;
   readonly?: boolean;
   comment?: string;
@@ -77,6 +78,7 @@ function toParsed(f: StructField): ParsedField {
     default: f.default,
     defaultAlways: f.default_always,
     value: f.value,
+    computed: f.computed,
     assert: f.assert,
     readonly: f.readonly,
     comment: f.comment,
@@ -231,8 +233,10 @@ function szType(type: string, ctx?: RenderCtx): string {
   const nullable = /^(.+?)\s*\|\s*null$/.exec(t);
   if (nullable) return `${szType(nullable[1], ctx)}.nullable()`;
 
-  const arr = /^(?:array|set)<(.+)>$/.exec(t);
+  const arr = /^array<(.+)>$/.exec(t);
   if (arr) return `${szType(arr[1], ctx)}.array()`;
+  const set = /^set<(.+)>$/.exec(t);
+  if (set) return `sz.set(${szType(set[1], ctx)})`;
   const rec = /^record<(.+?)>$/.exec(t);
   if (rec) return renderRecord(rec[1], ctx);
 
@@ -355,9 +359,12 @@ function renderField(node: FieldNode, indent: string, ctx?: RenderCtx): string {
     if (wrap.optional) expr += ".optional()";
   } else if (p && star && /^(array|set)\b/.test(wrap?.base ?? "")) {
     // Any array/set: the element's full structure (incl. nested sub-fields) lives in the `*`
-    // child — fold it into `<elem>.array()`. This beats parsing `array<object>` from the parent
-    // kind, which would lose the element's sub-fields.
-    expr = `${renderField(star, indent, ctx)}.array()`;
+    // child — fold it into `<elem>.array()` / `sz.set(<elem>)`. This beats parsing the element
+    // type from the parent kind, which would lose the element's sub-fields.
+    const elem = renderField(star, indent, ctx);
+    expr = /^set\b/.test(wrap?.base ?? "")
+      ? `sz.set(${elem})`
+      : `${elem}.array()`;
     if (wrap?.nullable) expr += ".nullable()";
     if (wrap?.optional) expr += ".optional()";
   } else if (!p) {
@@ -371,6 +378,7 @@ function renderField(node: FieldNode, indent: string, ctx?: RenderCtx): string {
       expr += `.${p.defaultAlways ? "$defaultAlways" : "$default"}(surql\`${p.default}\`)`;
     }
     if (p.value !== undefined) expr += `.$value(surql\`${p.value}\`)`;
+    if (p.computed !== undefined) expr += `.$computed(surql\`${p.computed}\`)`;
     if (p.assert !== undefined) expr += `.$assert(surql\`${p.assert}\`)`;
     if (p.readonly) expr += ".$readonly()";
     if (p.comment) expr += `.$comment(${JSON.stringify(p.comment)})`;
@@ -453,10 +461,19 @@ function renderTableConst(
     false,
   );
   if (tperm) close += `\n  .permissions(${tperm})`;
+  if (t.changefeed) {
+    const incl = t.changefeed.original ? ", { includeOriginal: true }" : "";
+    close += `\n  .changefeed(${JSON.stringify(t.changefeed.expiry)}${incl})`;
+  }
   for (const idx of t.indexes) {
     const cols = idx.cols.map((c) => JSON.stringify(c)).join(", ");
-    const unique = idx.index === "UNIQUE" ? ", { unique: true }" : "";
-    close += `\n  .index(${JSON.stringify(idx.name)}, [${cols}]${unique})`;
+    const opts =
+      idx.index === "UNIQUE"
+        ? ", { unique: true }"
+        : idx.index === "COUNT"
+          ? ", { count: true }"
+          : "";
+    close += `\n  .index(${JSON.stringify(idx.name)}, [${cols}]${opts})`;
   }
   for (const ev of t.events) {
     // Drop a `WHEN true` (SurrealDB's stored form of an omitted WHEN). Author bodies as `surql\`…\``.

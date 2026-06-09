@@ -440,3 +440,52 @@ describe("access", () => {
     );
   });
 });
+
+describe("batch 1: set / computed / changefeed / count", () => {
+  test("sz.set() emits set<T> (distinct from array<T>)", () => {
+    const t = defineTable("t", {
+      id: sz.string(),
+      tags: sz.set(sz.string()),
+      arr: sz.array(sz.string()),
+    });
+    const ddl = emitTable(t);
+    expect(ddl).toContain("DEFINE FIELD tags ON TABLE t TYPE set<string>;");
+    expect(ddl).toContain("DEFINE FIELD arr ON TABLE t TYPE array<string>;");
+  });
+
+  test("$computed emits a COMPUTED field; option<> is stripped", () => {
+    const t = defineTable("person", {
+      id: sz.string(),
+      first: sz.string(),
+      last: sz.string(),
+      full: sz
+        .string()
+        .optional()
+        .$computed(surql`string::concat(first, " ", last)`),
+    });
+    expect(emitTable(t)).toContain(
+      `DEFINE FIELD full ON TABLE person TYPE string COMPUTED string::concat(first, " ", last);`,
+    );
+  });
+
+  test(".changefeed() folds into the DEFINE TABLE head", () => {
+    expect(
+      emitTable(defineTable("a", { id: sz.string() }).changefeed("3d")),
+    ).toContain("SCHEMAFULL CHANGEFEED 3d;");
+    expect(
+      emitTable(
+        defineTable("b", { id: sz.string() }).changefeed("1h", {
+          includeOriginal: true,
+        }),
+      ),
+    ).toContain("CHANGEFEED 1h INCLUDE ORIGINAL;");
+  });
+
+  test("COUNT index emits no FIELDS clause", () => {
+    const t = defineTable("c", { id: sz.string() }).index("rows", [], {
+      count: true,
+    });
+    const up = diffSnapshots(EMPTY_SNAPSHOT, buildSnapshot([t])).up;
+    expect(up).toContain("DEFINE INDEX rows ON TABLE c COUNT;");
+  });
+});
