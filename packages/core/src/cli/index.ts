@@ -33,7 +33,7 @@ import {
 } from "./migrate";
 import { pipeThroughPager, resolvePager } from "./pager";
 import { pull } from "./pull";
-import { duplicateTables, loadSchemas } from "./schema";
+import { duplicateTables, loadDefs, loadSchemas } from "./schema";
 import { fail, ok, plural, style } from "./style";
 
 interface CommonOpts extends ConnectionOverrides {
@@ -427,9 +427,9 @@ configFlag(
       const lines = formatDuplicates(dups, config.root).map((l) => `  ${l}`);
       throw new Error(`${duplicateHeader(dups.size)}\n${lines.join("\n")}`);
     }
-    const defs = await loadSchemas(config.schemaPath);
+    const { tables, events } = await loadDefs(config.schemaPath);
     const kinds = summarizeKinds(
-      Object.values(buildSnapshot(defs).statements).map((s) => s.ddl),
+      Object.values(buildSnapshot(tables, events).statements).map((s) => s.ddl),
     );
     console.log(ok(`Schemas valid${kinds ? ` — ${kinds}` : " (no objects)"}.`));
   });

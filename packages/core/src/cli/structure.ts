@@ -44,6 +44,16 @@ export interface StructIndex {
   index: string;
 }
 
+export interface StructEvent {
+  name: string;
+  /** Owning table (STRUCTURE calls it `what`). */
+  what: string;
+  /** The `WHEN` condition. SurrealDB stores an omitted `WHEN` as the literal `"true"`. */
+  when?: string;
+  /** One or more `THEN` expressions (parens/`;` already stripped). */
+  then: string[];
+}
+
 export interface StructTableKind {
   kind: "NORMAL" | "ANY" | "RELATION";
   in?: string[];
@@ -60,6 +70,7 @@ export interface StructTable {
   permissions?: StructPermissions;
   fields: StructField[];
   indexes: StructIndex[];
+  events: StructEvent[];
 }
 
 interface DbStructure {
@@ -71,6 +82,7 @@ interface DbStructure {
 interface TableStructure {
   fields?: StructField[];
   indexes?: StructIndex[];
+  events?: StructEvent[];
 }
 
 /** The unescaped name of a relation endpoint — the SDK deserializes `in`/`out` as `Table` objects. */
@@ -128,7 +140,8 @@ function canonicalPerms(
   if (!perms) return "";
   const vals = ops.map((op) => perms[op]);
   if (vals.every((v) => v === true)) return "PERMISSIONS FULL";
-  if (vals.every((v) => v === false || v === undefined)) return "PERMISSIONS NONE";
+  if (vals.every((v) => v === false || v === undefined))
+    return "PERMISSIONS NONE";
   const clauses = ops.map((op) => {
     const v = perms[op];
     if (v === true) return `FOR ${op} FULL`;
@@ -140,14 +153,17 @@ function canonicalPerms(
 
 /** Canonical `DEFINE FIELD …`. The name is taken as-is (STRUCTURE already escapes reserved words). */
 function canonicalField(f: StructField): string {
-  const parts = [`DEFINE FIELD ${f.name} ON ${f.table} TYPE ${canonicalKind(f.kind)}`];
+  const parts = [
+    `DEFINE FIELD ${f.name} ON ${f.table} TYPE ${canonicalKind(f.kind)}`,
+  ];
   if (f.flexible) parts.push("FLEXIBLE");
   if (f.default !== undefined)
     parts.push(`DEFAULT ${f.default_always ? "ALWAYS " : ""}${f.default}`);
   if (f.value !== undefined) parts.push(`VALUE ${f.value}`);
   if (f.assert !== undefined) parts.push(`ASSERT ${f.assert}`);
   if (f.readonly) parts.push("READONLY");
-  if (f.comment !== undefined) parts.push(`COMMENT ${JSON.stringify(f.comment)}`);
+  if (f.comment !== undefined)
+    parts.push(`COMMENT ${JSON.stringify(f.comment)}`);
   const perms = canonicalPerms(f.permissions, ["select", "create", "update"]);
   if (perms) parts.push(perms);
   return `${parts.join(" ")};`;
@@ -186,6 +202,19 @@ function canonicalTableHead(t: StructTable): string {
 function canonicalIndex(t: StructTable, idx: StructIndex): string {
   const spec = idx.index ? ` ${idx.index}` : "";
   return `DEFINE INDEX ${idx.name} ON ${t.name} FIELDS ${idx.cols.join(", ")}${spec};`;
+}
+
+/**
+ * Canonical `DEFINE EVENT …`. An omitted `WHEN` (stored by SurrealDB as `"true"`) is dropped, and
+ * the `then` expressions are comma-joined — so an event authored with/without a `WHEN true` and any
+ * `THEN` formatting compares equal across the live DB and the shadow-applied schema.
+ */
+function canonicalEvent(t: StructTable, ev: StructEvent): string {
+  const parts = [`DEFINE EVENT ${ev.name} ON ${t.name}`];
+  if (ev.when !== undefined && ev.when !== "true")
+    parts.push(`WHEN ${ev.when}`);
+  parts.push(`THEN ${ev.then.join(", ")}`);
+  return `${parts.join(" ")};`;
 }
 
 /**
@@ -260,7 +289,9 @@ export function structuredSnapshot(tables: StructTable[]): Snapshot {
       if (implicit.has(f.name)) continue;
       if (f.name.endsWith(".*")) {
         const parent = byName.get(f.name.slice(0, -2));
-        const parentIsArray = parent ? /\b(?:array|set)\b/.test(parent.kind) : false;
+        const parentIsArray = parent
+          ? /\b(?:array|set)\b/.test(parent.kind)
+          : false;
         if (parentIsArray && isTrivialElement(f)) continue; // auto-created form → folded
       }
       const elem = elementOf.get(f.name);
@@ -281,6 +312,15 @@ export function structuredSnapshot(tables: StructTable[]): Snapshot {
         name: idx.name,
         table: t.name,
         ddl: canonicalIndex(t, idx),
+      };
+      statements[keyOf(s)] = s;
+    }
+    for (const ev of t.events) {
+      const s: DefineStatement = {
+        kind: "event",
+        name: ev.name,
+        table: t.name,
+        ddl: canonicalEvent(t, ev),
       };
       statements[keyOf(s)] = s;
     }
@@ -316,6 +356,7 @@ export async function introspectStructured(
       permissions: t.permissions,
       fields: tinfo.fields ?? [],
       indexes: tinfo.indexes ?? [],
+      events: tinfo.events ?? [],
     });
   }
   return out;

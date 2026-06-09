@@ -3,7 +3,7 @@ import { escapeIdent, type Surreal } from "surrealdb";
 import type { ResolvedConfig } from "./config";
 import { buildSnapshot, type Diff, diffSnapshots } from "./diff";
 import type { Snapshot } from "./meta";
-import { loadSchemas } from "./schema";
+import { loadDefs } from "./schema";
 import { introspectStructured, structuredSnapshot } from "./structure";
 
 const SHADOW_DB = "__surreal_zod_shadow";
@@ -13,6 +13,7 @@ const RANK: Record<DefineStatement["kind"], number> = {
   table: 0,
   field: 1,
   index: 2,
+  event: 3,
 };
 const byCreate = (a: DefineStatement, b: DefineStatement) =>
   RANK[a.kind] - RANK[b.kind];
@@ -47,8 +48,8 @@ export async function diffAgainstDb(
     new Set([config.migrationsTable, `${config.migrationsTable}_lock`]),
   );
 
-  const defs = await loadSchemas(config.schemaPath);
-  const ddl = Object.values(buildSnapshot(defs).statements)
+  const { tables, events } = await loadDefs(config.schemaPath);
+  const ddl = Object.values(buildSnapshot(tables, events).statements)
     .sort(byCreate)
     .map((s) => s.ddl)
     .join("\n");

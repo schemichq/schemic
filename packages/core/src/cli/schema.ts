@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import type { Shape, TableDef } from "surreal-zod";
+import type { EventDef, Shape, TableDef } from "surreal-zod";
 import { makeJiti } from "./config";
 
 export type AnyTable = TableDef<string, Shape>;
@@ -20,6 +20,18 @@ function isTableDef(v: unknown): v is AnyTable {
     typeof t.config === "object" &&
     t.config !== null &&
     typeof t.record === "function"
+  );
+}
+
+/** Duck-typed `EventDef` check (a standalone `defineEvent(…)`) — see `isTableDef` on why not `instanceof`. */
+function isEventDef(v: unknown): v is EventDef {
+  if (!v || typeof v !== "object") return false;
+  const e = v as Record<string, unknown>;
+  return (
+    e.kind === "event" &&
+    typeof e.name === "string" &&
+    typeof e.table === "string" &&
+    "then" in e
   );
 }
 
@@ -49,23 +61,36 @@ async function* tablesIn(
 }
 
 /**
- * Load every schema from `schemaPath` (a single `.ts` module, or a directory of them) and return
- * its tables/relations, ordered with normal tables before relations (and by name) for stable,
- * dependency-friendly DDL.
+ * Load every schema object from `schemaPath` (a single `.ts` module, or a directory of them): the
+ * tables/relations (ordered normal-before-relation, then by name, for stable DDL) and the standalone
+ * `defineEvent(…)` events. One pass over the files.
  */
-export async function loadSchemas(schemaPath: string): Promise<AnyTable[]> {
+export async function loadDefs(
+  schemaPath: string,
+): Promise<{ tables: AnyTable[]; events: EventDef[] }> {
   if (!existsSync(schemaPath)) {
     throw new Error(`Schema path not found: ${schemaPath}`);
   }
   const jiti = makeJiti();
-  const defs = new Map<string, AnyTable>();
+  const tables = new Map<string, AnyTable>();
+  const events: EventDef[] = [];
   for (const file of schemaFiles(schemaPath)) {
-    for await (const t of tablesIn(jiti, file)) defs.set(t.name, t); // last def of a name wins
+    const mod = (await jiti.import(file)) as Record<string, unknown>;
+    for (const value of Object.values(mod)) {
+      if (isTableDef(value)) tables.set(value.name, value); // last def of a name wins
+      else if (isEventDef(value)) events.push(value);
+    }
   }
   const rank = (t: AnyTable) => (t.config.relation ? 1 : 0);
-  return [...defs.values()].sort(
+  const sorted = [...tables.values()].sort(
     (a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name),
   );
+  return { tables: sorted, events };
+}
+
+/** The tables/relations from `schemaPath` (standalone events excluded — see {@link loadDefs}). */
+export async function loadSchemas(schemaPath: string): Promise<AnyTable[]> {
+  return (await loadDefs(schemaPath)).tables;
 }
 
 /** Map of table name → the file that defines it (for `pull`'s duplicate-definition check). */

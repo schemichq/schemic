@@ -599,9 +599,16 @@ function recordIdSchema<
     (r) =>
       (anyTable || (tables as readonly string[]).includes(r.table.name)) &&
       (valueType ? valueType.safeParse(r.id).success : true),
-    { error: anyTable ? "Expected a record" : `Expected record<${tables.join(" | ")}>` },
+    {
+      error: anyTable
+        ? "Expected a record"
+        : `Expected record<${tables.join(" | ")}>`,
+    },
   );
-  surrealTypeRegistry.set(schema, anyTable ? "record" : `record<${tables.join(" | ")}>`);
+  surrealTypeRegistry.set(
+    schema,
+    anyTable ? "record" : `record<${tables.join(" | ")}>`,
+  );
   return schema as unknown as z.ZodType<RecordId<T, V>, RecordId<T, V>>;
 }
 
@@ -924,6 +931,8 @@ export interface TableConfig {
   relation?: { from: string[]; to: string[] };
   /** Composite (multi-field) indexes. See `.index(name, fields, opts)`. */
   indexes?: TableIndex[];
+  /** Row-change events. See `.event(name, { when?, then })`. */
+  events?: TableEvent[];
 }
 
 /** A table index definition (single- or multi-field). */
@@ -931,6 +940,20 @@ export interface TableIndex {
   name: string;
   fields: string[];
   unique?: boolean;
+}
+
+/** A SurrealQL expression: a `surql\`…\`` bound query (bindings inlined) or a raw string. */
+export type Expr = BoundQuery | string;
+
+/**
+ * A table event: `DEFINE EVENT <name> ON TABLE <table> [WHEN <when>] THEN <then>`. The event
+ * body sees `$before`/`$after`/`$event`/`$value`. `then` may be one expression or several
+ * (run in order). Author expressions with `surql\`…\`` (bindings inline) or a raw string.
+ */
+export interface TableEvent {
+  name: string;
+  when?: Expr;
+  then: Expr | Expr[];
 }
 
 function normalizeFields<S extends Shape>(shape: S): Fields<S> {
@@ -1437,6 +1460,17 @@ export class TableDef<Name extends string, S extends Shape> {
       indexes: [...(this.config.indexes ?? []), index],
     });
   }
+  /**
+   * Add a row-change event: `DEFINE EVENT <name> ON TABLE <table> [WHEN <when>] THEN <then>`.
+   * The body sees `$before`/`$after`/`$event`/`$value`; author with `surql\`…\`` or a raw string.
+   */
+  event(name: string, spec: { when?: Expr; then: Expr | Expr[] }) {
+    // biome-ignore lint/suspicious/noThenProperty: `then` is the SurrealQL THEN clause (a string/BoundQuery), not a PromiseLike.
+    const event: TableEvent = { name, when: spec.when, then: spec.then };
+    return this.withConfig({
+      events: [...(this.config.events ?? []), event],
+    });
+  }
 
   // --- Shape ops (mirror Zod's object methods; carry DDL metadata + config) ---
   extend<E extends Shape>(ext: E): TableDef<Name, Omit<S, keyof E> & E> {
@@ -1794,6 +1828,37 @@ export function defineRelation<Name extends string, S extends Shape = {}>(
   fields?: S,
 ): RelationDef<Name, S> {
   return new RelationDef(name, (fields ?? {}) as S);
+}
+
+/**
+ * A standalone `DEFINE EVENT`, declared apart from its table (vs the inline `TableDef.event(…)`).
+ * Export one per event when you want each event as its own named symbol. It compiles to the same
+ * statement as the inline form — `pull` regenerates events inline, so the two are interchangeable.
+ */
+export class EventDef {
+  readonly kind = "event" as const;
+  constructor(
+    /** Owning table name. */
+    readonly table: string,
+    readonly name: string,
+    readonly when: Expr | undefined,
+    readonly then: Expr | Expr[],
+  ) {}
+}
+
+/**
+ * Declare a row-change event on `table` as a standalone, exportable object:
+ * `export const reverify = defineEvent(User, "reverify", { when, then })`. Pass the `TableDef`
+ * (preferred — no name repetition) or a table name string. See {@link TableDef.event} for the
+ * inline, chainable form.
+ */
+export function defineEvent(
+  table: TableDef<string, Shape> | string,
+  name: string,
+  spec: { when?: Expr; then: Expr | Expr[] },
+): EventDef {
+  const tableName = typeof table === "string" ? table : table.name;
+  return new EventDef(tableName, name, spec.when, spec.then);
 }
 
 /** The app-facing type (what your code reads). */

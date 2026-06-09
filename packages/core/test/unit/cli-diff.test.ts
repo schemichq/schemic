@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 // Import `sz`/`table` by package name (like the CLI does) so the table types line up with the
 // `surreal-zod`-typed signatures in cli/diff (avoids src-vs-lib duplicate-declaration errors).
-import { defineTable, emitTable, sz } from "surreal-zod";
+import { defineEvent, defineTable, emitTable, surql, sz } from "surreal-zod";
 import {
   buildSnapshot,
   diffSnapshots,
@@ -232,5 +232,84 @@ describe("indexes", () => {
   test("summarizeKinds counts indexes", () => {
     const up = diffSnapshots(EMPTY_SNAPSHOT, buildSnapshot([Indexed])).up;
     expect(summarizeKinds(up)).toBe("1 table, 4 fields, 3 indexes");
+  });
+});
+
+describe("events", () => {
+  const Evented = defineTable("user", {
+    id: sz.string(),
+    email: sz.email(),
+    verified: sz.boolean(),
+  })
+    .event("reverify", {
+      when: surql`$before.email != $after.email`,
+      then: surql`UPDATE $after.id SET verified = false`,
+    })
+    .event("log_changes", {
+      then: [surql`UPDATE $after.id SET a = 1`, surql`UPDATE $after.id SET b = 2`],
+    });
+
+  test(".event() emits DEFINE EVENT with WHEN + THEN", () => {
+    expect(emitTable(Evented)).toContain(
+      "DEFINE EVENT reverify ON TABLE user WHEN $before.email != $after.email THEN UPDATE $after.id SET verified = false;",
+    );
+  });
+
+  test("an omitted WHEN emits no WHEN; multiple THENs are parenthesized", () => {
+    expect(emitTable(Evented)).toContain(
+      "DEFINE EVENT log_changes ON TABLE user THEN (UPDATE $after.id SET a = 1), (UPDATE $after.id SET b = 2);",
+    );
+  });
+
+  test("adding an event → DEFINE EVENT up / REMOVE EVENT down", () => {
+    const before = defineTable("t", { id: sz.string(), n: sz.int() });
+    const after = before.event("on_n", {
+      when: surql`$before.n != $after.n`,
+      then: surql`UPDATE $after.id SET touched = true`,
+    });
+    const diff = diffSnapshots(buildSnapshot([before]), buildSnapshot([after]));
+    expect(diff.up).toEqual([
+      "DEFINE EVENT on_n ON TABLE t WHEN $before.n != $after.n THEN UPDATE $after.id SET touched = true;",
+    ]);
+    expect(diff.down).toEqual(["REMOVE EVENT IF EXISTS on_n ON TABLE t;"]);
+  });
+
+  test("diff orders create as table → fields → … → events", () => {
+    const up = diffSnapshots(EMPTY_SNAPSHOT, buildSnapshot([Evented])).up;
+    const lastField = up.findLastIndex((s) => s.startsWith("DEFINE FIELD"));
+    const firstEvent = up.findIndex((s) => s.startsWith("DEFINE EVENT"));
+    expect(lastField).toBeLessThan(firstEvent);
+  });
+
+  test("summarizeKinds counts events", () => {
+    const up = diffSnapshots(EMPTY_SNAPSHOT, buildSnapshot([Evented])).up;
+    expect(summarizeKinds(up)).toBe("1 table, 2 fields, 2 events");
+  });
+
+  test("standalone defineEvent compiles to the same statement as inline .event()", () => {
+    const Base = defineTable("user", { id: sz.string(), email: sz.email() });
+    const inline = Base.event("reverify", {
+      when: surql`$before.email != $after.email`,
+      then: surql`UPDATE $after.id SET verified = false`,
+    });
+    const standalone = defineEvent(Base, "reverify", {
+      when: surql`$before.email != $after.email`,
+      then: surql`UPDATE $after.id SET verified = false`,
+    });
+    const key = "event:user:reverify";
+    expect(buildSnapshot([Base], [standalone]).statements[key].ddl).toBe(
+      buildSnapshot([inline]).statements[key].ddl,
+    );
+  });
+
+  test("standalone events ride into buildSnapshot's second arg", () => {
+    const Base = defineTable("user", { id: sz.string(), n: sz.int() });
+    const ev = defineEvent(Base, "on_n", {
+      then: surql`UPDATE $after.id SET touched = true`,
+    });
+    const up = diffSnapshots(EMPTY_SNAPSHOT, buildSnapshot([Base], [ev])).up;
+    expect(up).toContain(
+      "DEFINE EVENT on_n ON TABLE user THEN UPDATE $after.id SET touched = true;",
+    );
   });
 });

@@ -454,6 +454,18 @@ function renderTableConst(
     const unique = idx.index === "UNIQUE" ? ", { unique: true }" : "";
     close += `\n  .index(${JSON.stringify(idx.name)}, [${cols}]${unique})`;
   }
+  for (const ev of t.events) {
+    // Drop a `WHEN true` (SurrealDB's stored form of an omitted WHEN). Author bodies as `surql\`…\``.
+    const when =
+      ev.when !== undefined && ev.when !== "true"
+        ? `when: surql\`${ev.when}\`, `
+        : "";
+    const then =
+      ev.then.length === 1
+        ? `surql\`${ev.then[0]}\``
+        : `[${ev.then.map((e) => `surql\`${e}\``).join(", ")}]`;
+    close += `\n  .event(${JSON.stringify(ev.name)}, { ${when}then: ${then} })`;
+  }
   body.push(`${close};`);
 
   return { code: body.join("\n"), factory };
@@ -462,13 +474,12 @@ function renderTableConst(
 /** A full single-table module — cross-file imports + the const — for the directory layout. */
 function renderTableModule(t: StructTable, ctx: RenderCtx): string {
   const { code, factory } = renderTableConst(t, ctx);
-  const imports = [`import { sz, ${factory} } from "surreal-zod";`];
+  const names = ["sz", ...(code.includes("surql`") ? ["surql"] : []), factory];
+  const imports = [`import { ${names.join(", ")} } from "surreal-zod";`];
   // Cross-table value imports (one per referenced table, sorted, self excluded).
   for (const dep of [...ctx.imports].filter((d) => d !== t.name).sort()) {
     imports.push(`import { ${ctx.constOf(dep)} } from "./${dep}";`);
   }
-  if (code.includes("surql`"))
-    imports.push('import { surql } from "surrealdb";');
   return `${imports.join("\n")}\n\n${code}\n`;
 }
 
@@ -616,11 +627,9 @@ async function pullToFile(
   });
   const ordered = topoSort(rendered);
   const factories = [...new Set(ordered.map((r) => r.factory))].sort();
-  const imports = [
-    `import { sz, ${factories.join(", ")} } from "surreal-zod";`,
-  ];
-  if (ordered.some((r) => r.usesSurql))
-    imports.push('import { surql } from "surrealdb";');
+  const usesSurql = ordered.some((r) => r.usesSurql);
+  const names = ["sz", ...(usesSurql ? ["surql"] : []), ...factories];
+  const imports = [`import { ${names.join(", ")} } from "surreal-zod";`];
   const out = `${imports.join("\n")}\n\n${ordered.map((r) => r.code).join("\n\n")}\n`;
 
   mkdirSync(dirname(target), { recursive: true });

@@ -1,6 +1,8 @@
 import { BoundQuery, escapeIdent, toSurqlString } from "surrealdb";
 import type { z } from "zod";
 import {
+  type EventDef,
+  type Expr,
   type FieldPermissions,
   objectFieldsRegistry,
   type PermOp,
@@ -9,6 +11,7 @@ import {
   type SurrealMeta,
   surrealTypeRegistry,
   type TableDef,
+  type TableEvent,
   type TablePermissions,
 } from "./pure";
 
@@ -328,10 +331,46 @@ export function renderPermissions(
  * individually. `emitTable`/`emitField` are the string-joined views of these.
  */
 export interface DefineStatement {
-  kind: "table" | "field" | "index";
+  kind: "table" | "field" | "index" | "event";
   name: string;
   table?: string;
   ddl: string;
+}
+
+/** Inline a single event clause (`when`/one `then`): a `BoundQuery` is inlined, a string passes through. */
+function eventClause(e: Expr): string {
+  return e instanceof BoundQuery ? inline(e) : e;
+}
+
+/** `DEFINE EVENT <name> ON TABLE <table> [WHEN <when>] THEN <then>`. Multiple `then`s run in order. */
+function emitEvent(
+  table: string,
+  ev: TableEvent,
+  opts?: DefineOptions,
+): string {
+  const parts = [
+    `DEFINE EVENT ${existsPrefix(opts)}${escapeIdent(ev.name)} ON TABLE ${escapeIdent(table)}`,
+  ];
+  if (ev.when !== undefined) parts.push(`WHEN ${eventClause(ev.when)}`);
+  const thens = (Array.isArray(ev.then) ? ev.then : [ev.then]).map(eventClause);
+  // One `THEN` rides bare; several are parenthesized so the comma list parses unambiguously.
+  parts.push(
+    `THEN ${thens.length === 1 ? thens[0] : thens.map((t) => `(${t})`).join(", ")}`,
+  );
+  return `${parts.join(" ")};`;
+}
+
+/** The `DefineStatement` for a standalone {@link EventDef} (the `defineEvent(…)` form). */
+export function emitEventStatement(
+  ev: EventDef,
+  opts?: DefineOptions,
+): DefineStatement {
+  return {
+    kind: "event",
+    name: ev.name,
+    table: ev.table,
+    ddl: emitEvent(ev.table, ev, opts),
+  };
 }
 
 /** Emit `DEFINE FIELD path ...` for a node, then recurse into its children. */
@@ -418,7 +457,14 @@ function emit(
     if (isArray && child.suffix === ".*") {
       if (isTrivialElement(child.info, child.surreal)) {
         for (const sub of child.info.children) {
-          emit(`${childPath}${sub.suffix}`, table, sub.info, sub.surreal, opts, out);
+          emit(
+            `${childPath}${sub.suffix}`,
+            table,
+            sub.info,
+            sub.surreal,
+            opts,
+            out,
+          );
         }
       } else {
         emit(childPath, table, child.info, child.surreal, opts, out, true);
@@ -515,6 +561,15 @@ export function emitStatements(
       ddl: `DEFINE INDEX ${existsPrefix(opts)}${escapeIdent(idx.name)} ON TABLE ${escapeIdent(t.name)} FIELDS ${idx.fields.map(escapeIdent).join(", ")}${unique};`,
     });
   }
+  // Row-change events declared via `.event(name, { when?, then })`.
+  for (const ev of t.config.events ?? []) {
+    out.push({
+      kind: "event",
+      name: ev.name,
+      table: t.name,
+      ddl: emitEvent(t.name, ev, opts),
+    });
+  }
   return out;
 }
 
@@ -536,6 +591,9 @@ export function removeStatement(
     return `REMOVE TABLE IF EXISTS ${escapeIdent(s.name)};`;
   if (s.kind === "index") {
     return `REMOVE INDEX IF EXISTS ${escapeIdent(s.name)} ON TABLE ${escapeIdent(s.table ?? "")};`;
+  }
+  if (s.kind === "event") {
+    return `REMOVE EVENT IF EXISTS ${escapeIdent(s.name)} ON TABLE ${escapeIdent(s.table ?? "")};`;
   }
   return `REMOVE FIELD IF EXISTS ${s.name} ON TABLE ${escapeIdent(s.table ?? "")};`;
 }

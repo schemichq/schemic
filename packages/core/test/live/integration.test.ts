@@ -1,6 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { z } from "zod";
 import { RecordId, surql } from "surrealdb";
+import {
+  introspectStructured,
+  structuredSnapshot,
+} from "../../src/cli/structure";
 import { emitTable } from "../../src/ddl";
 import { defineRelation, sz, defineTable } from "../../src/pure";
 import { tryConnect } from "../helpers";
@@ -37,10 +41,6 @@ live("CRUD + codecs against a live DB", () => {
       .join("\n");
     await db!.query(ddl);
     await db!.query(surql`DELETE it_friend; DELETE it_user; DELETE it_native;`);
-  });
-
-  afterAll(async () => {
-    await db?.close();
   });
 
   test("CREATE fills DB-side defaults; decode yields app types", async () => {
@@ -103,4 +103,50 @@ live("CRUD + codecs against a live DB", () => {
     );
     expect(res[0]?.friends).toContain("Bob");
   });
+});
+
+const Evented = defineTable("it_evented", {
+  id: z.string(),
+  email: sz.email(),
+  verified: sz.boolean().$default(surql`false`),
+}).event("it_reverify", {
+  when: surql`$before.email != $after.email`,
+  then: surql`UPDATE $after.id SET verified = false`,
+});
+
+live("event DDL introspects + round-trips", () => {
+  beforeAll(async () => {
+    await db!.query(emitTable(Evented, { exists: "overwrite" }));
+  });
+  afterAll(async () => {
+    await db?.query("REMOVE TABLE IF EXISTS it_evented;");
+  });
+
+  test("INFO … STRUCTURE reports the event; the snapshot canonicalizes it", async () => {
+    const tables = await introspectStructured(db!);
+    const t = tables.find((t) => t.name === "it_evented");
+    const ev = t?.events.find((e) => e.name === "it_reverify");
+    expect(ev?.when).toBe("$before.email != $after.email");
+    expect(ev?.then).toEqual(["UPDATE $after.id SET verified = false"]);
+
+    const ddl = structuredSnapshot([t!]).statements[
+      "event:it_evented:it_reverify"
+    ]?.ddl;
+    expect(ddl).toBe(
+      "DEFINE EVENT it_reverify ON it_evented WHEN $before.email != $after.email THEN UPDATE $after.id SET verified = false;",
+    );
+  });
+
+  test("re-applying the emitted DDL is idempotent (no diff --live drift)", async () => {
+    const key = "event:it_evented:it_reverify";
+    const before = structuredSnapshot(await introspectStructured(db!));
+    await db!.query(emitTable(Evented, { exists: "overwrite" }));
+    const after = structuredSnapshot(await introspectStructured(db!));
+    expect(after.statements[key].ddl).toBe(before.statements[key].ddl);
+  });
+});
+
+// Single teardown for the shared connection (each describe above uses it in turn).
+afterAll(async () => {
+  await db?.close();
 });

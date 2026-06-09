@@ -20,7 +20,7 @@ import {
   timestamp,
   writeSnapshot,
 } from "./meta";
-import { loadSchemas } from "./schema";
+import { loadDefs } from "./schema";
 
 export type Direction = "up" | "down";
 
@@ -41,7 +41,8 @@ export interface MigrationPlan {
 export async function planMigration(
   config: ResolvedConfig,
 ): Promise<MigrationPlan> {
-  const next = buildSnapshot(await loadSchemas(config.schemaPath));
+  const { tables, events } = await loadDefs(config.schemaPath);
+  const next = buildSnapshot(tables, events);
   const diff = diffSnapshots(readSnapshot(config.metaDir), next);
   return { diff, next };
 }
