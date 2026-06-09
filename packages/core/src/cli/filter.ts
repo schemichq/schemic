@@ -126,5 +126,6 @@ export function filterStructured(db: DbStructured, f: Filter): DbStructured {
       events: t.events.filter((e) => inCat(f.events, e.name)),
     }));
   const functions = db.functions.filter((fn) => inCat(f.functions, fn.name));
-  return { tables, functions };
+  const accesses = db.accesses.filter((a) => inCat(f.access, a.name));
+  return { tables, functions, accesses };
 }

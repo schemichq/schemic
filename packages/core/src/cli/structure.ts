@@ -67,6 +67,25 @@ export interface StructFunction {
   comment?: string;
 }
 
+export interface StructAccess {
+  name: string;
+  kind: {
+    kind: string; // "RECORD" | "JWT" | "BEARER"
+    /** BEARER: `"RECORD"` | `"USER"`. */
+    subject?: string;
+    /** RECORD bodies. */
+    signup?: string;
+    signin?: string;
+    authenticate?: string;
+    /** JWT/BEARER token config. The `key` is REDACTED by SurrealDB; `alg`/`url` are not. */
+    jwt?: {
+      issuer?: { alg?: string; key?: string };
+      verify?: { alg?: string; key?: string; url?: string };
+    };
+  };
+  duration?: { grant?: string; token?: string; session?: string };
+}
+
 export interface StructTableKind {
   kind: "NORMAL" | "ANY" | "RELATION";
   in?: string[];
@@ -92,12 +111,14 @@ interface DbStructure {
     id?: number;
   })[];
   functions?: StructFunction[];
+  accesses?: StructAccess[];
 }
 
-/** The structured database: tables (with their fields/indexes/events) and db-level functions. */
+/** The structured database: tables (with their fields/indexes/events) and db-level functions/access. */
 export interface DbStructured {
   tables: StructTable[];
   functions: StructFunction[];
+  accesses: StructAccess[];
 }
 interface TableStructure {
   fields?: StructField[];
@@ -256,6 +277,41 @@ function canonicalFunction(fn: StructFunction): string {
 }
 
 /**
+ * Canonical `DEFINE ACCESS …`. The signing KEY is INTENTIONALLY ignored — SurrealDB redacts it
+ * identically on both diff sides, so comparing it is meaningless (key changes go undetected by
+ * `diff --live`; documented). The JWT `alg`/`url` are kept (not redacted). Always `ON DATABASE`.
+ */
+function canonicalAccess(a: StructAccess): string {
+  const k = a.kind;
+  let typeClause: string;
+  if (k.kind === "BEARER") {
+    typeClause = `TYPE BEARER FOR ${k.subject}`;
+  } else if (k.kind === "JWT") {
+    const v = k.jwt?.verify;
+    typeClause = v?.url
+      ? `TYPE JWT URL ${JSON.stringify(v.url)}`
+      : `TYPE JWT ALGORITHM ${v?.alg ?? ""}`; // KEY omitted (redacted)
+  } else {
+    typeClause = "TYPE RECORD";
+  }
+  const parts = [`DEFINE ACCESS ${a.name} ON DATABASE ${typeClause}`];
+  if (k.kind === "RECORD") {
+    if (k.signup) parts.push(`SIGNUP ${k.signup}`);
+    if (k.signin) parts.push(`SIGNIN ${k.signin}`);
+    if (k.authenticate) parts.push(`AUTHENTICATE ${k.authenticate}`);
+  }
+  const d = a.duration;
+  if (d?.grant || d?.token || d?.session) {
+    const fors: string[] = [];
+    if (d.grant) fors.push(`FOR GRANT ${d.grant}`);
+    if (d.token) fors.push(`FOR TOKEN ${d.token}`);
+    if (d.session) fors.push(`FOR SESSION ${d.session}`);
+    parts.push(`DURATION ${fors.join(", ")}`);
+  }
+  return `${parts.join(" ")};`;
+}
+
+/**
  * Fold an array element type into a BARE `array`/`set` kind, so a field stored as `array` with an
  * `array.* TYPE object` element compares equal to `array<object>` (the typed form surreal-zod
  * emits). Typed kinds (`array<X>`) and the `.*` itself are left alone — the element is in the type.
@@ -305,6 +361,7 @@ const keyOf = (s: Pick<DefineStatement, "kind" | "name" | "table">) =>
 export function structuredSnapshot({
   tables,
   functions,
+  accesses,
 }: DbStructured): Snapshot {
   const statements: Record<string, DefineStatement> = {};
   for (const t of tables) {
@@ -375,6 +432,14 @@ export function structuredSnapshot({
     };
     statements[keyOf(s)] = s;
   }
+  for (const a of accesses) {
+    const s: DefineStatement = {
+      kind: "access",
+      name: a.name,
+      ddl: canonicalAccess(a),
+    };
+    statements[keyOf(s)] = s;
+  }
   return { version: 1, statements };
 }
 
@@ -410,5 +475,9 @@ export async function introspectStructured(
       events: tinfo.events ?? [],
     });
   }
-  return { tables, functions: dbInfo.functions ?? [] };
+  return {
+    tables,
+    functions: dbInfo.functions ?? [],
+    accesses: dbInfo.accesses ?? [],
+  };
 }

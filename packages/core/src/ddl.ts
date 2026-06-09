@@ -1,6 +1,7 @@
 import { BoundQuery, escapeIdent, toSurqlString } from "surrealdb";
 import type { z } from "zod";
 import {
+  type AccessDef,
   type Expr,
   type FieldPermissions,
   type FunctionDef,
@@ -348,6 +349,12 @@ function eventClause(e: Expr): string {
   return e instanceof BoundQuery ? inline(e) : e;
 }
 
+/** A `{ … }` block body — wraps a bare statement list in braces; a `surql\`{ … }\`` passes through. */
+function braceBody(e: Expr): string {
+  const s = eventClause(e).trim();
+  return s.startsWith("{") ? s : `{ ${s} }`;
+}
+
 /** `DEFINE EVENT <name> ON TABLE <table> [WHEN <when>] THEN <then>`. Multiple `then`s run in order. */
 function emitEvent(
   table: string,
@@ -380,9 +387,7 @@ function emitFunction(fn: FunctionDef, opts?: DefineOptions): string {
     `DEFINE FUNCTION ${existsPrefix(opts)}fn::${escapeIdent(fn.name)}(${args})`,
   ];
   if (fn.config.returns) parts.push(`-> ${fieldType(fn.config.returns)}`);
-  // Body is a block; wrap a bare statement list in braces (a `surql\`{ … }\`` passes through).
-  const body = eventClause(fn.config.body).trim();
-  parts.push(body.startsWith("{") ? body : `{ ${body} }`);
+  parts.push(braceBody(fn.config.body));
   const p = fn.config.permissions;
   if (p !== undefined) {
     parts.push(
@@ -398,7 +403,42 @@ function emitFunction(fn: FunctionDef, opts?: DefineOptions): string {
   return `${parts.join(" ")};`;
 }
 
-/** The `DefineStatement` for a standalone def — `defineEvent(…)` or `defineFunction(…)`. */
+/** `DEFINE ACCESS <name> ON <DATABASE|NAMESPACE> TYPE <RECORD|JWT|BEARER> … [DURATION …]`. */
+function emitAccess(a: AccessDef, opts?: DefineOptions): string {
+  const on = a.config.on === "namespace" ? "NAMESPACE" : "DATABASE";
+  const k = a.config.kind;
+  let typeClause: string;
+  if (k.type === "bearer") {
+    typeClause = `TYPE BEARER FOR ${k.subject === "user" ? "USER" : "RECORD"}`;
+  } else if (k.type === "jwt") {
+    typeClause = k.url
+      ? `TYPE JWT URL ${JSON.stringify(k.url)}`
+      : `TYPE JWT ALGORITHM ${k.alg ?? "HS512"} KEY ${JSON.stringify(k.key ?? "")}`;
+  } else {
+    typeClause = "TYPE RECORD";
+  }
+  const parts = [
+    `DEFINE ACCESS ${existsPrefix(opts)}${escapeIdent(a.name)} ON ${on} ${typeClause}`,
+  ];
+  // SIGNUP/SIGNIN/AUTHENTICATE only apply to RECORD access.
+  if (k.type === "record") {
+    if (a.config.signup) parts.push(`SIGNUP ${braceBody(a.config.signup)}`);
+    if (a.config.signin) parts.push(`SIGNIN ${braceBody(a.config.signin)}`);
+    if (a.config.authenticate)
+      parts.push(`AUTHENTICATE ${braceBody(a.config.authenticate)}`);
+  }
+  const d = a.config.duration;
+  if (d?.grant || d?.token || d?.session) {
+    const fors: string[] = [];
+    if (d.grant) fors.push(`FOR GRANT ${d.grant}`);
+    if (d.token) fors.push(`FOR TOKEN ${d.token}`);
+    if (d.session) fors.push(`FOR SESSION ${d.session}`);
+    parts.push(`DURATION ${fors.join(", ")}`);
+  }
+  return `${parts.join(" ")};`;
+}
+
+/** The `DefineStatement` for a standalone def — `defineEvent`/`defineFunction`/`defineAccess`. */
 export function emitDefStatement(
   def: StandaloneDef,
   opts?: DefineOptions,
@@ -410,6 +450,9 @@ export function emitDefStatement(
       table: def.table,
       ddl: emitEvent(def.table, def, opts),
     };
+  }
+  if (def.kind === "access") {
+    return { kind: "access", name: def.name, ddl: emitAccess(def, opts) };
   }
   return { kind: "function", name: def.name, ddl: emitFunction(def, opts) };
 }

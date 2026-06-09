@@ -28,7 +28,8 @@ function isStandaloneDef(v: unknown): v is StandaloneDef {
   if (!v || typeof v !== "object") return false;
   const d = v as Record<string, unknown>;
   return (
-    (d.kind === "event" || d.kind === "function") && typeof d.name === "string"
+    (d.kind === "event" || d.kind === "function" || d.kind === "access") &&
+    typeof d.name === "string"
   );
 }
 

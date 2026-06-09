@@ -1,4 +1,4 @@
-import type { DefineStatement } from "surreal-zod";
+import { type DefineStatement, overwriteStatement } from "surreal-zod";
 import { escapeIdent, type Surreal } from "surrealdb";
 import type { ResolvedConfig } from "./config";
 import { buildSnapshot, type Diff, diffSnapshots } from "./diff";
@@ -72,10 +72,26 @@ export async function diffAgainstDb(
 
   // up = statements that would bring the live database in line with the schema. The filter drops
   // both sides' excluded kinds (access is off by default) so they're neither applied nor pruned.
-  return diffSnapshots(
+  const diff = diffSnapshots(
     filterSnapshot(target, filter),
     filterSnapshot(desired, filter),
   );
+
+  // Access is COMPARED via its canonical form (the signing key is redacted identically on both
+  // sides, so no false diff), but that form can't be APPLIED — the redacted KEY is gone. Swap in
+  // the schema's emit DDL (which carries the key) for any DEFINE ACCESS in the apply plan.
+  const accessEmit = new Map<string, string>();
+  for (const s of Object.values(buildSnapshot(tables, defs).statements))
+    if (s.kind === "access") accessEmit.set(s.name, s.ddl);
+  if (accessEmit.size) {
+    const swap = (stmt: string): string => {
+      const m = /^DEFINE ACCESS (OVERWRITE )?(\S+)/.exec(stmt);
+      const emit = m && accessEmit.get(m[2]);
+      return emit ? (m[1] ? overwriteStatement(emit) : emit) : stmt;
+    };
+    diff.up = diff.up.map(swap);
+  }
+  return diff;
 }
 
 /**

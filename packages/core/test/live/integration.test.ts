@@ -1,12 +1,18 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { z } from "zod";
 import { RecordId, surql } from "surrealdb";
+import { z } from "zod";
 import {
   introspectStructured,
   structuredSnapshot,
 } from "../../src/cli/structure";
 import { emitDefStatement, emitTable } from "../../src/ddl";
-import { defineFunction, defineRelation, sz, defineTable } from "../../src/pure";
+import {
+  defineAccess,
+  defineFunction,
+  defineRelation,
+  defineTable,
+  sz,
+} from "../../src/pure";
 import { tryConnect } from "../helpers";
 
 /**
@@ -15,7 +21,8 @@ import { tryConnect } from "../helpers";
  */
 const db = await tryConnect();
 const live = describe.skipIf(!db);
-if (!db) console.warn("[live] SurrealDB unreachable — skipping integration tests");
+if (!db)
+  console.warn("[live] SurrealDB unreachable — skipping integration tests");
 
 const User = defineTable("it_user", {
   id: z.string(),
@@ -32,7 +39,9 @@ const Native = defineTable("it_native", {
   when: sz.datetime(),
 });
 
-const Friend = defineRelation("it_friend", { strength: sz.number() }).from(User).to(User);
+const Friend = defineRelation("it_friend", { strength: sz.number() })
+  .from(User)
+  .to(User);
 
 live("CRUD + codecs against a live DB", () => {
   beforeAll(async () => {
@@ -45,7 +54,9 @@ live("CRUD + codecs against a live DB", () => {
 
   test("CREATE fills DB-side defaults; decode yields app types", async () => {
     const id = User.record().make("alice");
-    await db!.query(surql`CREATE ${id} CONTENT ${User.encode({ name: "Alice" })}`);
+    await db!.query(
+      surql`CREATE ${id} CONTENT ${User.encode({ name: "Alice" })}`,
+    );
 
     const [rows] = await db!.query<[unknown[]]>(surql`SELECT * FROM ${id}`);
     const u = User.decode(rows[0]);
@@ -58,7 +69,9 @@ live("CRUD + codecs against a live DB", () => {
 
   test("encodePartial MERGE updates a field", async () => {
     const id = User.record().make("alice");
-    await db!.query(surql`UPDATE ${id} MERGE ${User.encodePartial({ role: "admin" })}`);
+    await db!.query(
+      surql`UPDATE ${id} MERGE ${User.encodePartial({ role: "admin" })}`,
+    );
 
     const [rows] = await db!.query<[unknown[]]>(surql`SELECT * FROM ${id}`);
     expect(User.decode(rows[0]).role).toBe("admin");
@@ -67,11 +80,13 @@ live("CRUD + codecs against a live DB", () => {
   test("native round-trip: uuid + bytes + datetime through the DB", async () => {
     const id = Native.record().make("n1");
     const tag = "0190b6e0-1234-7890-abcd-ef0123456789";
-    await db!.query(surql`CREATE ${id} CONTENT ${Native.encode({
-      tag,
-      data: new Uint8Array([1, 2, 3]),
-      when: new Date("2022-01-01T00:00:00.000Z"),
-    })}`);
+    await db!.query(
+      surql`CREATE ${id} CONTENT ${Native.encode({
+        tag,
+        data: new Uint8Array([1, 2, 3]),
+        when: new Date("2022-01-01T00:00:00.000Z"),
+      })}`,
+    );
 
     const [rows] = await db!.query<[unknown[]]>(surql`SELECT * FROM ${id}`);
     const n = Native.decode(rows[0]);
@@ -85,8 +100,12 @@ live("CRUD + codecs against a live DB", () => {
   test("RELATE + decode of an edge record", async () => {
     const alice = User.record().make("alice");
     const bob = User.record().make("bob");
-    await db!.query(surql`CREATE ${bob} CONTENT ${User.encode({ name: "Bob" })}`);
-    await db!.query(surql`RELATE ${alice}->it_friend->${bob} SET strength = 0.9`);
+    await db!.query(
+      surql`CREATE ${bob} CONTENT ${User.encode({ name: "Bob" })}`,
+    );
+    await db!.query(
+      surql`RELATE ${alice}->it_friend->${bob} SET strength = 0.9`,
+    );
 
     const [rows] = await db!.query<[unknown[]]>(surql`SELECT * FROM it_friend`);
     const f = Friend.decode(rows[0]);
@@ -129,9 +148,11 @@ live("event DDL introspects + round-trips", () => {
     expect(ev?.when).toBe("$before.email != $after.email");
     expect(ev?.then).toEqual(["UPDATE $after.id SET verified = false"]);
 
-    const ddl = structuredSnapshot({ tables: [t!], functions: [] }).statements[
-      "event:it_evented:it_reverify"
-    ]?.ddl;
+    const ddl = structuredSnapshot({
+      tables: [t!],
+      functions: [],
+      accesses: [],
+    }).statements["event:it_evented:it_reverify"]?.ddl;
     expect(ddl).toBe(
       "DEFINE EVENT it_reverify ON it_evented WHEN $before.email != $after.email THEN UPDATE $after.id SET verified = false;",
     );
@@ -164,8 +185,11 @@ live("function DDL introspects + round-trips", () => {
     expect(fn?.args).toEqual([["name", "string"]]);
     expect(fn?.returns).toBe("string");
 
-    const ddl = structuredSnapshot({ tables: [], functions: fn ? [fn] : [] })
-      .statements["function::it_greet"]?.ddl;
+    const ddl = structuredSnapshot({
+      tables: [],
+      functions: fn ? [fn] : [],
+      accesses: [],
+    }).statements["function::it_greet"]?.ddl;
     expect(ddl).toContain(
       "DEFINE FUNCTION fn::it_greet($name: string) -> string {",
     );
@@ -177,6 +201,47 @@ live("function DDL introspects + round-trips", () => {
     await db!.query(emitDefStatement(Greeter, { exists: "overwrite" }).ddl);
     const after = structuredSnapshot(await introspectStructured(db!));
     expect(after.statements[key].ddl).toBe(before.statements[key].ddl);
+  });
+});
+
+const Accesses = [
+  defineAccess("it_app")
+    .record()
+    .signin(surql`SELECT * FROM it_user WHERE email = $email`)
+    .duration({ token: "1h", session: "12h" }),
+  defineAccess("it_jwt").jwt({ alg: "HS512", key: "supersecretvalue" }),
+  defineAccess("it_svc").bearer({ for: "record" }).duration({ grant: "30d" }),
+];
+
+live("access DDL (record/jwt/bearer) introspects + round-trips", () => {
+  beforeAll(async () => {
+    for (const a of Accesses)
+      await db!.query(emitDefStatement(a, { exists: "overwrite" }).ddl);
+  });
+  afterAll(async () => {
+    for (const n of ["it_app", "it_jwt", "it_svc"])
+      await db?.query(`REMOVE ACCESS IF EXISTS ${n} ON DATABASE;`);
+  });
+
+  test("INFO FOR DB STRUCTURE reports all three access types", async () => {
+    const { accesses } = await introspectStructured(db!);
+    const mine = accesses.filter((a) => a.name.startsWith("it_"));
+    expect(mine.map((a) => `${a.name}:${a.kind.kind}`).sort()).toEqual([
+      "it_app:RECORD",
+      "it_jwt:JWT",
+      "it_svc:BEARER",
+    ]);
+  });
+
+  test("re-applying is idempotent (no diff --live drift)", async () => {
+    const snap = () =>
+      introspectStructured(db!).then((s) => structuredSnapshot(s).statements);
+    const before = await snap();
+    for (const a of Accesses)
+      await db!.query(emitDefStatement(a, { exists: "overwrite" }).ddl);
+    const after = await snap();
+    for (const n of ["it_app", "it_jwt", "it_svc"])
+      expect(after[`access::${n}`].ddl).toBe(before[`access::${n}`].ddl);
   });
 });
 

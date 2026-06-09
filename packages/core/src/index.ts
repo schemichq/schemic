@@ -31,6 +31,8 @@ export type {
   Wire,
 } from "./pure";
 export {
+  AccessDef,
+  defineAccess,
   defineEvent,
   defineFunction,
   defineRelation,

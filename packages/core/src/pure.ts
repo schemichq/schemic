@@ -1916,8 +1916,96 @@ export function defineFunction(name: string, args: Shape = {}): FunctionDef {
   );
 }
 
+/** The access type + its type-specific config. `RECORD` (default) / `JWT` / `BEARER`. */
+export type AccessKind =
+  | { type: "record" }
+  | { type: "jwt"; alg?: string; key?: string; url?: string }
+  | { type: "bearer"; subject: "record" | "user" };
+
+/** Token/session/grant lifetimes, e.g. `{ token: "1h", session: "12h", grant: "30d" }`. */
+export interface AccessDuration {
+  grant?: string;
+  token?: string;
+  session?: string;
+}
+
+interface AccessConfig {
+  /** `ON DATABASE` (default) or `ON NAMESPACE`. */
+  on: "database" | "namespace";
+  kind: AccessKind;
+  /** RECORD-only: SIGNUP/SIGNIN/AUTHENTICATE blocks. */
+  signup?: Expr;
+  signin?: Expr;
+  authenticate?: Expr;
+  duration?: AccessDuration;
+}
+
+/**
+ * An access definition — `DEFINE ACCESS <name> ON DATABASE TYPE …`. Chainable like {@link TableDef}.
+ * Pick a type with `.record()` (default; SIGNUP/SIGNIN), `.jwt({ alg, key } | { url })` (validate
+ * external tokens), or `.bearer({ for })` (API-key grants). The RECORD bodies are `surql\`…\`` blocks
+ * (braces optional). NOTE: SurrealDB redacts signing keys in introspection, so `pull` can't recover
+ * them — see the CLI (`--access` is opt-in for that reason).
+ */
+export class AccessDef {
+  readonly kind = "access" as const;
+  constructor(
+    readonly name: string,
+    readonly config: AccessConfig = {
+      on: "database",
+      kind: { type: "record" },
+    },
+  ) {}
+  private withConfig(c: Partial<AccessConfig>): AccessDef {
+    return new AccessDef(this.name, { ...this.config, ...c });
+  }
+  /** `TYPE RECORD` (the default) — end users sign up / sign in directly. */
+  record(): AccessDef {
+    return this.withConfig({ kind: { type: "record" } });
+  }
+  /** `TYPE JWT` — validate tokens from an external issuer: `{ alg, key }` (symmetric/PEM) or `{ url }` (JWKS). */
+  jwt(opts: { alg?: string; key?: string; url?: string }): AccessDef {
+    return this.withConfig({ kind: { type: "jwt", ...opts } });
+  }
+  /** `TYPE BEARER FOR USER|RECORD` — bearer-token / API-key grants. */
+  bearer(opts: { for: "record" | "user" }): AccessDef {
+    return this.withConfig({ kind: { type: "bearer", subject: opts.for } });
+  }
+  onNamespace(): AccessDef {
+    return this.withConfig({ on: "namespace" });
+  }
+  onDatabase(): AccessDef {
+    return this.withConfig({ on: "database" });
+  }
+  /** `SIGNUP { … }` (RECORD) — a `surql\`…\`` block (braces optional) run on sign-up. */
+  signup(body: Expr): AccessDef {
+    return this.withConfig({ signup: body });
+  }
+  /** `SIGNIN { … }` (RECORD) — a `surql\`…\`` block run on sign-in. */
+  signin(body: Expr): AccessDef {
+    return this.withConfig({ signin: body });
+  }
+  /** `AUTHENTICATE { … }` — a `surql\`…\`` block run on each authenticated request. */
+  authenticate(body: Expr): AccessDef {
+    return this.withConfig({ authenticate: body });
+  }
+  /** Token/session/grant lifetimes (`DURATION FOR TOKEN …, FOR SESSION …, FOR GRANT …`). */
+  duration(d: AccessDuration): AccessDef {
+    return this.withConfig({ duration: d });
+  }
+}
+
+/**
+ * Declare an access definition: `export const account = defineAccess("account").record()
+ * .signup(surql\`…\`).signin(surql\`…\`).duration({ token: "1h", session: "12h" })`. See {@link AccessDef}
+ * for `.jwt(…)` / `.bearer(…)`.
+ */
+export function defineAccess(name: string): AccessDef {
+  return new AccessDef(name);
+}
+
 /** A schema object declared apart from a table (collected by the CLI loader and emitted on its own). */
-export type StandaloneDef = EventDef | FunctionDef;
+export type StandaloneDef = EventDef | FunctionDef | AccessDef;
 
 /** The app-facing type (what your code reads). */
 export type App<T extends { object: z.ZodType }> = z.output<T["object"]>;

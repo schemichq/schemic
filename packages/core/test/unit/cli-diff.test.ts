@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 // Import `sz`/`table` by package name (like the CLI does) so the table types line up with the
 // `surreal-zod`-typed signatures in cli/diff (avoids src-vs-lib duplicate-declaration errors).
 import {
+  defineAccess,
   defineEvent,
   defineFunction,
   defineTable,
@@ -253,7 +254,10 @@ describe("events", () => {
       then: surql`UPDATE $after.id SET verified = false`,
     })
     .event("log_changes", {
-      then: [surql`UPDATE $after.id SET a = 1`, surql`UPDATE $after.id SET b = 2`],
+      then: [
+        surql`UPDATE $after.id SET a = 1`,
+        surql`UPDATE $after.id SET b = 2`,
+      ],
     });
 
   test(".event() emits DEFINE EVENT with WHEN + THEN", () => {
@@ -338,9 +342,10 @@ describe("functions", () => {
   });
 
   test("sz-typed args infer SurrealQL types (record/int), bare body is braced", () => {
-    const fn = defineFunction("touch", { who: User.record(), n: sz.int() }).body(
-      surql`UPDATE $who SET hits = $n`,
-    );
+    const fn = defineFunction("touch", {
+      who: User.record(),
+      n: sz.int(),
+    }).body(surql`UPDATE $who SET hits = $n`);
     expect(ddlOf(fn)).toBe(
       "DEFINE FUNCTION fn::touch($who: record<user>, $n: int) { UPDATE $who SET hits = $n };",
     );
@@ -371,5 +376,67 @@ describe("functions", () => {
     const fn = defineFunction("f", {}).body(surql`RETURN 1`);
     const up = diffSnapshots(EMPTY_SNAPSHOT, buildSnapshot([], [fn])).up;
     expect(summarizeKinds(up)).toBe("1 function");
+  });
+});
+
+describe("access", () => {
+  const ddlOf = (a: ReturnType<typeof defineAccess>) =>
+    diffSnapshots(EMPTY_SNAPSHOT, buildSnapshot([], [a])).up[0];
+
+  test("emits DEFINE ACCESS RECORD with auto-braced SIGNUP/SIGNIN + DURATION", () => {
+    const account = defineAccess("account")
+      .record()
+      .signup(surql`CREATE user CONTENT { email: $email }`)
+      .signin(surql`SELECT * FROM user WHERE email = $email`)
+      .duration({ token: "1h", session: "12h" });
+    expect(ddlOf(account)).toBe(
+      "DEFINE ACCESS account ON DATABASE TYPE RECORD " +
+        "SIGNUP { CREATE user CONTENT { email: $email } } " +
+        "SIGNIN { SELECT * FROM user WHERE email = $email } " +
+        "DURATION FOR TOKEN 1h, FOR SESSION 12h;",
+    );
+  });
+
+  test("adding access → DEFINE ACCESS up / REMOVE ACCESS down", () => {
+    const a = defineAccess("account").record().signin(surql`SELECT 1`);
+    const diff = diffSnapshots(EMPTY_SNAPSHOT, buildSnapshot([], [a]));
+    expect(diff.up[0]).toContain(
+      "DEFINE ACCESS account ON DATABASE TYPE RECORD",
+    );
+    expect(diff.down).toEqual(["REMOVE ACCESS IF EXISTS account ON DATABASE;"]);
+  });
+
+  test("summarizeKinds counts access", () => {
+    const a = defineAccess("a").record().signin(surql`SELECT 1`);
+    const up = diffSnapshots(EMPTY_SNAPSHOT, buildSnapshot([], [a])).up;
+    expect(summarizeKinds(up)).toBe("1 access");
+  });
+
+  test("TYPE JWT with alg + key, and with a JWKS url", () => {
+    const sym = defineAccess("api")
+      .jwt({ alg: "HS512", key: "secret" })
+      .duration({ token: "1h" });
+    expect(ddlOf(sym)).toBe(
+      `DEFINE ACCESS api ON DATABASE TYPE JWT ALGORITHM HS512 KEY "secret" DURATION FOR TOKEN 1h;`,
+    );
+    const jwks = defineAccess("api2").jwt({
+      url: "https://example.com/jwks.json",
+    });
+    expect(ddlOf(jwks)).toBe(
+      `DEFINE ACCESS api2 ON DATABASE TYPE JWT URL "https://example.com/jwks.json";`,
+    );
+  });
+
+  test("TYPE BEARER FOR RECORD/USER with grant duration", () => {
+    const svc = defineAccess("svc")
+      .bearer({ for: "record" })
+      .duration({ grant: "30d", session: "12h" });
+    expect(ddlOf(svc)).toBe(
+      "DEFINE ACCESS svc ON DATABASE TYPE BEARER FOR RECORD " +
+        "DURATION FOR GRANT 30d, FOR SESSION 12h;",
+    );
+    expect(ddlOf(defineAccess("u").bearer({ for: "user" }))).toBe(
+      "DEFINE ACCESS u ON DATABASE TYPE BEARER FOR USER;",
+    );
   });
 });

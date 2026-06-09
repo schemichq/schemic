@@ -7,6 +7,7 @@ import { existingTables } from "./schema";
 import {
   type DbStructured,
   introspectStructured,
+  type StructAccess,
   type StructField,
   type StructFunction,
   type StructPerm,
@@ -506,6 +507,48 @@ function renderFunctionConst(fn: StructFunction): string {
   return `${code};`;
 }
 
+/** Reverse a `StructAccess` into a `defineAccess(name).<type>(…)…` const. Signing keys are NOT recovered. */
+function renderAccessConst(a: StructAccess): string {
+  const k = a.kind;
+  const v = k.jwt?.verify;
+  // A signing key is present (and redacted) for everything except JWT-via-JWKS-URL.
+  const hasRedactedKey = !(k.kind === "JWT" && v?.url);
+  const lines: string[] = [];
+  if (hasRedactedKey)
+    lines.push(
+      "// NOTE: signing key not pulled (SurrealDB redacts it) — re-applying rotates it.",
+    );
+  let head = `export const ${fnConst(a.name)} = defineAccess(${JSON.stringify(a.name)})`;
+  if (k.kind === "BEARER") {
+    head += `\n  .bearer({ for: ${JSON.stringify((k.subject ?? "record").toLowerCase())} })`;
+  } else if (k.kind === "JWT") {
+    head += v?.url
+      ? `\n  .jwt({ url: ${JSON.stringify(v.url)} })`
+      : `\n  .jwt({ alg: ${JSON.stringify(v?.alg ?? "HS512")} /* key not pulled */ })`;
+  } else {
+    head += `\n  .record()`;
+  }
+  lines.push(head);
+  if (k.kind === "RECORD") {
+    if (k.signup) lines.push(`  .signup(surql\`${k.signup}\`)`);
+    if (k.signin) lines.push(`  .signin(surql\`${k.signin}\`)`);
+    if (k.authenticate)
+      lines.push(`  .authenticate(surql\`${k.authenticate}\`)`);
+  }
+  const d = a.duration;
+  if (d?.grant || d?.token || d?.session) {
+    const obj = [
+      d.grant && `grant: ${JSON.stringify(d.grant)}`,
+      d.token && `token: ${JSON.stringify(d.token)}`,
+      d.session && `session: ${JSON.stringify(d.session)}`,
+    ]
+      .filter(Boolean)
+      .join(", ");
+    lines.push(`  .duration({ ${obj} })`);
+  }
+  return `${lines.join("\n")};`;
+}
+
 /** Topologically sort so a table comes after every same-file table it references (deps first). */
 function topoSort<T extends { name: string; deps: string[] }>(items: T[]): T[] {
   const byName = new Map(items.map((it) => [it.name, it]));
@@ -546,7 +589,7 @@ export async function pull(
     db,
     new Set([config.migrationsTable, `${config.migrationsTable}_lock`]),
   );
-  const { tables, functions } = filterStructured(
+  const { tables, functions, accesses } = filterStructured(
     introspected,
     opts.filter ?? parseFilter({}),
   );
@@ -566,13 +609,13 @@ export async function pull(
   });
 
   return config.schemaIsFile
-    ? pullToFile({ tables, functions }, config, opts, makeCtx)
-    : pullToDir({ tables, functions }, config, opts, makeCtx);
+    ? pullToFile({ tables, functions, accesses }, config, opts, makeCtx)
+    : pullToDir({ tables, functions, accesses }, config, opts, makeCtx);
 }
 
 /** Directory layout: one `<table>.ts` per table, refusing to duplicate tables defined elsewhere. */
 async function pullToDir(
-  { tables, functions }: DbStructured,
+  { tables, functions, accesses }: DbStructured,
   config: ResolvedConfig,
   opts: { force?: boolean },
   makeCtx: (t: StructTable) => RenderCtx,
@@ -623,16 +666,18 @@ async function pullToDir(
     writeFileSync(file, renderTableModule(t, makeCtx(t)));
     files.push(`${t.name}.ts`);
   }
-  // Db-level functions live together in one `functions.ts` (they have no owning table).
-  if (functions.length) {
-    const file = join(dir, "functions.ts");
-    if (existsSync(file) && !opts.force) {
-      skipped.push("functions.ts");
-    } else {
-      writeFileSync(file, renderFunctionsModule(functions));
-      files.push("functions.ts");
+  // Db-level objects live in their own module (they have no owning table).
+  const writeModule = (name: string, content: string) => {
+    const file = join(dir, name);
+    if (existsSync(file) && !opts.force) skipped.push(name);
+    else {
+      writeFileSync(file, content);
+      files.push(name);
     }
-  }
+  };
+  if (functions.length)
+    writeModule("functions.ts", renderFunctionsModule(functions));
+  if (accesses.length) writeModule("access.ts", renderAccessModule(accesses));
   return { files, skipped };
 }
 
@@ -642,9 +687,15 @@ function renderFunctionsModule(functions: StructFunction[]): string {
   return `import { defineFunction, sz, surql } from "surreal-zod";\n\n${body}\n`;
 }
 
+/** The `access.ts` module for the directory layout (all db-level access defs). */
+function renderAccessModule(accesses: StructAccess[]): string {
+  const body = accesses.map(renderAccessConst).join("\n\n");
+  return `import { defineAccess, surql } from "surreal-zod";\n\n${body}\n`;
+}
+
 /** Single-file layout: one combined module (tables ordered so same-file refs resolve). */
 async function pullToFile(
-  { tables, functions }: DbStructured,
+  { tables, functions, accesses }: DbStructured,
   config: ResolvedConfig,
   opts: { force?: boolean },
   makeCtx: (t: StructTable) => RenderCtx,
@@ -670,13 +721,20 @@ async function pullToFile(
   });
   const ordered = topoSort(rendered);
   const fnCode = functions.map(renderFunctionConst);
+  const accessCode = accesses.map(renderAccessConst);
   const factories = [...new Set(ordered.map((r) => r.factory))];
   if (functions.length) factories.push("defineFunction");
+  if (accesses.length) factories.push("defineAccess");
   factories.sort();
-  const usesSurql = functions.length > 0 || ordered.some((r) => r.usesSurql);
+  const usesSurql =
+    functions.length > 0 ||
+    accesses.length > 0 ||
+    ordered.some((r) => r.usesSurql);
   const names = ["sz", ...(usesSurql ? ["surql"] : []), ...factories];
   const imports = [`import { ${names.join(", ")} } from "surreal-zod";`];
-  const body = [...ordered.map((r) => r.code), ...fnCode].join("\n\n");
+  const body = [...ordered.map((r) => r.code), ...fnCode, ...accessCode].join(
+    "\n\n",
+  );
   const out = `${imports.join("\n")}\n\n${body}\n`;
 
   mkdirSync(dirname(target), { recursive: true });
