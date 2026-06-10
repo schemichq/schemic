@@ -339,6 +339,13 @@ export interface DefineStatement {
   name: string;
   table?: string;
   ddl: string;
+  /**
+   * Rendered clause fragments keyed by clause name (`TYPE`, `DEFAULT`, `ASSERT`, …) — only on
+   * `field`/`table` statements. Each value is the exact fragment used in the DDL, which is also
+   * the `ALTER … <set>` form, so the migration engine can compute a clause-level delta without
+   * parsing SurrealQL. Absent on older snapshots (those changes fall back to `OVERWRITE`).
+   */
+  clauses?: Record<string, string>;
 }
 
 /** The SurrealQL type of a field schema (e.g. `string`, `option<int>`, `record<user>`). */
@@ -495,35 +502,47 @@ function emit(
   }
   // An array element is auto-created by SurrealDB, so a (kept) element DEFINE must OVERWRITE it.
   const prefix = forceOverwrite ? "OVERWRITE " : existsPrefix(opts);
-  const parts = [
-    `DEFINE FIELD ${prefix}${path} ON TABLE ${escapeIdent(table)} TYPE ${type}`,
-  ];
-  if (info.flexible) parts.push("FLEXIBLE");
-  if (surreal?.default) {
-    parts.push(
-      `DEFAULT ${surreal.defaultAlways ? "ALWAYS " : ""}${inline(surreal.default)}`,
-    );
+  // Clause fragments keyed by clause name (insertion order == DDL order). Each fragment is also
+  // the `ALTER FIELD … <set>` form, so the migration engine diffs clauses without parsing.
+  const clauses: Record<string, string> = { TYPE: `TYPE ${type}` };
+  if (info.flexible) clauses.FLEXIBLE = "FLEXIBLE";
+  if (surreal?.reference) {
+    let ref = "REFERENCE";
+    const onDelete =
+      surreal.reference === true ? undefined : surreal.reference.onDelete;
+    if (onDelete !== undefined) {
+      ref +=
+        onDelete instanceof BoundQuery
+          ? ` ON DELETE THEN ${inline(onDelete)}`
+          : ` ON DELETE ${onDelete.toUpperCase()}`;
+    }
+    clauses.REFERENCE = ref;
   }
-  if (surreal?.value) parts.push(`VALUE ${inline(surreal.value)}`);
-  if (surreal?.computed) parts.push(`COMPUTED ${inline(surreal.computed)}`);
+  if (surreal?.default) {
+    clauses.DEFAULT = `DEFAULT ${surreal.defaultAlways ? "ALWAYS " : ""}${inline(surreal.default)}`;
+  }
+  if (surreal?.value) clauses.VALUE = `VALUE ${inline(surreal.value)}`;
+  if (surreal?.computed)
+    clauses.COMPUTED = `COMPUTED ${inline(surreal.computed)}`;
   const assertClause = renderAsserts(surreal?.asserts);
-  if (assertClause) parts.push(assertClause);
-  if (surreal?.readonly) parts.push("READONLY");
+  if (assertClause) clauses.ASSERT = assertClause;
+  if (surreal?.readonly) clauses.READONLY = "READONLY";
   if (surreal?.comment)
-    parts.push(`COMMENT ${JSON.stringify(surreal.comment)}`);
+    clauses.COMMENT = `COMMENT ${JSON.stringify(surreal.comment)}`;
   // Internal fields still exist on the table (so SCHEMAFULL writes succeed) but grant
   // no record-user access — internal wins over any `$permissions` on the same field.
   if (surreal?.internal) {
-    parts.push("PERMISSIONS NONE");
+    clauses.PERMISSIONS = "PERMISSIONS NONE";
   } else if (surreal?.permissions !== undefined) {
     const clause = renderPermissions(surreal.permissions, [
       "select",
       "create",
       "update",
     ]);
-    if (clause) parts.push(clause);
+    if (clause) clauses.PERMISSIONS = clause;
   }
-  out.push({ kind: "field", name: path, table, ddl: `${parts.join(" ")};` });
+  const ddl = `DEFINE FIELD ${prefix}${path} ON TABLE ${escapeIdent(table)} ${Object.values(clauses).join(" ")};`;
+  out.push({ kind: "field", name: path, table, ddl, clauses });
 
   // A single-field index defined via `.index()` / `.unique()`.
   if (surreal?.index) {
@@ -611,22 +630,24 @@ export function emitStatements(
     if (rel.from.length)
       type += ` FROM ${rel.from.map(escapeIdent).join(" | ")}`;
     if (rel.to.length) type += ` TO ${rel.to.map(escapeIdent).join(" | ")}`;
+    if (rel.enforced) type += " ENFORCED";
   } else {
     type = t.config.type === "any" ? "ANY" : "NORMAL";
   }
 
-  const head = [
-    `DEFINE TABLE ${existsPrefix(opts)}${escapeIdent(t.name)}`,
-    `TYPE ${type}`,
-  ];
-  if (t.config.drop) head.push("DROP");
-  head.push(t.config.schemafull ? "SCHEMAFULL" : "SCHEMALESS");
+  // Build clauses keyed by name (insertion order == DDL order) so the migration engine can diff
+  // table-level changes into the `ALTER TABLE … <set>` form without parsing SurrealQL — the
+  // stored fragment IS the ALTER set form, exactly as for fields.
+  const clauses: Record<string, string> = { TYPE: `TYPE ${type}` };
+  if (t.config.drop) clauses.DROP = "DROP";
+  clauses.SCHEMA = t.config.schemafull ? "SCHEMAFULL" : "SCHEMALESS";
   if (t.config.changefeed) {
-    head.push(`CHANGEFEED ${t.config.changefeed.expiry}`);
-    if (t.config.changefeed.includeOriginal) head.push("INCLUDE ORIGINAL");
+    clauses.CHANGEFEED = `CHANGEFEED ${t.config.changefeed.expiry}${
+      t.config.changefeed.includeOriginal ? " INCLUDE ORIGINAL" : ""
+    }`;
   }
   if (t.config.comment)
-    head.push(`COMMENT ${JSON.stringify(t.config.comment)}`);
+    clauses.COMMENT = `COMMENT ${JSON.stringify(t.config.comment)}`;
   // Fold permissions into the single DEFINE TABLE head (no separate OVERWRITE … PERMISSIONS).
   if (t.config.permissions !== undefined) {
     const clause = renderPermissions(t.config.permissions, [
@@ -635,11 +656,16 @@ export function emitStatements(
       "update",
       "delete",
     ]);
-    if (clause) head.push(clause);
+    if (clause) clauses.PERMISSIONS = clause;
   }
 
   const out: DefineStatement[] = [
-    { kind: "table", name: t.name, ddl: `${head.join(" ")};` },
+    {
+      kind: "table",
+      name: t.name,
+      ddl: `DEFINE TABLE ${existsPrefix(opts)}${escapeIdent(t.name)} ${Object.values(clauses).join(" ")};`,
+      clauses,
+    },
   ];
   for (const [name, field] of Object.entries(t.fields)) {
     if (implicit.has(name)) continue;
@@ -706,4 +732,115 @@ export function overwriteStatement(ddl: string): string {
     /^DEFINE (TABLE|FIELD|INDEX|EVENT|ANALYZER|ACCESS|PARAM|FUNCTION) (?!OVERWRITE\b)/,
     "DEFINE $1 OVERWRITE ",
   );
+}
+
+/** Canonical clause order for a deterministic `ALTER FIELD` body (matches the DDL order). */
+const FIELD_CLAUSE_ORDER = [
+  "TYPE",
+  "FLEXIBLE",
+  "REFERENCE",
+  "DEFAULT",
+  "VALUE",
+  "COMPUTED",
+  "ASSERT",
+  "READONLY",
+  "COMMENT",
+  "PERMISSIONS",
+] as const;
+/** Clauses `ALTER FIELD` can `DROP` (remove). `PERMISSIONS` has no DROP (reset to FULL);
+ *  `COMPUTED` has no ALTER form at all (forces an OVERWRITE fallback). */
+const FIELD_DROPPABLE = new Set([
+  "FLEXIBLE",
+  "READONLY",
+  "VALUE",
+  "ASSERT",
+  "DEFAULT",
+  "COMMENT",
+  "REFERENCE",
+]);
+
+/**
+ * Emit an `ALTER FIELD` that turns the `prev` clause set into `next` — re-set changed/added
+ * clauses, `DROP` removed ones (a true delta). Returns `null` (the caller should fall back to
+ * `DEFINE … OVERWRITE`) when the delta touches a clause `ALTER FIELD` can't express (`COMPUTED`),
+ * or when clause data is unavailable (e.g. an older snapshot without `clauses`).
+ */
+export function alterField(
+  table: string,
+  path: string,
+  prev: Record<string, string> | undefined,
+  next: Record<string, string> | undefined,
+): string | null {
+  if (!prev || !next) return null;
+  const sets: string[] = [];
+  for (const k of FIELD_CLAUSE_ORDER) {
+    const before = prev[k];
+    const after = next[k];
+    if (before === after) continue;
+    if (k === "COMPUTED") return null; // no `ALTER FIELD … COMPUTED` form
+    if (after !== undefined) {
+      sets.push(after); // added or changed -> re-set (the fragment IS the ALTER set form)
+    } else if (k === "PERMISSIONS") {
+      sets.push("PERMISSIONS FULL"); // no `DROP PERMISSIONS`; reset to the field default
+    } else if (k === "TYPE") {
+      return null; // a field always has a TYPE; "removing" it is meaningless -> OVERWRITE
+    } else if (FIELD_DROPPABLE.has(k)) {
+      sets.push(`DROP ${k}`);
+    } else {
+      return null;
+    }
+  }
+  if (!sets.length) return null;
+  return `ALTER FIELD ${path} ON TABLE ${escapeIdent(table)} ${sets.join(" ")};`;
+}
+
+/** Canonical clause order for a deterministic `ALTER TABLE` body (matches the DDL order). */
+const TABLE_CLAUSE_ORDER = [
+  "TYPE",
+  "DROP",
+  "SCHEMA",
+  "CHANGEFEED",
+  "COMMENT",
+  "PERMISSIONS",
+] as const;
+/** Clauses `ALTER TABLE` can express. `TYPE`/`DROP` have no ALTER form (force an OVERWRITE
+ *  fallback); `SCHEMA` is always SCHEMAFULL|SCHEMALESS (re-set, never dropped); `CHANGEFEED`
+ *  and `COMMENT` have `DROP` forms; `PERMISSIONS` resets to the table default (NONE). */
+const TABLE_ALTERABLE = new Set([
+  "SCHEMA",
+  "CHANGEFEED",
+  "COMMENT",
+  "PERMISSIONS",
+]);
+const TABLE_DROPPABLE = new Set(["CHANGEFEED", "COMMENT"]);
+
+/**
+ * Emit an `ALTER TABLE` that turns the `prev` clause set into `next`. Returns `null` (caller falls
+ * back to `DEFINE … OVERWRITE`) when the delta touches a clause `ALTER TABLE` can't express
+ * (`TYPE` NORMAL/RELATION/ANY, or the `DROP` flag), or when clause data is unavailable.
+ */
+export function alterTable(
+  name: string,
+  prev: Record<string, string> | undefined,
+  next: Record<string, string> | undefined,
+): string | null {
+  if (!prev || !next) return null;
+  const sets: string[] = [];
+  for (const k of TABLE_CLAUSE_ORDER) {
+    const before = prev[k];
+    const after = next[k];
+    if (before === after) continue;
+    if (!TABLE_ALTERABLE.has(k)) return null; // TYPE / DROP changed -> OVERWRITE
+    if (after !== undefined) {
+      sets.push(after); // added or changed -> re-set
+    } else if (k === "PERMISSIONS") {
+      sets.push("PERMISSIONS NONE"); // no `DROP PERMISSIONS`; reset to the table default
+    } else if (TABLE_DROPPABLE.has(k)) {
+      sets.push(`DROP ${k}`);
+    } else {
+      return null; // SCHEMA is never absent; anything else unexpected -> OVERWRITE
+    }
+  }
+  if (!sets.length) return null;
+  return `ALTER TABLE ${escapeIdent(name)} ${sets.join(" ")};`;
 }

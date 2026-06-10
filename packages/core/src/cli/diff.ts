@@ -1,5 +1,7 @@
 import type { DefineStatement, StandaloneDef } from "surreal-zod";
 import {
+  alterField,
+  alterTable,
   emitDefStatement,
   emitStatements,
   overwriteStatement,
@@ -74,6 +76,41 @@ const RANK: Record<DefineStatement["kind"], number> = {
 const tableOf = (s: DefineStatement) => s.table ?? s.name;
 
 /**
+ * The up-migration statement(s) for a CHANGED object:
+ *   - `table` -> a clause-level `ALTER TABLE` (falls back to `DEFINE … OVERWRITE` when the delta
+ *     can't be expressed via ALTER, e.g. a `TYPE` NORMAL/RELATION change or an older snapshot),
+ *   - `field` -> a clause-level `ALTER FIELD` (falls back to `DEFINE … OVERWRITE` when the delta
+ *     can't be expressed via ALTER, e.g. a `COMPUTED` change or an older snapshot w/o clauses),
+ *   - `index` -> `REMOVE` + `DEFINE` (ALTER INDEX can't change fields/kind),
+ *   - everything else (event/function/access) -> `DEFINE … OVERWRITE`.
+ */
+function changeUp(old: DefineStatement, next: DefineStatement): string[] {
+  if (next.kind === "table") {
+    const alt = alterTable(next.name, old.clauses, next.clauses);
+    return [alt ?? overwriteStatement(next.ddl)];
+  }
+  if (next.kind === "field") {
+    const alt = alterField(tableOf(next), next.name, old.clauses, next.clauses);
+    return [alt ?? overwriteStatement(next.ddl)];
+  }
+  if (next.kind === "index") return [removeStatement(old), next.ddl];
+  return [overwriteStatement(next.ddl)];
+}
+/** The inverse (next -> old) statement(s) for the down migration. */
+function changeDown(old: DefineStatement, next: DefineStatement): string[] {
+  if (next.kind === "table") {
+    const alt = alterTable(old.name, next.clauses, old.clauses);
+    return [alt ?? overwriteStatement(old.ddl)];
+  }
+  if (next.kind === "field") {
+    const alt = alterField(tableOf(old), old.name, next.clauses, old.clauses);
+    return [alt ?? overwriteStatement(old.ddl)];
+  }
+  if (next.kind === "index") return [removeStatement(next), old.ddl];
+  return [overwriteStatement(old.ddl)];
+}
+
+/**
  * Diff two snapshots into `up`/`down` SurrealQL. Added/changed objects → `DEFINE` (with
  * `OVERWRITE` when changed); dropped objects → `REMOVE`. `down` is the exact inverse, so a
  * migration can be rolled back. Fields of a dropped/added table are skipped (the `TABLE`
@@ -103,15 +140,11 @@ export function diffSnapshots(prev: Snapshot, next: Snapshot): Diff {
   );
 
   const added: DefineStatement[] = [];
-  const changedNew: DefineStatement[] = [];
-  const changedOld: DefineStatement[] = [];
+  const changed: { old: DefineStatement; next: DefineStatement }[] = [];
   for (const k of Object.keys(nextS)) {
     const s = nextS[k];
     if (!(k in prevS)) added.push(s);
-    else if (prevS[k].ddl !== s.ddl) {
-      changedNew.push(s);
-      changedOld.push(prevS[k]);
-    }
+    else if (prevS[k].ddl !== s.ddl) changed.push({ old: prevS[k], next: s });
   }
   const addedTables = new Set(
     added.filter((s) => s.kind === "table").map((s) => s.name),
@@ -128,16 +161,16 @@ export function diffSnapshots(prev: Snapshot, next: Snapshot): Diff {
     up.push(removeStatement(s));
   }
   for (const s of [...added].sort(byCreate)) up.push(s.ddl);
-  for (const s of [...changedNew].sort(byCreate))
-    up.push(overwriteStatement(s.ddl));
+  for (const c of [...changed].sort((a, b) => byCreate(a.next, b.next)))
+    up.push(...changeUp(c.old, c.next));
 
   const down: string[] = [];
   for (const s of added.filter((s) => !isOrphan(s, addedTables)).sort(byDrop)) {
     down.push(removeStatement(s));
   }
   for (const s of [...removed].sort(byCreate)) down.push(s.ddl);
-  for (const s of [...changedOld].sort(byCreate))
-    down.push(overwriteStatement(s.ddl));
+  for (const c of [...changed].sort((a, b) => byCreate(a.next, b.next)))
+    down.push(...changeDown(c.old, c.next));
 
   // Structured display items, grouped by table (table → its fields → its indexes).
   const tagged: { sort: [number, number]; item: DiffItem }[] = [];
@@ -167,17 +200,16 @@ export function diffSnapshots(prev: Snapshot, next: Snapshot): Diff {
       },
     });
   }
-  for (let i = 0; i < changedNew.length; i++) {
-    const s = changedNew[i];
+  for (const c of changed) {
     tagged.push({
-      sort: at(s),
+      sort: at(c.next),
       item: {
         op: "change",
-        kind: s.kind,
-        key: keyOf(s),
-        table: tableOf(s),
-        before: changedOld[i].ddl,
-        after: s.ddl,
+        kind: c.next.kind,
+        key: keyOf(c.next),
+        table: tableOf(c.next),
+        before: c.old.ddl,
+        after: c.next.ddl,
       },
     });
   }

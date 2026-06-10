@@ -9,6 +9,8 @@
 export { surql } from "surrealdb";
 export type { DefineOptions, DefineStatement } from "./ddl";
 export {
+  alterField,
+  alterTable,
   emitDefStatement,
   emitField,
   emitFieldStatements,

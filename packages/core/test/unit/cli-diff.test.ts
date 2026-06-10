@@ -5,6 +5,7 @@ import {
   defineAccess,
   defineEvent,
   defineFunction,
+  defineRelation,
   defineTable,
   emitTable,
   surql,
@@ -67,7 +68,7 @@ describe("diff engine", () => {
     );
   });
 
-  test("change a field: OVERWRITE to new up, OVERWRITE to old down", () => {
+  test("change a field type: ALTER FIELD … TYPE up and down", () => {
     const prev = buildSnapshot([
       defineTable("user", { id: sz.string(), name: sz.string() }),
     ]);
@@ -75,10 +76,85 @@ describe("diff engine", () => {
       defineTable("user", { id: sz.string(), name: sz.string().optional() }),
     ]);
     const diff = diffSnapshots(prev, next);
-    expect(diff.up[0]).toContain("DEFINE FIELD OVERWRITE name");
-    expect(diff.up[0]).toContain("option<string>");
-    expect(diff.down[0]).toContain("DEFINE FIELD OVERWRITE name");
-    expect(diff.down[0]).not.toContain("option<string>");
+    expect(diff.up[0]).toBe(
+      "ALTER FIELD name ON TABLE user TYPE option<string>;",
+    );
+    expect(diff.down[0]).toBe("ALTER FIELD name ON TABLE user TYPE string;");
+  });
+
+  test("add a field clause -> ALTER sets it; remove -> ALTER DROPs it", () => {
+    const prev = buildSnapshot([
+      defineTable("user", { id: sz.string(), name: sz.string() }),
+    ]);
+    const next = buildSnapshot([
+      defineTable("user", {
+        id: sz.string(),
+        name: sz.string().$default("anon"),
+      }),
+    ]);
+    expect(diffSnapshots(prev, next).up[0]).toBe(
+      'ALTER FIELD name ON TABLE user DEFAULT "anon";',
+    );
+    // the inverse removes the default with an explicit DROP:
+    expect(diffSnapshots(next, prev).up[0]).toBe(
+      "ALTER FIELD name ON TABLE user DROP DEFAULT;",
+    );
+  });
+
+  test("COMPUTED change falls back to DEFINE … OVERWRITE (no ALTER form)", () => {
+    const prev = buildSnapshot([
+      defineTable("t", { id: sz.string(), c: sz.string() }),
+    ]);
+    const next = buildSnapshot([
+      defineTable("t", {
+        id: sz.string(),
+        c: sz.string().$computed(surql`"x"`),
+      }),
+    ]);
+    expect(diffSnapshots(prev, next).up[0]).toContain(
+      "DEFINE FIELD OVERWRITE c",
+    );
+  });
+
+  test("changed index -> REMOVE + DEFINE (ALTER INDEX can't change fields)", () => {
+    const prev = buildSnapshot([
+      defineTable("t", { id: sz.string(), a: sz.string().index() }),
+    ]);
+    const next = buildSnapshot([
+      defineTable("t", { id: sz.string(), a: sz.string().unique() }),
+    ]);
+    const up = diffSnapshots(prev, next).up;
+    expect(up.some((s) => s.startsWith("REMOVE INDEX"))).toBe(true);
+    expect(up.some((s) => /^DEFINE INDEX .*UNIQUE;$/.test(s))).toBe(true);
+  });
+
+  test("table SCHEMAFULL<->SCHEMALESS change -> ALTER TABLE", () => {
+    const prev = buildSnapshot([defineTable("t", { id: sz.string() })]); // schemafull default
+    const next = buildSnapshot([
+      defineTable("t", { id: sz.string() }).schemaless(),
+    ]);
+    const diff = diffSnapshots(prev, next);
+    expect(diff.up[0]).toBe("ALTER TABLE t SCHEMALESS;");
+    expect(diff.down[0]).toBe("ALTER TABLE t SCHEMAFULL;");
+  });
+
+  test("table COMMENT add -> ALTER TABLE … COMMENT; remove -> DROP COMMENT", () => {
+    const prev = buildSnapshot([defineTable("t", { id: sz.string() })]);
+    const next = buildSnapshot([
+      defineTable("t", { id: sz.string() }).comment("note"),
+    ]);
+    expect(diffSnapshots(prev, next).up[0]).toBe(
+      'ALTER TABLE t COMMENT "note";',
+    );
+    expect(diffSnapshots(next, prev).up[0]).toBe("ALTER TABLE t DROP COMMENT;");
+  });
+
+  test("table TYPE change (NORMAL -> RELATION) falls back to OVERWRITE", () => {
+    const prev = buildSnapshot([defineTable("t", { id: sz.string() })]);
+    const next = buildSnapshot([defineRelation("t", {})]);
+    expect(diffSnapshots(prev, next).up[0]).toContain(
+      "DEFINE TABLE OVERWRITE t",
+    );
   });
 
   test("remove a table: REMOVE TABLE up (no orphan field removes), re-define down", () => {
