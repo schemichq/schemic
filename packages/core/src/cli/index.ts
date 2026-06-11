@@ -19,7 +19,11 @@ import {
   isEmptyDiff,
   summarizeKinds,
 } from "./diff";
-import { spawnEphemeralServer, surrealBinaryAvailable } from "./engine";
+import {
+  connectEmbedded,
+  spawnEphemeralServer,
+  surrealBinaryAvailable,
+} from "./engine";
 import { type FilterOpts, kindFlags, parseFilter } from "./filter";
 import { init } from "./init";
 import {
@@ -489,13 +493,13 @@ dbFlags(
 
     // 2. Deep check: replay every migration into throwaway scratch databases and confirm the result
     //    matches the schema. The replay NEVER reads or writes your real database. Engine selection:
-    //    `auto` prefers an ephemeral in-memory server from the local `surreal` binary (your exact
-    //    version, no external server); else it falls back to the `check.db`/`db` server.
+    //    an embedded object → in-process via @surrealdb/node; `auto` prefers an ephemeral server from
+    //    the local `surreal` binary (your exact version); else the `check.db`/`db` server.
+    const engine = config.checkEngine;
     const useBinary =
-      config.checkEngine === "binary" ||
-      (config.checkEngine === "auto" &&
-        surrealBinaryAvailable(config.checkBinary));
-    if (config.checkEngine === "binary" && !useBinary) {
+      engine === "binary" ||
+      (engine === "auto" && surrealBinaryAvailable(config.checkBinary));
+    if (engine === "binary" && !useBinary) {
       throw new Error(
         'check.engine "binary" needs the `surreal` CLI on PATH (or set `check.binary`). Run `sz check --schema` to skip the replay.',
       );
@@ -504,7 +508,25 @@ dbFlags(
     let db: Surreal;
     let checkCfg: ResolvedConfig;
     let cleanup: () => Promise<void>;
-    if (useBinary) {
+    if (typeof engine === "object") {
+      const embedded = await connectEmbedded(engine, "check", "check");
+      db = embedded.db;
+      checkCfg = {
+        ...config,
+        db: {
+          url: embedded.url,
+          namespace: "check",
+          database: "check",
+          authLevel: "root",
+        },
+      };
+      cleanup = embedded.stop;
+      console.log(
+        style.dim(
+          `  replaying on an ${embedded.url} SurrealDB (@surrealdb/node) — no server, your data untouched`,
+        ),
+      );
+    } else if (useBinary) {
       const server = await spawnEphemeralServer(config.checkBinary);
       checkCfg = {
         ...config,

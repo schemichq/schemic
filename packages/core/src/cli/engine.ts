@@ -1,6 +1,7 @@
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { createServer } from "node:net";
-import { Surreal } from "surrealdb";
+import type { SurrealZodCheckEmbedded } from "surreal-zod/config";
+import { escapeIdent, Surreal } from "surrealdb";
 
 /** Pick a free localhost TCP port by binding to :0 and reading it back. */
 function freePort(): Promise<number> {
@@ -124,4 +125,65 @@ export async function spawnEphemeralServer(
     throw e;
   }
   return { url, username, password, stop };
+}
+
+export interface EmbeddedConnection {
+  db: Surreal;
+  /** A display label for the engine, e.g. `embedded memory`. */
+  url: string;
+  stop: () => Promise<void>;
+}
+
+/**
+ * Connect to an EMBEDDED in-process SurrealDB via the optional `@surrealdb/node` package, selecting
+ * the `cfg.backend` storage and passing `cfg` (capabilities, timeouts, …) straight to
+ * `createNodeEngines`. Creates/selects the given namespace/database so the replay can run. The
+ * package is imported lazily (a non-literal specifier) so it's never required unless this engine is
+ * used; a clear error tells the user to install it otherwise.
+ */
+export async function connectEmbedded(
+  cfg: SurrealZodCheckEmbedded,
+  namespace: string,
+  database: string,
+): Promise<EmbeddedConnection> {
+  // Non-literal specifier so tsc/bundlers don't treat `@surrealdb/node` as a hard dependency.
+  const pkg: string = "@surrealdb/node";
+  let createNodeEngines: ((options?: unknown) => unknown) | undefined;
+  try {
+    const mod = (await import(pkg)) as {
+      createNodeEngines?: (options?: unknown) => unknown;
+    };
+    createNodeEngines = mod.createNodeEngines;
+  } catch {
+    createNodeEngines = undefined;
+  }
+  if (!createNodeEngines) {
+    throw new Error(
+      'check.engine embedded mode needs `@surrealdb/node` — install it (e.g. `npm i -D @surrealdb/node`), or use a string engine ("auto" / "binary" / "remote").',
+    );
+  }
+
+  const backend = cfg.backend ?? "memory";
+  const scheme = backend === "memory" ? "mem" : backend;
+  const url = `${scheme}://${cfg.path ?? ""}`;
+  const engines = createNodeEngines({
+    capabilities: cfg.capabilities ?? true,
+    strict: cfg.strict,
+    query_timeout: cfg.query_timeout,
+    transaction_timeout: cfg.transaction_timeout,
+  });
+  // biome-ignore lint/suspicious/noExplicitAny: the SDK's `engines` option is loosely typed here.
+  const db = new Surreal({ engines } as any);
+  await db.connect(url);
+  await db.query(`DEFINE NAMESPACE IF NOT EXISTS ${escapeIdent(namespace)}`);
+  await db.use({ namespace });
+  await db.query(`DEFINE DATABASE IF NOT EXISTS ${escapeIdent(database)}`);
+  await db.use({ namespace, database });
+  return {
+    db,
+    url: `embedded ${backend}`,
+    stop: async () => {
+      await db.close().catch(() => {});
+    },
+  };
 }

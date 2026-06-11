@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { createJiti } from "jiti";
 import type {
   AuthLevel,
+  SurrealZodCheckEmbedded,
   SurrealZodConfig,
   SurrealZodConnection,
 } from "surreal-zod/config";
@@ -90,8 +91,8 @@ export interface ResolvedConfig extends SurrealZodConfig {
   migrationsTable: string;
   /** Connection for `sz check`'s remote-engine replay (`config.check.db` merged over `db`). */
   checkDb: SurrealZodConnection;
-  /** Engine for `sz check`'s migration replay. Default `"auto"`. */
-  checkEngine: "auto" | "binary" | "remote";
+  /** Engine for `sz check`'s migration replay. Default `"auto"`; an object → embedded engine. */
+  checkEngine: "auto" | "binary" | "remote" | SurrealZodCheckEmbedded;
   /** Path to the `surreal` CLI for the auto/binary check engines. Default `"surreal"`. */
   checkBinary: string;
 }

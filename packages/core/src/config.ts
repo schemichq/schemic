@@ -42,6 +42,42 @@ export interface SurrealZodConnection {
   authLevel?: AuthLevel;
 }
 
+/** An allow/deny list for a single capability — mirrors `@surrealdb/node`. */
+export interface CapabilityList {
+  allow?: boolean | string[];
+  deny?: boolean | string[];
+}
+
+/** Capabilities for the embedded check engine — mirrors `@surrealdb/node`'s `capabilities` option. */
+export interface EmbeddedCapabilities {
+  scripting?: boolean;
+  guest_access?: boolean;
+  live_query_notifications?: boolean;
+  functions?: boolean | string[] | CapabilityList;
+  network_targets?: boolean | string[] | CapabilityList;
+  experimental?: boolean | string[] | CapabilityList;
+}
+
+/**
+ * Run `sz check`'s replay on an EMBEDDED in-process SurrealDB via the optional `@surrealdb/node`
+ * package (install it yourself — `npm i -D @surrealdb/node`). Options pass through to
+ * `createNodeEngines`; `backend`/`path` choose the storage. No external server, your data untouched.
+ */
+export interface SurrealZodCheckEmbedded {
+  /** Storage backend. `memory` (default) is throwaway in-RAM; the others persist to `path`. */
+  backend?: "memory" | "surrealkv" | "surrealkv+versioned" | "rocksdb";
+  /** Filesystem path for the persistent backends (ignored for `memory`). */
+  path?: string;
+  /** Capabilities for the instance. Default: all allowed, so asserts/defaults/functions work. */
+  capabilities?: boolean | EmbeddedCapabilities;
+  /** SurrealDB strict mode. */
+  strict?: boolean;
+  /** Query timeout. */
+  query_timeout?: number;
+  /** Transaction timeout. */
+  transaction_timeout?: number;
+}
+
 /** `sz check` options. */
 export interface SurrealZodCheck {
   /**
@@ -51,8 +87,10 @@ export interface SurrealZodCheck {
    *    the `check.db`/`db` server.
    *  - `"binary"` — require the local `surreal` CLI (error if it's missing).
    *  - `"remote"` — always use the `check.db`/`db` server (throwaway scratch databases on it).
+   *  - an embedded object (`{ backend, capabilities, … }`) — run in-process via the optional
+   *    `@surrealdb/node` package. See {@link SurrealZodCheckEmbedded}.
    */
-  engine?: "auto" | "binary" | "remote";
+  engine?: "auto" | "binary" | "remote" | SurrealZodCheckEmbedded;
   /** Path to the `surreal` CLI for the `auto`/`binary` engines. Default: `surreal` on PATH. */
   binary?: string;
   /**

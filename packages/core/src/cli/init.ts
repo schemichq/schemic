@@ -20,6 +20,8 @@ export default defineConfig({
   // external server, your real database untouched. Falls back to the \`db\` server if the CLI is
   // missing. To always use a server (and keep it off production) point the replay at a scratch one:
   // check: { engine: "remote", db: { url: "ws://localhost:8000", namespace: "scratch" } },
+  // Or run fully in-process via the optional @surrealdb/node package (npm i -D @surrealdb/node):
+  // check: { engine: { backend: "memory" } }, // backend: memory | surrealkv | rocksdb, + capabilities
 });
 `;
 
