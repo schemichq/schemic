@@ -1,0 +1,1988 @@
+{
+  "version": 1,
+  "statements": {
+    "table::billing_cycle": {
+      "kind": "table",
+      "name": "billing_cycle",
+      "ddl": "DEFINE TABLE billing_cycle TYPE ANY SCHEMAFULL;",
+      "clauses": {
+        "TYPE": "TYPE ANY",
+        "SCHEMA": "SCHEMAFULL"
+      }
+    },
+    "field:billing_cycle:closedAt": {
+      "kind": "field",
+      "name": "closedAt",
+      "table": "billing_cycle",
+      "ddl": "DEFINE FIELD closedAt ON TABLE billing_cycle TYPE option<datetime>;",
+      "clauses": {
+        "TYPE": "TYPE option<datetime>"
+      }
+    },
+    "field:billing_cycle:closedBy": {
+      "kind": "field",
+      "name": "closedBy",
+      "table": "billing_cycle",
+      "ddl": "DEFINE FIELD closedBy ON TABLE billing_cycle TYPE option<record<user>>;",
+      "clauses": {
+        "TYPE": "TYPE option<record<user>>"
+      }
+    },
+    "field:billing_cycle:createdAt": {
+      "kind": "field",
+      "name": "createdAt",
+      "table": "billing_cycle",
+      "ddl": "DEFINE FIELD createdAt ON TABLE billing_cycle TYPE any DEFAULT time::now();",
+      "clauses": {
+        "TYPE": "TYPE any",
+        "DEFAULT": "DEFAULT time::now()"
+      }
+    },
+    "field:billing_cycle:number": {
+      "kind": "field",
+      "name": "number",
+      "table": "billing_cycle",
+      "ddl": "DEFINE FIELD number ON TABLE billing_cycle TYPE number;",
+      "clauses": {
+        "TYPE": "TYPE number"
+      }
+    },
+    "field:billing_cycle:openedAt": {
+      "kind": "field",
+      "name": "openedAt",
+      "table": "billing_cycle",
+      "ddl": "DEFINE FIELD openedAt ON TABLE billing_cycle TYPE datetime;",
+      "clauses": {
+        "TYPE": "TYPE datetime"
+      }
+    },
+    "table::billing_cycle_report_note": {
+      "kind": "table",
+      "name": "billing_cycle_report_note",
+      "ddl": "DEFINE TABLE billing_cycle_report_note TYPE ANY SCHEMAFULL;",
+      "clauses": {
+        "TYPE": "TYPE ANY",
+        "SCHEMA": "SCHEMAFULL"
+      }
+    },
+    "field:billing_cycle_report_note:billingCycle": {
+      "kind": "field",
+      "name": "billingCycle",
+      "table": "billing_cycle_report_note",
+      "ddl": "DEFINE FIELD billingCycle ON TABLE billing_cycle_report_note TYPE any;",
+      "clauses": {
+        "TYPE": "TYPE any"
+      }
+    },
+    "field:billing_cycle_report_note:loan": {
+      "kind": "field",
+      "name": "loan",
+      "table": "billing_cycle_report_note",
+      "ddl": "DEFINE FIELD loan ON TABLE billing_cycle_report_note TYPE any;",
+      "clauses": {
+        "TYPE": "TYPE any"
+      }
+    },
+    "field:billing_cycle_report_note:note": {
+      "kind": "field",
+      "name": "note",
+      "table": "billing_cycle_report_note",
+      "ddl": "DEFINE FIELD note ON TABLE billing_cycle_report_note TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:billing_cycle_report_note:updatedAt": {
+      "kind": "field",
+      "name": "updatedAt",
+      "table": "billing_cycle_report_note",
+      "ddl": "DEFINE FIELD updatedAt ON TABLE billing_cycle_report_note TYPE any DEFAULT time::now();",
+      "clauses": {
+        "TYPE": "TYPE any",
+        "DEFAULT": "DEFAULT time::now()"
+      }
+    },
+    "field:billing_cycle_report_note:updatedBy": {
+      "kind": "field",
+      "name": "updatedBy",
+      "table": "billing_cycle_report_note",
+      "ddl": "DEFINE FIELD updatedBy ON TABLE billing_cycle_report_note TYPE any;",
+      "clauses": {
+        "TYPE": "TYPE any"
+      }
+    },
+    "table::client": {
+      "kind": "table",
+      "name": "client",
+      "ddl": "DEFINE TABLE client TYPE ANY SCHEMAFULL;",
+      "clauses": {
+        "TYPE": "TYPE ANY",
+        "SCHEMA": "SCHEMAFULL"
+      }
+    },
+    "field:client:address": {
+      "kind": "field",
+      "name": "address",
+      "table": "client",
+      "ddl": "DEFINE FIELD address ON TABLE client TYPE option<object>;",
+      "clauses": {
+        "TYPE": "TYPE option<object>"
+      }
+    },
+    "field:client:address.number": {
+      "kind": "field",
+      "name": "address.number",
+      "table": "client",
+      "ddl": "DEFINE FIELD address.number ON TABLE client TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:client:address.province": {
+      "kind": "field",
+      "name": "address.province",
+      "table": "client",
+      "ddl": "DEFINE FIELD address.province ON TABLE client TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:client:address.reference": {
+      "kind": "field",
+      "name": "address.reference",
+      "table": "client",
+      "ddl": "DEFINE FIELD address.reference ON TABLE client TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:client:address.sector": {
+      "kind": "field",
+      "name": "address.sector",
+      "table": "client",
+      "ddl": "DEFINE FIELD address.sector ON TABLE client TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:client:address.street": {
+      "kind": "field",
+      "name": "address.street",
+      "table": "client",
+      "ddl": "DEFINE FIELD address.street ON TABLE client TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:client:archived": {
+      "kind": "field",
+      "name": "archived",
+      "table": "client",
+      "ddl": "DEFINE FIELD archived ON TABLE client TYPE bool DEFAULT false;",
+      "clauses": {
+        "TYPE": "TYPE bool",
+        "DEFAULT": "DEFAULT false"
+      }
+    },
+    "field:client:archivedReason": {
+      "kind": "field",
+      "name": "archivedReason",
+      "table": "client",
+      "ddl": "DEFINE FIELD archivedReason ON TABLE client TYPE option<string>;",
+      "clauses": {
+        "TYPE": "TYPE option<string>"
+      }
+    },
+    "field:client:banking": {
+      "kind": "field",
+      "name": "banking",
+      "table": "client",
+      "ddl": "DEFINE FIELD banking ON TABLE client TYPE option<object> FLEXIBLE;",
+      "clauses": {
+        "TYPE": "TYPE option<object>",
+        "FLEXIBLE": "FLEXIBLE"
+      }
+    },
+    "field:client:banking.accountNumber": {
+      "kind": "field",
+      "name": "banking.accountNumber",
+      "table": "client",
+      "ddl": "DEFINE FIELD banking.accountNumber ON TABLE client TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:client:banking.bank": {
+      "kind": "field",
+      "name": "banking.bank",
+      "table": "client",
+      "ddl": "DEFINE FIELD banking.bank ON TABLE client TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:client:banking.email": {
+      "kind": "field",
+      "name": "banking.email",
+      "table": "client",
+      "ddl": "DEFINE FIELD banking.email ON TABLE client TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:client:banking.password": {
+      "kind": "field",
+      "name": "banking.password",
+      "table": "client",
+      "ddl": "DEFINE FIELD banking.password ON TABLE client TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:client:banking.username": {
+      "kind": "field",
+      "name": "banking.username",
+      "table": "client",
+      "ddl": "DEFINE FIELD banking.username ON TABLE client TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:client:birthdate": {
+      "kind": "field",
+      "name": "birthdate",
+      "table": "client",
+      "ddl": "DEFINE FIELD birthdate ON TABLE client TYPE option<datetime>;",
+      "clauses": {
+        "TYPE": "TYPE option<datetime>"
+      }
+    },
+    "field:client:contactDetails": {
+      "kind": "field",
+      "name": "contactDetails",
+      "table": "client",
+      "ddl": "DEFINE FIELD contactDetails ON TABLE client TYPE array<object>;",
+      "clauses": {
+        "TYPE": "TYPE array<object>"
+      }
+    },
+    "field:client:contactDetails.*": {
+      "kind": "field",
+      "name": "contactDetails.*",
+      "table": "client",
+      "ddl": "DEFINE FIELD OVERWRITE contactDetails.* ON TABLE client TYPE object FLEXIBLE;",
+      "clauses": {
+        "TYPE": "TYPE object",
+        "FLEXIBLE": "FLEXIBLE"
+      }
+    },
+    "field:client:createdAt": {
+      "kind": "field",
+      "name": "createdAt",
+      "table": "client",
+      "ddl": "DEFINE FIELD createdAt ON TABLE client TYPE any DEFAULT time::now();",
+      "clauses": {
+        "TYPE": "TYPE any",
+        "DEFAULT": "DEFAULT time::now()"
+      }
+    },
+    "field:client:createdBy": {
+      "kind": "field",
+      "name": "createdBy",
+      "table": "client",
+      "ddl": "DEFINE FIELD createdBy ON TABLE client TYPE option<record<user>>;",
+      "clauses": {
+        "TYPE": "TYPE option<record<user>>"
+      }
+    },
+    "field:client:employment": {
+      "kind": "field",
+      "name": "employment",
+      "table": "client",
+      "ddl": "DEFINE FIELD employment ON TABLE client TYPE option<object>;",
+      "clauses": {
+        "TYPE": "TYPE option<object>"
+      }
+    },
+    "field:client:employment.company": {
+      "kind": "field",
+      "name": "employment.company",
+      "table": "client",
+      "ddl": "DEFINE FIELD employment.company ON TABLE client TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:client:employment.companyAddress": {
+      "kind": "field",
+      "name": "employment.companyAddress",
+      "table": "client",
+      "ddl": "DEFINE FIELD employment.companyAddress ON TABLE client TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:client:employment.companyPhone": {
+      "kind": "field",
+      "name": "employment.companyPhone",
+      "table": "client",
+      "ddl": "DEFINE FIELD employment.companyPhone ON TABLE client TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:client:employment.companyPhoneExt": {
+      "kind": "field",
+      "name": "employment.companyPhoneExt",
+      "table": "client",
+      "ddl": "DEFINE FIELD employment.companyPhoneExt ON TABLE client TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:client:employment.companyRef": {
+      "kind": "field",
+      "name": "employment.companyRef",
+      "table": "client",
+      "ddl": "DEFINE FIELD employment.companyRef ON TABLE client TYPE option<record<company>>;",
+      "clauses": {
+        "TYPE": "TYPE option<record<company>>"
+      }
+    },
+    "field:client:employment.otherIncome": {
+      "kind": "field",
+      "name": "employment.otherIncome",
+      "table": "client",
+      "ddl": "DEFINE FIELD employment.otherIncome ON TABLE client TYPE number;",
+      "clauses": {
+        "TYPE": "TYPE number"
+      }
+    },
+    "field:client:employment.position": {
+      "kind": "field",
+      "name": "employment.position",
+      "table": "client",
+      "ddl": "DEFINE FIELD employment.position ON TABLE client TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:client:employment.salary": {
+      "kind": "field",
+      "name": "employment.salary",
+      "table": "client",
+      "ddl": "DEFINE FIELD employment.salary ON TABLE client TYPE number;",
+      "clauses": {
+        "TYPE": "TYPE number"
+      }
+    },
+    "field:client:employment.startDate": {
+      "kind": "field",
+      "name": "employment.startDate",
+      "table": "client",
+      "ddl": "DEFINE FIELD employment.startDate ON TABLE client TYPE datetime;",
+      "clauses": {
+        "TYPE": "TYPE datetime"
+      }
+    },
+    "field:client:employment.supervisorMobile": {
+      "kind": "field",
+      "name": "employment.supervisorMobile",
+      "table": "client",
+      "ddl": "DEFINE FIELD employment.supervisorMobile ON TABLE client TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:client:employment.supervisorName": {
+      "kind": "field",
+      "name": "employment.supervisorName",
+      "table": "client",
+      "ddl": "DEFINE FIELD employment.supervisorName ON TABLE client TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:client:employment.supervisorPhone": {
+      "kind": "field",
+      "name": "employment.supervisorPhone",
+      "table": "client",
+      "ddl": "DEFINE FIELD employment.supervisorPhone ON TABLE client TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:client:housing": {
+      "kind": "field",
+      "name": "housing",
+      "table": "client",
+      "ddl": "DEFINE FIELD housing ON TABLE client TYPE option<object> FLEXIBLE;",
+      "clauses": {
+        "TYPE": "TYPE option<object>",
+        "FLEXIBLE": "FLEXIBLE"
+      }
+    },
+    "field:client:identification": {
+      "kind": "field",
+      "name": "identification",
+      "table": "client",
+      "ddl": "DEFINE FIELD identification ON TABLE client TYPE array<object>;",
+      "clauses": {
+        "TYPE": "TYPE array<object>"
+      }
+    },
+    "field:client:identification.*": {
+      "kind": "field",
+      "name": "identification.*",
+      "table": "client",
+      "ddl": "DEFINE FIELD OVERWRITE identification.* ON TABLE client TYPE object FLEXIBLE;",
+      "clauses": {
+        "TYPE": "TYPE object",
+        "FLEXIBLE": "FLEXIBLE"
+      }
+    },
+    "field:client:maritalStatus": {
+      "kind": "field",
+      "name": "maritalStatus",
+      "table": "client",
+      "ddl": "DEFINE FIELD maritalStatus ON TABLE client TYPE option<string>;",
+      "clauses": {
+        "TYPE": "TYPE option<string>"
+      }
+    },
+    "field:client:name": {
+      "kind": "field",
+      "name": "name",
+      "table": "client",
+      "ddl": "DEFINE FIELD name ON TABLE client TYPE object;",
+      "clauses": {
+        "TYPE": "TYPE object"
+      }
+    },
+    "field:client:name.family": {
+      "kind": "field",
+      "name": "name.family",
+      "table": "client",
+      "ddl": "DEFINE FIELD name.family ON TABLE client TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:client:name.given": {
+      "kind": "field",
+      "name": "name.given",
+      "table": "client",
+      "ddl": "DEFINE FIELD name.given ON TABLE client TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:client:otherDebts": {
+      "kind": "field",
+      "name": "otherDebts",
+      "table": "client",
+      "ddl": "DEFINE FIELD otherDebts ON TABLE client TYPE array<object>;",
+      "clauses": {
+        "TYPE": "TYPE array<object>"
+      }
+    },
+    "field:client:otherDebts.*": {
+      "kind": "field",
+      "name": "otherDebts.*",
+      "table": "client",
+      "ddl": "DEFINE FIELD OVERWRITE otherDebts.* ON TABLE client TYPE object FLEXIBLE;",
+      "clauses": {
+        "TYPE": "TYPE object",
+        "FLEXIBLE": "FLEXIBLE"
+      }
+    },
+    "field:client:references": {
+      "kind": "field",
+      "name": "references",
+      "table": "client",
+      "ddl": "DEFINE FIELD references ON TABLE client TYPE array<object>;",
+      "clauses": {
+        "TYPE": "TYPE array<object>"
+      }
+    },
+    "field:client:references.*": {
+      "kind": "field",
+      "name": "references.*",
+      "table": "client",
+      "ddl": "DEFINE FIELD OVERWRITE references.* ON TABLE client TYPE object FLEXIBLE;",
+      "clauses": {
+        "TYPE": "TYPE object",
+        "FLEXIBLE": "FLEXIBLE"
+      }
+    },
+    "field:client:status": {
+      "kind": "field",
+      "name": "status",
+      "table": "client",
+      "ddl": "DEFINE FIELD status ON TABLE client TYPE option<\"pending\" | \"active\">;",
+      "clauses": {
+        "TYPE": "TYPE option<\"pending\" | \"active\">"
+      }
+    },
+    "field:client:updatedAt": {
+      "kind": "field",
+      "name": "updatedAt",
+      "table": "client",
+      "ddl": "DEFINE FIELD updatedAt ON TABLE client TYPE any DEFAULT time::now();",
+      "clauses": {
+        "TYPE": "TYPE any",
+        "DEFAULT": "DEFAULT time::now()"
+      }
+    },
+    "field:client:vehicle": {
+      "kind": "field",
+      "name": "vehicle",
+      "table": "client",
+      "ddl": "DEFINE FIELD vehicle ON TABLE client TYPE option<object> FLEXIBLE;",
+      "clauses": {
+        "TYPE": "TYPE option<object>",
+        "FLEXIBLE": "FLEXIBLE"
+      }
+    },
+    "table::client_document": {
+      "kind": "table",
+      "name": "client_document",
+      "ddl": "DEFINE TABLE client_document TYPE ANY SCHEMAFULL;",
+      "clauses": {
+        "TYPE": "TYPE ANY",
+        "SCHEMA": "SCHEMAFULL"
+      }
+    },
+    "field:client_document:client": {
+      "kind": "field",
+      "name": "client",
+      "table": "client_document",
+      "ddl": "DEFINE FIELD client ON TABLE client_document TYPE any;",
+      "clauses": {
+        "TYPE": "TYPE any"
+      }
+    },
+    "field:client_document:createdAt": {
+      "kind": "field",
+      "name": "createdAt",
+      "table": "client_document",
+      "ddl": "DEFINE FIELD createdAt ON TABLE client_document TYPE any DEFAULT time::now();",
+      "clauses": {
+        "TYPE": "TYPE any",
+        "DEFAULT": "DEFAULT time::now()"
+      }
+    },
+    "field:client_document:expiresAt": {
+      "kind": "field",
+      "name": "expiresAt",
+      "table": "client_document",
+      "ddl": "DEFINE FIELD expiresAt ON TABLE client_document TYPE option<datetime>;",
+      "clauses": {
+        "TYPE": "TYPE option<datetime>"
+      }
+    },
+    "field:client_document:fileName": {
+      "kind": "field",
+      "name": "fileName",
+      "table": "client_document",
+      "ddl": "DEFINE FIELD fileName ON TABLE client_document TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:client_document:fileUrl": {
+      "kind": "field",
+      "name": "fileUrl",
+      "table": "client_document",
+      "ddl": "DEFINE FIELD fileUrl ON TABLE client_document TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:client_document:mimeType": {
+      "kind": "field",
+      "name": "mimeType",
+      "table": "client_document",
+      "ddl": "DEFINE FIELD mimeType ON TABLE client_document TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:client_document:preferred": {
+      "kind": "field",
+      "name": "preferred",
+      "table": "client_document",
+      "ddl": "DEFINE FIELD preferred ON TABLE client_document TYPE option<bool>;",
+      "clauses": {
+        "TYPE": "TYPE option<bool>"
+      }
+    },
+    "field:client_document:sizeBytes": {
+      "kind": "field",
+      "name": "sizeBytes",
+      "table": "client_document",
+      "ddl": "DEFINE FIELD sizeBytes ON TABLE client_document TYPE number;",
+      "clauses": {
+        "TYPE": "TYPE number"
+      }
+    },
+    "field:client_document:type": {
+      "kind": "field",
+      "name": "type",
+      "table": "client_document",
+      "ddl": "DEFINE FIELD type ON TABLE client_document TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:client_document:uploadedBy": {
+      "kind": "field",
+      "name": "uploadedBy",
+      "table": "client_document",
+      "ddl": "DEFINE FIELD uploadedBy ON TABLE client_document TYPE any;",
+      "clauses": {
+        "TYPE": "TYPE any"
+      }
+    },
+    "table::company": {
+      "kind": "table",
+      "name": "company",
+      "ddl": "DEFINE TABLE company TYPE ANY SCHEMAFULL;",
+      "clauses": {
+        "TYPE": "TYPE ANY",
+        "SCHEMA": "SCHEMAFULL"
+      }
+    },
+    "field:company:archiveByDefault": {
+      "kind": "field",
+      "name": "archiveByDefault",
+      "table": "company",
+      "ddl": "DEFINE FIELD archiveByDefault ON TABLE company TYPE option<bool>;",
+      "clauses": {
+        "TYPE": "TYPE option<bool>"
+      }
+    },
+    "field:company:createdAt": {
+      "kind": "field",
+      "name": "createdAt",
+      "table": "company",
+      "ddl": "DEFINE FIELD createdAt ON TABLE company TYPE any DEFAULT time::now();",
+      "clauses": {
+        "TYPE": "TYPE any",
+        "DEFAULT": "DEFAULT time::now()"
+      }
+    },
+    "field:company:createdBy": {
+      "kind": "field",
+      "name": "createdBy",
+      "table": "company",
+      "ddl": "DEFINE FIELD createdBy ON TABLE company TYPE option<record<user>>;",
+      "clauses": {
+        "TYPE": "TYPE option<record<user>>"
+      }
+    },
+    "field:company:name": {
+      "kind": "field",
+      "name": "name",
+      "table": "company",
+      "ddl": "DEFINE FIELD name ON TABLE company TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:company:normalizedName": {
+      "kind": "field",
+      "name": "normalizedName",
+      "table": "company",
+      "ddl": "DEFINE FIELD normalizedName ON TABLE company TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:company:notes": {
+      "kind": "field",
+      "name": "notes",
+      "table": "company",
+      "ddl": "DEFINE FIELD notes ON TABLE company TYPE option<string>;",
+      "clauses": {
+        "TYPE": "TYPE option<string>"
+      }
+    },
+    "field:company:updatedAt": {
+      "kind": "field",
+      "name": "updatedAt",
+      "table": "company",
+      "ddl": "DEFINE FIELD updatedAt ON TABLE company TYPE any DEFAULT time::now();",
+      "clauses": {
+        "TYPE": "TYPE any",
+        "DEFAULT": "DEFAULT time::now()"
+      }
+    },
+    "index:company:companyNormalizedNameIdx": {
+      "kind": "index",
+      "name": "companyNormalizedNameIdx",
+      "table": "company",
+      "ddl": "DEFINE INDEX companyNormalizedNameIdx ON TABLE company FIELDS normalizedName UNIQUE;"
+    },
+    "table::expense": {
+      "kind": "table",
+      "name": "expense",
+      "ddl": "DEFINE TABLE expense TYPE ANY SCHEMAFULL;",
+      "clauses": {
+        "TYPE": "TYPE ANY",
+        "SCHEMA": "SCHEMAFULL"
+      }
+    },
+    "field:expense:amount": {
+      "kind": "field",
+      "name": "amount",
+      "table": "expense",
+      "ddl": "DEFINE FIELD amount ON TABLE expense TYPE number;",
+      "clauses": {
+        "TYPE": "TYPE number"
+      }
+    },
+    "field:expense:category": {
+      "kind": "field",
+      "name": "category",
+      "table": "expense",
+      "ddl": "DEFINE FIELD category ON TABLE expense TYPE option<\"oficina\" | \"transporte\" | \"comida\" | \"servicios\" | \"marketing\" | \"legal\" | \"tecnologia\" | \"otros\">;",
+      "clauses": {
+        "TYPE": "TYPE option<\"oficina\" | \"transporte\" | \"comida\" | \"servicios\" | \"marketing\" | \"legal\" | \"tecnologia\" | \"otros\">"
+      }
+    },
+    "field:expense:createdAt": {
+      "kind": "field",
+      "name": "createdAt",
+      "table": "expense",
+      "ddl": "DEFINE FIELD createdAt ON TABLE expense TYPE any DEFAULT time::now();",
+      "clauses": {
+        "TYPE": "TYPE any",
+        "DEFAULT": "DEFAULT time::now()"
+      }
+    },
+    "field:expense:createdBy": {
+      "kind": "field",
+      "name": "createdBy",
+      "table": "expense",
+      "ddl": "DEFINE FIELD createdBy ON TABLE expense TYPE any;",
+      "clauses": {
+        "TYPE": "TYPE any"
+      }
+    },
+    "field:expense:description": {
+      "kind": "field",
+      "name": "description",
+      "table": "expense",
+      "ddl": "DEFINE FIELD description ON TABLE expense TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:expense:expenseDate": {
+      "kind": "field",
+      "name": "expenseDate",
+      "table": "expense",
+      "ddl": "DEFINE FIELD expenseDate ON TABLE expense TYPE datetime;",
+      "clauses": {
+        "TYPE": "TYPE datetime"
+      }
+    },
+    "field:expense:notes": {
+      "kind": "field",
+      "name": "notes",
+      "table": "expense",
+      "ddl": "DEFINE FIELD notes ON TABLE expense TYPE option<string>;",
+      "clauses": {
+        "TYPE": "TYPE option<string>"
+      }
+    },
+    "field:expense:updatedAt": {
+      "kind": "field",
+      "name": "updatedAt",
+      "table": "expense",
+      "ddl": "DEFINE FIELD updatedAt ON TABLE expense TYPE any DEFAULT time::now();",
+      "clauses": {
+        "TYPE": "TYPE any",
+        "DEFAULT": "DEFAULT time::now()"
+      }
+    },
+    "table::form_draft": {
+      "kind": "table",
+      "name": "form_draft",
+      "ddl": "DEFINE TABLE form_draft TYPE ANY SCHEMAFULL;",
+      "clauses": {
+        "TYPE": "TYPE ANY",
+        "SCHEMA": "SCHEMAFULL"
+      }
+    },
+    "field:form_draft:createdAt": {
+      "kind": "field",
+      "name": "createdAt",
+      "table": "form_draft",
+      "ddl": "DEFINE FIELD createdAt ON TABLE form_draft TYPE any DEFAULT time::now();",
+      "clauses": {
+        "TYPE": "TYPE any",
+        "DEFAULT": "DEFAULT time::now()"
+      }
+    },
+    "field:form_draft:data": {
+      "kind": "field",
+      "name": "data",
+      "table": "form_draft",
+      "ddl": "DEFINE FIELD data ON TABLE form_draft TYPE object FLEXIBLE;",
+      "clauses": {
+        "TYPE": "TYPE object",
+        "FLEXIBLE": "FLEXIBLE"
+      }
+    },
+    "field:form_draft:step": {
+      "kind": "field",
+      "name": "step",
+      "table": "form_draft",
+      "ddl": "DEFINE FIELD step ON TABLE form_draft TYPE option<number>;",
+      "clauses": {
+        "TYPE": "TYPE option<number>"
+      }
+    },
+    "field:form_draft:updatedAt": {
+      "kind": "field",
+      "name": "updatedAt",
+      "table": "form_draft",
+      "ddl": "DEFINE FIELD updatedAt ON TABLE form_draft TYPE any DEFAULT time::now();",
+      "clauses": {
+        "TYPE": "TYPE any",
+        "DEFAULT": "DEFAULT time::now()"
+      }
+    },
+    "field:form_draft:user": {
+      "kind": "field",
+      "name": "user",
+      "table": "form_draft",
+      "ddl": "DEFINE FIELD user ON TABLE form_draft TYPE any;",
+      "clauses": {
+        "TYPE": "TYPE any"
+      }
+    },
+    "table::invoice_counter": {
+      "kind": "table",
+      "name": "invoice_counter",
+      "ddl": "DEFINE TABLE invoice_counter TYPE ANY SCHEMAFULL;",
+      "clauses": {
+        "TYPE": "TYPE ANY",
+        "SCHEMA": "SCHEMAFULL"
+      }
+    },
+    "field:invoice_counter:value": {
+      "kind": "field",
+      "name": "value",
+      "table": "invoice_counter",
+      "ddl": "DEFINE FIELD value ON TABLE invoice_counter TYPE number;",
+      "clauses": {
+        "TYPE": "TYPE number"
+      }
+    },
+    "table::loan": {
+      "kind": "table",
+      "name": "loan",
+      "ddl": "DEFINE TABLE loan TYPE ANY SCHEMAFULL;",
+      "clauses": {
+        "TYPE": "TYPE ANY",
+        "SCHEMA": "SCHEMAFULL"
+      }
+    },
+    "field:loan:approvedAmount": {
+      "kind": "field",
+      "name": "approvedAmount",
+      "table": "loan",
+      "ddl": "DEFINE FIELD approvedAmount ON TABLE loan TYPE number;",
+      "clauses": {
+        "TYPE": "TYPE number"
+      }
+    },
+    "field:loan:approvedBy": {
+      "kind": "field",
+      "name": "approvedBy",
+      "table": "loan",
+      "ddl": "DEFINE FIELD approvedBy ON TABLE loan TYPE any;",
+      "clauses": {
+        "TYPE": "TYPE any"
+      }
+    },
+    "field:loan:capitalPerPeriod": {
+      "kind": "field",
+      "name": "capitalPerPeriod",
+      "table": "loan",
+      "ddl": "DEFINE FIELD capitalPerPeriod ON TABLE loan TYPE number;",
+      "clauses": {
+        "TYPE": "TYPE number"
+      }
+    },
+    "field:loan:client": {
+      "kind": "field",
+      "name": "client",
+      "table": "loan",
+      "ddl": "DEFINE FIELD client ON TABLE loan TYPE any;",
+      "clauses": {
+        "TYPE": "TYPE any"
+      }
+    },
+    "field:loan:createdAt": {
+      "kind": "field",
+      "name": "createdAt",
+      "table": "loan",
+      "ddl": "DEFINE FIELD createdAt ON TABLE loan TYPE any DEFAULT time::now();",
+      "clauses": {
+        "TYPE": "TYPE any",
+        "DEFAULT": "DEFAULT time::now()"
+      }
+    },
+    "field:loan:firstPaymentDate": {
+      "kind": "field",
+      "name": "firstPaymentDate",
+      "table": "loan",
+      "ddl": "DEFINE FIELD firstPaymentDate ON TABLE loan TYPE datetime;",
+      "clauses": {
+        "TYPE": "TYPE datetime"
+      }
+    },
+    "field:loan:interestRate": {
+      "kind": "field",
+      "name": "interestRate",
+      "table": "loan",
+      "ddl": "DEFINE FIELD interestRate ON TABLE loan TYPE number;",
+      "clauses": {
+        "TYPE": "TYPE number"
+      }
+    },
+    "field:loan:legalFees": {
+      "kind": "field",
+      "name": "legalFees",
+      "table": "loan",
+      "ddl": "DEFINE FIELD legalFees ON TABLE loan TYPE number;",
+      "clauses": {
+        "TYPE": "TYPE number"
+      }
+    },
+    "field:loan:loanRequest": {
+      "kind": "field",
+      "name": "loanRequest",
+      "table": "loan",
+      "ddl": "DEFINE FIELD loanRequest ON TABLE loan TYPE any;",
+      "clauses": {
+        "TYPE": "TYPE any"
+      }
+    },
+    "field:loan:paymentModel": {
+      "kind": "field",
+      "name": "paymentModel",
+      "table": "loan",
+      "ddl": "DEFINE FIELD paymentModel ON TABLE loan TYPE \"weekly\" | \"biweekly\" | \"monthly\";",
+      "clauses": {
+        "TYPE": "TYPE \"weekly\" | \"biweekly\" | \"monthly\""
+      }
+    },
+    "field:loan:phoneFees": {
+      "kind": "field",
+      "name": "phoneFees",
+      "table": "loan",
+      "ddl": "DEFINE FIELD phoneFees ON TABLE loan TYPE option<number>;",
+      "clauses": {
+        "TYPE": "TYPE option<number>"
+      }
+    },
+    "field:loan:voidedAt": {
+      "kind": "field",
+      "name": "voidedAt",
+      "table": "loan",
+      "ddl": "DEFINE FIELD voidedAt ON TABLE loan TYPE option<datetime>;",
+      "clauses": {
+        "TYPE": "TYPE option<datetime>"
+      }
+    },
+    "field:loan:voidedBy": {
+      "kind": "field",
+      "name": "voidedBy",
+      "table": "loan",
+      "ddl": "DEFINE FIELD voidedBy ON TABLE loan TYPE option<record<user>>;",
+      "clauses": {
+        "TYPE": "TYPE option<record<user>>"
+      }
+    },
+    "field:loan:voidedReason": {
+      "kind": "field",
+      "name": "voidedReason",
+      "table": "loan",
+      "ddl": "DEFINE FIELD voidedReason ON TABLE loan TYPE option<string>;",
+      "clauses": {
+        "TYPE": "TYPE option<string>"
+      }
+    },
+    "table::loan_counter": {
+      "kind": "table",
+      "name": "loan_counter",
+      "ddl": "DEFINE TABLE loan_counter TYPE ANY SCHEMAFULL;",
+      "clauses": {
+        "TYPE": "TYPE ANY",
+        "SCHEMA": "SCHEMAFULL"
+      }
+    },
+    "field:loan_counter:value": {
+      "kind": "field",
+      "name": "value",
+      "table": "loan_counter",
+      "ddl": "DEFINE FIELD value ON TABLE loan_counter TYPE number;",
+      "clauses": {
+        "TYPE": "TYPE number"
+      }
+    },
+    "table::loan_payment": {
+      "kind": "table",
+      "name": "loan_payment",
+      "ddl": "DEFINE TABLE loan_payment TYPE ANY SCHEMAFULL;",
+      "clauses": {
+        "TYPE": "TYPE ANY",
+        "SCHEMA": "SCHEMAFULL"
+      }
+    },
+    "field:loan_payment:capitalPaid": {
+      "kind": "field",
+      "name": "capitalPaid",
+      "table": "loan_payment",
+      "ddl": "DEFINE FIELD capitalPaid ON TABLE loan_payment TYPE number;",
+      "clauses": {
+        "TYPE": "TYPE number"
+      }
+    },
+    "field:loan_payment:createdAt": {
+      "kind": "field",
+      "name": "createdAt",
+      "table": "loan_payment",
+      "ddl": "DEFINE FIELD createdAt ON TABLE loan_payment TYPE any DEFAULT time::now();",
+      "clauses": {
+        "TYPE": "TYPE any",
+        "DEFAULT": "DEFAULT time::now()"
+      }
+    },
+    "field:loan_payment:interestPaid": {
+      "kind": "field",
+      "name": "interestPaid",
+      "table": "loan_payment",
+      "ddl": "DEFINE FIELD interestPaid ON TABLE loan_payment TYPE number;",
+      "clauses": {
+        "TYPE": "TYPE number"
+      }
+    },
+    "field:loan_payment:invoiceNumber": {
+      "kind": "field",
+      "name": "invoiceNumber",
+      "table": "loan_payment",
+      "ddl": "DEFINE FIELD invoiceNumber ON TABLE loan_payment TYPE option<string>;",
+      "clauses": {
+        "TYPE": "TYPE option<string>"
+      }
+    },
+    "field:loan_payment:loan": {
+      "kind": "field",
+      "name": "loan",
+      "table": "loan_payment",
+      "ddl": "DEFINE FIELD loan ON TABLE loan_payment TYPE any;",
+      "clauses": {
+        "TYPE": "TYPE any"
+      }
+    },
+    "field:loan_payment:notes": {
+      "kind": "field",
+      "name": "notes",
+      "table": "loan_payment",
+      "ddl": "DEFINE FIELD notes ON TABLE loan_payment TYPE option<string>;",
+      "clauses": {
+        "TYPE": "TYPE option<string>"
+      }
+    },
+    "field:loan_payment:paidAt": {
+      "kind": "field",
+      "name": "paidAt",
+      "table": "loan_payment",
+      "ddl": "DEFINE FIELD paidAt ON TABLE loan_payment TYPE datetime;",
+      "clauses": {
+        "TYPE": "TYPE datetime"
+      }
+    },
+    "field:loan_payment:paymentMethod": {
+      "kind": "field",
+      "name": "paymentMethod",
+      "table": "loan_payment",
+      "ddl": "DEFINE FIELD paymentMethod ON TABLE loan_payment TYPE option<string>;",
+      "clauses": {
+        "TYPE": "TYPE option<string>"
+      }
+    },
+    "field:loan_payment:period": {
+      "kind": "field",
+      "name": "period",
+      "table": "loan_payment",
+      "ddl": "DEFINE FIELD period ON TABLE loan_payment TYPE number;",
+      "clauses": {
+        "TYPE": "TYPE number"
+      }
+    },
+    "field:loan_payment:registeredBy": {
+      "kind": "field",
+      "name": "registeredBy",
+      "table": "loan_payment",
+      "ddl": "DEFINE FIELD registeredBy ON TABLE loan_payment TYPE any;",
+      "clauses": {
+        "TYPE": "TYPE any"
+      }
+    },
+    "field:loan_payment:totalPaid": {
+      "kind": "field",
+      "name": "totalPaid",
+      "table": "loan_payment",
+      "ddl": "DEFINE FIELD totalPaid ON TABLE loan_payment TYPE number;",
+      "clauses": {
+        "TYPE": "TYPE number"
+      }
+    },
+    "table::loan_payment_document": {
+      "kind": "table",
+      "name": "loan_payment_document",
+      "ddl": "DEFINE TABLE loan_payment_document TYPE ANY SCHEMAFULL;",
+      "clauses": {
+        "TYPE": "TYPE ANY",
+        "SCHEMA": "SCHEMAFULL"
+      }
+    },
+    "field:loan_payment_document:createdAt": {
+      "kind": "field",
+      "name": "createdAt",
+      "table": "loan_payment_document",
+      "ddl": "DEFINE FIELD createdAt ON TABLE loan_payment_document TYPE any DEFAULT time::now();",
+      "clauses": {
+        "TYPE": "TYPE any",
+        "DEFAULT": "DEFAULT time::now()"
+      }
+    },
+    "field:loan_payment_document:fileName": {
+      "kind": "field",
+      "name": "fileName",
+      "table": "loan_payment_document",
+      "ddl": "DEFINE FIELD fileName ON TABLE loan_payment_document TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:loan_payment_document:fileUrl": {
+      "kind": "field",
+      "name": "fileUrl",
+      "table": "loan_payment_document",
+      "ddl": "DEFINE FIELD fileUrl ON TABLE loan_payment_document TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:loan_payment_document:loanPayment": {
+      "kind": "field",
+      "name": "loanPayment",
+      "table": "loan_payment_document",
+      "ddl": "DEFINE FIELD loanPayment ON TABLE loan_payment_document TYPE option<record<loan_payment>>;",
+      "clauses": {
+        "TYPE": "TYPE option<record<loan_payment>>"
+      }
+    },
+    "field:loan_payment_document:loanTopUp": {
+      "kind": "field",
+      "name": "loanTopUp",
+      "table": "loan_payment_document",
+      "ddl": "DEFINE FIELD loanTopUp ON TABLE loan_payment_document TYPE option<record<loan_top_up>>;",
+      "clauses": {
+        "TYPE": "TYPE option<record<loan_top_up>>"
+      }
+    },
+    "field:loan_payment_document:mimeType": {
+      "kind": "field",
+      "name": "mimeType",
+      "table": "loan_payment_document",
+      "ddl": "DEFINE FIELD mimeType ON TABLE loan_payment_document TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:loan_payment_document:sizeBytes": {
+      "kind": "field",
+      "name": "sizeBytes",
+      "table": "loan_payment_document",
+      "ddl": "DEFINE FIELD sizeBytes ON TABLE loan_payment_document TYPE number;",
+      "clauses": {
+        "TYPE": "TYPE number"
+      }
+    },
+    "field:loan_payment_document:uploadedBy": {
+      "kind": "field",
+      "name": "uploadedBy",
+      "table": "loan_payment_document",
+      "ddl": "DEFINE FIELD uploadedBy ON TABLE loan_payment_document TYPE any;",
+      "clauses": {
+        "TYPE": "TYPE any"
+      }
+    },
+    "table::loan_request": {
+      "kind": "table",
+      "name": "loan_request",
+      "ddl": "DEFINE TABLE loan_request TYPE ANY SCHEMAFULL;",
+      "clauses": {
+        "TYPE": "TYPE ANY",
+        "SCHEMA": "SCHEMAFULL"
+      }
+    },
+    "field:loan_request:checkNumber": {
+      "kind": "field",
+      "name": "checkNumber",
+      "table": "loan_request",
+      "ddl": "DEFINE FIELD checkNumber ON TABLE loan_request TYPE option<string>;",
+      "clauses": {
+        "TYPE": "TYPE option<string>"
+      }
+    },
+    "field:loan_request:client": {
+      "kind": "field",
+      "name": "client",
+      "table": "loan_request",
+      "ddl": "DEFINE FIELD client ON TABLE loan_request TYPE any;",
+      "clauses": {
+        "TYPE": "TYPE any"
+      }
+    },
+    "field:loan_request:createdAt": {
+      "kind": "field",
+      "name": "createdAt",
+      "table": "loan_request",
+      "ddl": "DEFINE FIELD createdAt ON TABLE loan_request TYPE any DEFAULT time::now();",
+      "clauses": {
+        "TYPE": "TYPE any",
+        "DEFAULT": "DEFAULT time::now()"
+      }
+    },
+    "field:loan_request:createdBy": {
+      "kind": "field",
+      "name": "createdBy",
+      "table": "loan_request",
+      "ddl": "DEFINE FIELD createdBy ON TABLE loan_request TYPE option<record<user>>;",
+      "clauses": {
+        "TYPE": "TYPE option<record<user>>"
+      }
+    },
+    "field:loan_request:editToken": {
+      "kind": "field",
+      "name": "editToken",
+      "table": "loan_request",
+      "ddl": "DEFINE FIELD editToken ON TABLE loan_request TYPE option<string>;",
+      "clauses": {
+        "TYPE": "TYPE option<string>"
+      }
+    },
+    "field:loan_request:loan": {
+      "kind": "field",
+      "name": "loan",
+      "table": "loan_request",
+      "ddl": "DEFINE FIELD loan ON TABLE loan_request TYPE option<record<loan>>;",
+      "clauses": {
+        "TYPE": "TYPE option<record<loan>>"
+      }
+    },
+    "field:loan_request:notes": {
+      "kind": "field",
+      "name": "notes",
+      "table": "loan_request",
+      "ddl": "DEFINE FIELD notes ON TABLE loan_request TYPE option<string>;",
+      "clauses": {
+        "TYPE": "TYPE option<string>"
+      }
+    },
+    "field:loan_request:paymentModel": {
+      "kind": "field",
+      "name": "paymentModel",
+      "table": "loan_request",
+      "ddl": "DEFINE FIELD paymentModel ON TABLE loan_request TYPE \"weekly\" | \"biweekly\" | \"monthly\";",
+      "clauses": {
+        "TYPE": "TYPE \"weekly\" | \"biweekly\" | \"monthly\""
+      }
+    },
+    "field:loan_request:previousRequest": {
+      "kind": "field",
+      "name": "previousRequest",
+      "table": "loan_request",
+      "ddl": "DEFINE FIELD previousRequest ON TABLE loan_request TYPE option<record<loan_request>>;",
+      "clauses": {
+        "TYPE": "TYPE option<record<loan_request>>"
+      }
+    },
+    "field:loan_request:recentPayment1": {
+      "kind": "field",
+      "name": "recentPayment1",
+      "table": "loan_request",
+      "ddl": "DEFINE FIELD recentPayment1 ON TABLE loan_request TYPE option<number>;",
+      "clauses": {
+        "TYPE": "TYPE option<number>"
+      }
+    },
+    "field:loan_request:recentPayment2": {
+      "kind": "field",
+      "name": "recentPayment2",
+      "table": "loan_request",
+      "ddl": "DEFINE FIELD recentPayment2 ON TABLE loan_request TYPE option<number>;",
+      "clauses": {
+        "TYPE": "TYPE option<number>"
+      }
+    },
+    "field:loan_request:recentPayment3": {
+      "kind": "field",
+      "name": "recentPayment3",
+      "table": "loan_request",
+      "ddl": "DEFINE FIELD recentPayment3 ON TABLE loan_request TYPE option<number>;",
+      "clauses": {
+        "TYPE": "TYPE option<number>"
+      }
+    },
+    "field:loan_request:recentPayment4": {
+      "kind": "field",
+      "name": "recentPayment4",
+      "table": "loan_request",
+      "ddl": "DEFINE FIELD recentPayment4 ON TABLE loan_request TYPE option<number>;",
+      "clauses": {
+        "TYPE": "TYPE option<number>"
+      }
+    },
+    "field:loan_request:recentPayment5": {
+      "kind": "field",
+      "name": "recentPayment5",
+      "table": "loan_request",
+      "ddl": "DEFINE FIELD recentPayment5 ON TABLE loan_request TYPE option<number>;",
+      "clauses": {
+        "TYPE": "TYPE option<number>"
+      }
+    },
+    "field:loan_request:recentPayment6": {
+      "kind": "field",
+      "name": "recentPayment6",
+      "table": "loan_request",
+      "ddl": "DEFINE FIELD recentPayment6 ON TABLE loan_request TYPE option<number>;",
+      "clauses": {
+        "TYPE": "TYPE option<number>"
+      }
+    },
+    "field:loan_request:refinanceCapitalPerPeriod": {
+      "kind": "field",
+      "name": "refinanceCapitalPerPeriod",
+      "table": "loan_request",
+      "ddl": "DEFINE FIELD refinanceCapitalPerPeriod ON TABLE loan_request TYPE option<number>;",
+      "clauses": {
+        "TYPE": "TYPE option<number>"
+      }
+    },
+    "field:loan_request:refinanceFirstPaymentDate": {
+      "kind": "field",
+      "name": "refinanceFirstPaymentDate",
+      "table": "loan_request",
+      "ddl": "DEFINE FIELD refinanceFirstPaymentDate ON TABLE loan_request TYPE option<datetime>;",
+      "clauses": {
+        "TYPE": "TYPE option<datetime>"
+      }
+    },
+    "field:loan_request:refinanceInterestRate": {
+      "kind": "field",
+      "name": "refinanceInterestRate",
+      "table": "loan_request",
+      "ddl": "DEFINE FIELD refinanceInterestRate ON TABLE loan_request TYPE option<number>;",
+      "clauses": {
+        "TYPE": "TYPE option<number>"
+      }
+    },
+    "field:loan_request:refinanceLegalFees": {
+      "kind": "field",
+      "name": "refinanceLegalFees",
+      "table": "loan_request",
+      "ddl": "DEFINE FIELD refinanceLegalFees ON TABLE loan_request TYPE option<number>;",
+      "clauses": {
+        "TYPE": "TYPE option<number>"
+      }
+    },
+    "field:loan_request:refinancePhoneFees": {
+      "kind": "field",
+      "name": "refinancePhoneFees",
+      "table": "loan_request",
+      "ddl": "DEFINE FIELD refinancePhoneFees ON TABLE loan_request TYPE option<number>;",
+      "clauses": {
+        "TYPE": "TYPE option<number>"
+      }
+    },
+    "field:loan_request:rejectionNotes": {
+      "kind": "field",
+      "name": "rejectionNotes",
+      "table": "loan_request",
+      "ddl": "DEFINE FIELD rejectionNotes ON TABLE loan_request TYPE option<string>;",
+      "clauses": {
+        "TYPE": "TYPE option<string>"
+      }
+    },
+    "field:loan_request:rejectionReason": {
+      "kind": "field",
+      "name": "rejectionReason",
+      "table": "loan_request",
+      "ddl": "DEFINE FIELD rejectionReason ON TABLE loan_request TYPE option<record<rejection_reason>>;",
+      "clauses": {
+        "TYPE": "TYPE option<record<rejection_reason>>"
+      }
+    },
+    "field:loan_request:requestedAmount": {
+      "kind": "field",
+      "name": "requestedAmount",
+      "table": "loan_request",
+      "ddl": "DEFINE FIELD requestedAmount ON TABLE loan_request TYPE number;",
+      "clauses": {
+        "TYPE": "TYPE number"
+      }
+    },
+    "field:loan_request:source": {
+      "kind": "field",
+      "name": "source",
+      "table": "loan_request",
+      "ddl": "DEFINE FIELD source ON TABLE loan_request TYPE option<\"internal\" | \"public\">;",
+      "clauses": {
+        "TYPE": "TYPE option<\"internal\" | \"public\">"
+      }
+    },
+    "field:loan_request:status": {
+      "kind": "field",
+      "name": "status",
+      "table": "loan_request",
+      "ddl": "DEFINE FIELD status ON TABLE loan_request TYPE \"pending\" | \"approved\" | \"rejected\";",
+      "clauses": {
+        "TYPE": "TYPE \"pending\" | \"approved\" | \"rejected\""
+      }
+    },
+    "field:loan_request:updatedAt": {
+      "kind": "field",
+      "name": "updatedAt",
+      "table": "loan_request",
+      "ddl": "DEFINE FIELD updatedAt ON TABLE loan_request TYPE any DEFAULT time::now();",
+      "clauses": {
+        "TYPE": "TYPE any",
+        "DEFAULT": "DEFAULT time::now()"
+      }
+    },
+    "table::loan_request_document": {
+      "kind": "table",
+      "name": "loan_request_document",
+      "ddl": "DEFINE TABLE loan_request_document TYPE ANY SCHEMAFULL;",
+      "clauses": {
+        "TYPE": "TYPE ANY",
+        "SCHEMA": "SCHEMAFULL"
+      }
+    },
+    "field:loan_request_document:createdAt": {
+      "kind": "field",
+      "name": "createdAt",
+      "table": "loan_request_document",
+      "ddl": "DEFINE FIELD createdAt ON TABLE loan_request_document TYPE any DEFAULT time::now();",
+      "clauses": {
+        "TYPE": "TYPE any",
+        "DEFAULT": "DEFAULT time::now()"
+      }
+    },
+    "field:loan_request_document:expiresAt": {
+      "kind": "field",
+      "name": "expiresAt",
+      "table": "loan_request_document",
+      "ddl": "DEFINE FIELD expiresAt ON TABLE loan_request_document TYPE option<datetime>;",
+      "clauses": {
+        "TYPE": "TYPE option<datetime>"
+      }
+    },
+    "field:loan_request_document:fileName": {
+      "kind": "field",
+      "name": "fileName",
+      "table": "loan_request_document",
+      "ddl": "DEFINE FIELD fileName ON TABLE loan_request_document TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:loan_request_document:fileUrl": {
+      "kind": "field",
+      "name": "fileUrl",
+      "table": "loan_request_document",
+      "ddl": "DEFINE FIELD fileUrl ON TABLE loan_request_document TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:loan_request_document:loanRequest": {
+      "kind": "field",
+      "name": "loanRequest",
+      "table": "loan_request_document",
+      "ddl": "DEFINE FIELD loanRequest ON TABLE loan_request_document TYPE any;",
+      "clauses": {
+        "TYPE": "TYPE any"
+      }
+    },
+    "field:loan_request_document:mimeType": {
+      "kind": "field",
+      "name": "mimeType",
+      "table": "loan_request_document",
+      "ddl": "DEFINE FIELD mimeType ON TABLE loan_request_document TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:loan_request_document:sizeBytes": {
+      "kind": "field",
+      "name": "sizeBytes",
+      "table": "loan_request_document",
+      "ddl": "DEFINE FIELD sizeBytes ON TABLE loan_request_document TYPE number;",
+      "clauses": {
+        "TYPE": "TYPE number"
+      }
+    },
+    "field:loan_request_document:type": {
+      "kind": "field",
+      "name": "type",
+      "table": "loan_request_document",
+      "ddl": "DEFINE FIELD type ON TABLE loan_request_document TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:loan_request_document:uploadedBy": {
+      "kind": "field",
+      "name": "uploadedBy",
+      "table": "loan_request_document",
+      "ddl": "DEFINE FIELD uploadedBy ON TABLE loan_request_document TYPE any;",
+      "clauses": {
+        "TYPE": "TYPE any"
+      }
+    },
+    "table::loan_top_up": {
+      "kind": "table",
+      "name": "loan_top_up",
+      "ddl": "DEFINE TABLE loan_top_up TYPE ANY SCHEMAFULL;",
+      "clauses": {
+        "TYPE": "TYPE ANY",
+        "SCHEMA": "SCHEMAFULL"
+      }
+    },
+    "field:loan_top_up:additionalAmount": {
+      "kind": "field",
+      "name": "additionalAmount",
+      "table": "loan_top_up",
+      "ddl": "DEFINE FIELD additionalAmount ON TABLE loan_top_up TYPE option<number>;",
+      "clauses": {
+        "TYPE": "TYPE option<number>"
+      }
+    },
+    "field:loan_top_up:amount": {
+      "kind": "field",
+      "name": "amount",
+      "table": "loan_top_up",
+      "ddl": "DEFINE FIELD amount ON TABLE loan_top_up TYPE option<number>;",
+      "clauses": {
+        "TYPE": "TYPE option<number>"
+      }
+    },
+    "field:loan_top_up:appliedToPeriod": {
+      "kind": "field",
+      "name": "appliedToPeriod",
+      "table": "loan_top_up",
+      "ddl": "DEFINE FIELD appliedToPeriod ON TABLE loan_top_up TYPE number;",
+      "clauses": {
+        "TYPE": "TYPE number"
+      }
+    },
+    "field:loan_top_up:createdAt": {
+      "kind": "field",
+      "name": "createdAt",
+      "table": "loan_top_up",
+      "ddl": "DEFINE FIELD createdAt ON TABLE loan_top_up TYPE any DEFAULT time::now();",
+      "clauses": {
+        "TYPE": "TYPE any",
+        "DEFAULT": "DEFAULT time::now()"
+      }
+    },
+    "field:loan_top_up:createdBy": {
+      "kind": "field",
+      "name": "createdBy",
+      "table": "loan_top_up",
+      "ddl": "DEFINE FIELD createdBy ON TABLE loan_top_up TYPE any;",
+      "clauses": {
+        "TYPE": "TYPE any"
+      }
+    },
+    "field:loan_top_up:interestAmount": {
+      "kind": "field",
+      "name": "interestAmount",
+      "table": "loan_top_up",
+      "ddl": "DEFINE FIELD interestAmount ON TABLE loan_top_up TYPE option<number>;",
+      "clauses": {
+        "TYPE": "TYPE option<number>"
+      }
+    },
+    "field:loan_top_up:invoiceNumber": {
+      "kind": "field",
+      "name": "invoiceNumber",
+      "table": "loan_top_up",
+      "ddl": "DEFINE FIELD invoiceNumber ON TABLE loan_top_up TYPE option<string>;",
+      "clauses": {
+        "TYPE": "TYPE option<string>"
+      }
+    },
+    "field:loan_top_up:kind": {
+      "kind": "field",
+      "name": "kind",
+      "table": "loan_top_up",
+      "ddl": "DEFINE FIELD kind ON TABLE loan_top_up TYPE \"refinance\" | \"quick_advance\" | \"abono\";",
+      "clauses": {
+        "TYPE": "TYPE \"refinance\" | \"quick_advance\" | \"abono\""
+      }
+    },
+    "field:loan_top_up:loan": {
+      "kind": "field",
+      "name": "loan",
+      "table": "loan_top_up",
+      "ddl": "DEFINE FIELD loan ON TABLE loan_top_up TYPE any;",
+      "clauses": {
+        "TYPE": "TYPE any"
+      }
+    },
+    "field:loan_top_up:loanRequest": {
+      "kind": "field",
+      "name": "loanRequest",
+      "table": "loan_top_up",
+      "ddl": "DEFINE FIELD loanRequest ON TABLE loan_top_up TYPE option<record<loan_request>>;",
+      "clauses": {
+        "TYPE": "TYPE option<record<loan_request>>"
+      }
+    },
+    "field:loan_top_up:newCapitalPerPeriod": {
+      "kind": "field",
+      "name": "newCapitalPerPeriod",
+      "table": "loan_top_up",
+      "ddl": "DEFINE FIELD newCapitalPerPeriod ON TABLE loan_top_up TYPE option<number>;",
+      "clauses": {
+        "TYPE": "TYPE option<number>"
+      }
+    },
+    "field:loan_top_up:newFirstPaymentDate": {
+      "kind": "field",
+      "name": "newFirstPaymentDate",
+      "table": "loan_top_up",
+      "ddl": "DEFINE FIELD newFirstPaymentDate ON TABLE loan_top_up TYPE option<datetime>;",
+      "clauses": {
+        "TYPE": "TYPE option<datetime>"
+      }
+    },
+    "field:loan_top_up:newInterestRate": {
+      "kind": "field",
+      "name": "newInterestRate",
+      "table": "loan_top_up",
+      "ddl": "DEFINE FIELD newInterestRate ON TABLE loan_top_up TYPE option<number>;",
+      "clauses": {
+        "TYPE": "TYPE option<number>"
+      }
+    },
+    "field:loan_top_up:newLegalFees": {
+      "kind": "field",
+      "name": "newLegalFees",
+      "table": "loan_top_up",
+      "ddl": "DEFINE FIELD newLegalFees ON TABLE loan_top_up TYPE option<number>;",
+      "clauses": {
+        "TYPE": "TYPE option<number>"
+      }
+    },
+    "field:loan_top_up:newPhoneFees": {
+      "kind": "field",
+      "name": "newPhoneFees",
+      "table": "loan_top_up",
+      "ddl": "DEFINE FIELD newPhoneFees ON TABLE loan_top_up TYPE option<number>;",
+      "clauses": {
+        "TYPE": "TYPE option<number>"
+      }
+    },
+    "field:loan_top_up:newTotalAmount": {
+      "kind": "field",
+      "name": "newTotalAmount",
+      "table": "loan_top_up",
+      "ddl": "DEFINE FIELD newTotalAmount ON TABLE loan_top_up TYPE option<number>;",
+      "clauses": {
+        "TYPE": "TYPE option<number>"
+      }
+    },
+    "field:loan_top_up:notes": {
+      "kind": "field",
+      "name": "notes",
+      "table": "loan_top_up",
+      "ddl": "DEFINE FIELD notes ON TABLE loan_top_up TYPE option<string>;",
+      "clauses": {
+        "TYPE": "TYPE option<string>"
+      }
+    },
+    "table::otp_challenge": {
+      "kind": "table",
+      "name": "otp_challenge",
+      "ddl": "DEFINE TABLE otp_challenge TYPE ANY SCHEMAFULL;",
+      "clauses": {
+        "TYPE": "TYPE ANY",
+        "SCHEMA": "SCHEMAFULL"
+      }
+    },
+    "field:otp_challenge:attempts": {
+      "kind": "field",
+      "name": "attempts",
+      "table": "otp_challenge",
+      "ddl": "DEFINE FIELD attempts ON TABLE otp_challenge TYPE any DEFAULT 0;",
+      "clauses": {
+        "TYPE": "TYPE any",
+        "DEFAULT": "DEFAULT 0"
+      }
+    },
+    "field:otp_challenge:codeHash": {
+      "kind": "field",
+      "name": "codeHash",
+      "table": "otp_challenge",
+      "ddl": "DEFINE FIELD codeHash ON TABLE otp_challenge TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:otp_challenge:createdAt": {
+      "kind": "field",
+      "name": "createdAt",
+      "table": "otp_challenge",
+      "ddl": "DEFINE FIELD createdAt ON TABLE otp_challenge TYPE any DEFAULT time::now();",
+      "clauses": {
+        "TYPE": "TYPE any",
+        "DEFAULT": "DEFAULT time::now()"
+      }
+    },
+    "field:otp_challenge:expiresAt": {
+      "kind": "field",
+      "name": "expiresAt",
+      "table": "otp_challenge",
+      "ddl": "DEFINE FIELD expiresAt ON TABLE otp_challenge TYPE datetime;",
+      "clauses": {
+        "TYPE": "TYPE datetime"
+      }
+    },
+    "field:otp_challenge:loanRequest": {
+      "kind": "field",
+      "name": "loanRequest",
+      "table": "otp_challenge",
+      "ddl": "DEFINE FIELD loanRequest ON TABLE otp_challenge TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:otp_challenge:phoneHint": {
+      "kind": "field",
+      "name": "phoneHint",
+      "table": "otp_challenge",
+      "ddl": "DEFINE FIELD phoneHint ON TABLE otp_challenge TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:otp_challenge:salt": {
+      "kind": "field",
+      "name": "salt",
+      "table": "otp_challenge",
+      "ddl": "DEFINE FIELD salt ON TABLE otp_challenge TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:otp_challenge:verifiedAt": {
+      "kind": "field",
+      "name": "verifiedAt",
+      "table": "otp_challenge",
+      "ddl": "DEFINE FIELD verifiedAt ON TABLE otp_challenge TYPE option<datetime>;",
+      "clauses": {
+        "TYPE": "TYPE option<datetime>"
+      }
+    },
+    "table::rejection_reason": {
+      "kind": "table",
+      "name": "rejection_reason",
+      "ddl": "DEFINE TABLE rejection_reason TYPE ANY SCHEMAFULL;",
+      "clauses": {
+        "TYPE": "TYPE ANY",
+        "SCHEMA": "SCHEMAFULL"
+      }
+    },
+    "field:rejection_reason:createdAt": {
+      "kind": "field",
+      "name": "createdAt",
+      "table": "rejection_reason",
+      "ddl": "DEFINE FIELD createdAt ON TABLE rejection_reason TYPE any DEFAULT time::now();",
+      "clauses": {
+        "TYPE": "TYPE any",
+        "DEFAULT": "DEFAULT time::now()"
+      }
+    },
+    "field:rejection_reason:displayOrder": {
+      "kind": "field",
+      "name": "displayOrder",
+      "table": "rejection_reason",
+      "ddl": "DEFINE FIELD displayOrder ON TABLE rejection_reason TYPE option<number>;",
+      "clauses": {
+        "TYPE": "TYPE option<number>"
+      }
+    },
+    "field:rejection_reason:text": {
+      "kind": "field",
+      "name": "text",
+      "table": "rejection_reason",
+      "ddl": "DEFINE FIELD text ON TABLE rejection_reason TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "table::request_counter": {
+      "kind": "table",
+      "name": "request_counter",
+      "ddl": "DEFINE TABLE request_counter TYPE ANY SCHEMAFULL;",
+      "clauses": {
+        "TYPE": "TYPE ANY",
+        "SCHEMA": "SCHEMAFULL"
+      }
+    },
+    "field:request_counter:value": {
+      "kind": "field",
+      "name": "value",
+      "table": "request_counter",
+      "ddl": "DEFINE FIELD value ON TABLE request_counter TYPE number;",
+      "clauses": {
+        "TYPE": "TYPE number"
+      }
+    },
+    "table::session": {
+      "kind": "table",
+      "name": "session",
+      "ddl": "DEFINE TABLE session TYPE ANY SCHEMAFULL;",
+      "clauses": {
+        "TYPE": "TYPE ANY",
+        "SCHEMA": "SCHEMAFULL"
+      }
+    },
+    "field:session:createdAt": {
+      "kind": "field",
+      "name": "createdAt",
+      "table": "session",
+      "ddl": "DEFINE FIELD createdAt ON TABLE session TYPE datetime;",
+      "clauses": {
+        "TYPE": "TYPE datetime"
+      }
+    },
+    "field:session:expiresAt": {
+      "kind": "field",
+      "name": "expiresAt",
+      "table": "session",
+      "ddl": "DEFINE FIELD expiresAt ON TABLE session TYPE datetime;",
+      "clauses": {
+        "TYPE": "TYPE datetime"
+      }
+    },
+    "field:session:updatedAt": {
+      "kind": "field",
+      "name": "updatedAt",
+      "table": "session",
+      "ddl": "DEFINE FIELD updatedAt ON TABLE session TYPE datetime;",
+      "clauses": {
+        "TYPE": "TYPE datetime"
+      }
+    },
+    "field:session:user": {
+      "kind": "field",
+      "name": "user",
+      "table": "session",
+      "ddl": "DEFINE FIELD user ON TABLE session TYPE any;",
+      "clauses": {
+        "TYPE": "TYPE any"
+      }
+    },
+    "table::user": {
+      "kind": "table",
+      "name": "user",
+      "ddl": "DEFINE TABLE user TYPE ANY SCHEMAFULL;",
+      "clauses": {
+        "TYPE": "TYPE ANY",
+        "SCHEMA": "SCHEMAFULL"
+      }
+    },
+    "field:user:createdAt": {
+      "kind": "field",
+      "name": "createdAt",
+      "table": "user",
+      "ddl": "DEFINE FIELD createdAt ON TABLE user TYPE any DEFAULT time::now();",
+      "clauses": {
+        "TYPE": "TYPE any",
+        "DEFAULT": "DEFAULT time::now()"
+      }
+    },
+    "field:user:email": {
+      "kind": "field",
+      "name": "email",
+      "table": "user",
+      "ddl": "DEFINE FIELD email ON TABLE user TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:user:image": {
+      "kind": "field",
+      "name": "image",
+      "table": "user",
+      "ddl": "DEFINE FIELD image ON TABLE user TYPE option<string>;",
+      "clauses": {
+        "TYPE": "TYPE option<string>"
+      }
+    },
+    "field:user:name": {
+      "kind": "field",
+      "name": "name",
+      "table": "user",
+      "ddl": "DEFINE FIELD name ON TABLE user TYPE string;",
+      "clauses": {
+        "TYPE": "TYPE string"
+      }
+    },
+    "field:user:password": {
+      "kind": "field",
+      "name": "password",
+      "table": "user",
+      "ddl": "DEFINE FIELD password ON TABLE user TYPE any VALUE crypto::bcrypt::generate($value);",
+      "clauses": {
+        "TYPE": "TYPE any",
+        "VALUE": "VALUE crypto::bcrypt::generate($value)"
+      }
+    },
+    "field:user:updatedAt": {
+      "kind": "field",
+      "name": "updatedAt",
+      "table": "user",
+      "ddl": "DEFINE FIELD updatedAt ON TABLE user TYPE any DEFAULT time::now();",
+      "clauses": {
+        "TYPE": "TYPE any",
+        "DEFAULT": "DEFAULT time::now()"
+      }
+    },
+    "table::has": {
+      "kind": "table",
+      "name": "has",
+      "ddl": "DEFINE TABLE has TYPE RELATION FROM user TO loan SCHEMALESS;",
+      "clauses": {
+        "TYPE": "TYPE RELATION FROM user TO loan",
+        "SCHEMA": "SCHEMALESS"
+      }
+    }
+  }
+}
