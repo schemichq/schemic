@@ -88,8 +88,12 @@ export interface ResolvedConfig extends SurrealZodConfig {
   metaDir: string;
   /** Name of the table that records applied migrations. */
   migrationsTable: string;
-  /** Connection for `sz check`'s migration replay (`config.check.db` merged over `db`). */
+  /** Connection for `sz check`'s remote-engine replay (`config.check.db` merged over `db`). */
   checkDb: SurrealZodConnection;
+  /** Engine for `sz check`'s migration replay. Default `"auto"`. */
+  checkEngine: "auto" | "binary" | "remote";
+  /** Path to the `surreal` CLI for the auto/binary check engines. Default `"surreal"`. */
+  checkBinary: string;
 }
 
 /**
@@ -154,6 +158,8 @@ export async function loadConfig(opts?: {
     migrations,
     db,
     checkDb,
+    checkEngine: config.check?.engine ?? "auto",
+    checkBinary: config.check?.binary ?? "surreal",
     root,
     schemaPath,
     schemaIsFile: schemaIsFilePath(schemaPath),

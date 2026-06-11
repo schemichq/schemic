@@ -19,6 +19,7 @@ import {
   isEmptyDiff,
   summarizeKinds,
 } from "./diff";
+import { spawnEphemeralServer, surrealBinaryAvailable } from "./engine";
 import { type FilterOpts, kindFlags, parseFilter } from "./filter";
 import { init } from "./init";
 import {
@@ -487,22 +488,64 @@ dbFlags(
     if (opts.schema) return;
 
     // 2. Deep check: replay every migration into throwaway scratch databases and confirm the result
-    //    matches the schema. Runs on `check.db` (or `db`) — it creates and drops isolated databases
-    //    and NEVER reads or writes your real database. `--schema` skips this half.
-    const checkCfg = { ...config, db: config.checkDb };
-    let db: Surreal;
-    try {
-      db = await connect(checkCfg, opts);
-    } catch (e) {
+    //    matches the schema. The replay NEVER reads or writes your real database. Engine selection:
+    //    `auto` prefers an ephemeral in-memory server from the local `surreal` binary (your exact
+    //    version, no external server); else it falls back to the `check.db`/`db` server.
+    const useBinary =
+      config.checkEngine === "binary" ||
+      (config.checkEngine === "auto" &&
+        surrealBinaryAvailable(config.checkBinary));
+    if (config.checkEngine === "binary" && !useBinary) {
       throw new Error(
-        `${errMsg(e)}\n  (run \`sz check --schema\` to validate the schema without a database, or set \`check.db\` in your config to point the replay at a scratch server)`,
+        'check.engine "binary" needs the `surreal` CLI on PATH (or set `check.binary`). Run `sz check --schema` to skip the replay.',
       );
     }
-    console.log(
-      style.dim(
-        `  replaying on ${config.checkDb.url} (${config.checkDb.namespace}) — isolated scratch databases; your data is untouched`,
-      ),
-    );
+
+    let db: Surreal;
+    let checkCfg: ResolvedConfig;
+    let cleanup: () => Promise<void>;
+    if (useBinary) {
+      const server = await spawnEphemeralServer(config.checkBinary);
+      checkCfg = {
+        ...config,
+        db: {
+          url: server.url,
+          namespace: "check",
+          database: "check",
+          username: server.username,
+          password: server.password,
+          authLevel: "root",
+        },
+      };
+      db = await connect(checkCfg, {});
+      cleanup = async () => {
+        await db.close().catch(() => {});
+        await server.stop();
+      };
+      console.log(
+        style.dim(
+          "  replaying on an ephemeral in-memory SurrealDB (local `surreal` binary) — your server is untouched",
+        ),
+      );
+    } else {
+      checkCfg = { ...config, db: config.checkDb };
+      try {
+        db = await connect(checkCfg, opts);
+      } catch (e) {
+        throw new Error(
+          `${errMsg(e)}\n  (run \`sz check --schema\` to skip the replay, install the \`surreal\` CLI for an in-memory engine, or set \`check.db\` to point the replay at a scratch server)`,
+        );
+      }
+      cleanup = async () => {
+        await db.close().catch(() => {});
+      };
+      console.log(
+        style.dim(
+          `  replaying on ${config.checkDb.url} (${config.checkDb.namespace}) — isolated scratch databases; your data is untouched`,
+        ),
+      );
+    }
+
     try {
       const diff = await verifyMigrations(
         db,
@@ -523,7 +566,7 @@ dbFlags(
       );
       process.exitCode = 1;
     } finally {
-      await db.close();
+      await cleanup();
     }
   });
 });

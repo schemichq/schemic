@@ -14,6 +14,8 @@ function tmpConfig(): ResolvedConfig {
     migrations: "migrations",
     db: { url: "", namespace: "", database: "" },
     checkDb: { url: "", namespace: "", database: "" },
+    checkEngine: "auto",
+    checkBinary: "surreal",
     root,
     schemaPath: join(root, "schemas"),
     schemaIsFile: false,

@@ -45,10 +45,21 @@ export interface SurrealZodConnection {
 /** `sz check` options. */
 export interface SurrealZodCheck {
   /**
-   * Connection used for `sz check`'s migration replay, merged field-by-field over `db`. The replay
-   * spins up throwaway scratch databases and drops them — it NEVER reads or writes your real database
-   * — but it DOES reach the server and needs database-create privileges. Point this at a local or
-   * scratch SurrealDB (the same major version you deploy to) so `sz check` never touches production:
+   * Engine for the migration replay:
+   *  - `"auto"` (default) — if the `surreal` CLI is on PATH, spin up an ephemeral in-memory instance
+   *    (your EXACT SurrealDB version, no external server, your data untouched); otherwise fall back to
+   *    the `check.db`/`db` server.
+   *  - `"binary"` — require the local `surreal` CLI (error if it's missing).
+   *  - `"remote"` — always use the `check.db`/`db` server (throwaway scratch databases on it).
+   */
+  engine?: "auto" | "binary" | "remote";
+  /** Path to the `surreal` CLI for the `auto`/`binary` engines. Default: `surreal` on PATH. */
+  binary?: string;
+  /**
+   * Connection used for the `remote` engine, merged field-by-field over `db`. The replay spins up
+   * throwaway scratch databases and drops them — it NEVER reads or writes your real database — but it
+   * DOES reach the server. Point this at a local/scratch SurrealDB so `sz check` never touches
+   * production:
    *
    * ```ts
    * check: { db: { url: "ws://localhost:8000", namespace: "scratch" } }
