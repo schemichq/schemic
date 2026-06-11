@@ -1,0 +1,83 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import PageHeader from "../../components/docs/PageHeader.astro";
+import CompatBadges from "../../components/docs/CompatBadges.astro";
+import CodeToggle from "../../components/docs/CodeToggle.astro";
+import CommandBlock from "../../components/docs/CommandBlock.astro";
+import Callout from "../../components/docs/Callout.astro";
+import PrevNext from "../../components/docs/PrevNext.astro";
+
+const headings = [
+  { id: "incremental-alters", text: "Incremental ALTERs" },
+  { id: "generate-and-apply", text: "Generate and apply" },
+  { id: "safe-by-default", text: "Safe by default" },
+];
+
+const editTs = `export const User = defineTable("user", {
+  name: sz.string(),
+  email: sz.string().email(),
+  role: sz.enum(["admin", "member", "owner"]),
+  lastSeen: sz.datetime().optional(),
+});`;
+
+const migrationSurql = `-- migrations/0002_user.surql
+ALTER FIELD role ON TABLE user TYPE "admin" | "member" | "owner";
+DEFINE FIELD lastSeen ON TABLE user TYPE option<datetime>;`;
+---
+
+<DocsLayout
+  title="Migrations"
+  description="surreal-zod diffs your schema into incremental ALTER statements that touch only what changed and round-trip on real SurrealDB."
+  activeHref="/guides/migrations"
+  topActive="Guides"
+  headings={headings}
+>
+  <PageHeader crumb="Guides&nbsp; /&nbsp; Migrations" title="Migrations">
+    <CompatBadges slot="badges" items={["SurrealDB 3.x", "Zod 4", "SDK v2.x"]} />
+    Change your schema and surreal-zod writes the migration. It diffs into
+    clause-level <code>ALTER</code> statements that touch only what changed.
+  </PageHeader>
+
+  <div class="doc-prose">
+    <h2 id="incremental-alters">Incremental ALTERs</h2>
+    <p>
+      Add a value to an enum and a new optional field, and the generator emits
+      one <code>ALTER FIELD</code> and one <code>DEFINE FIELD</code> — not a
+      rewritten table. Unmentioned clauses are preserved.
+    </p>
+
+    <CodeToggle ts={editTs} surql={migrationSurql} tsTitle="user.ts" />
+
+    <h2 id="generate-and-apply">Generate and apply</h2>
+    <p>
+      <code>sz gen</code> writes the next numbered migration; <code>sz migrate</code>
+      applies the pending ones. Both the up and down directions round-trip on a
+      real database.
+    </p>
+
+    <CommandBlock
+      lines={[
+        { cmd: "sz gen" },
+        { ok: "diff: 1 altered field, 1 new field" },
+        { ok: "wrote migrations/0002_user.surql" },
+        { cmd: "sz migrate" },
+        { ok: "applied 0002_user.surql" },
+      ]}
+    />
+
+    <div id="safe-by-default">
+      <Callout variant="tip" title="Safe migrations, not rip-and-replace">
+        <p>
+          Migrations are non-destructive by default. Pair this with
+          <code>sz check</code>, which replays every migration from zero on a
+          throwaway database and confirms it reproduces your declared schema.
+        </p>
+      </Callout>
+    </div>
+  </div>
+
+  <PrevNext
+    prev={{ label: "Defining schemas", href: "/guides/schemas" }}
+    next={{ label: "Codecs & BYO types", href: "/guides/codecs" }}
+  />
+</DocsLayout>

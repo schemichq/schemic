@@ -1,0 +1,165 @@
+---
+import BlogLayout from "../../layouts/BlogLayout.astro";
+import CodeToggle from "../../components/docs/CodeToggle.astro";
+
+const editTs = `export const User = defineTable("user", {
+  name: sz.string(),
+  email: sz.string().email(),
+  role: sz.enum(["admin", "member", "owner"]),
+  lastSeen: sz.datetime().optional(),
+});`;
+
+const migrationSurql = `-- migrations/0002_user.surql
+ALTER FIELD role ON TABLE user TYPE "admin" | "member" | "owner";
+DEFINE FIELD lastSeen ON TABLE user TYPE option<datetime>;`;
+---
+
+<BlogLayout
+  title="Incremental migrations: ALTER, not rip-and-replace"
+  description="The CLI now diffs into clause-level ALTER statements that touch only what changed."
+  glow={true}
+>
+  <a class="back" href="/blog">&larr; Blog</a>
+
+  <div class="meta">
+    <span class="tag">RELEASE</span>
+    <span class="date">2026-06-10 &middot; 8 min read</span>
+  </div>
+  <h1 class="title">Incremental migrations: ALTER, not rip-and-replace</h1>
+
+  <div class="author">
+    <span class="avatar">MS</span>
+    <span class="ainfo">
+      <span class="an">Manuel Sanchez</span>
+      <span class="ar">Maintainer &middot; SurrealDB Ambassador</span>
+    </span>
+  </div>
+
+  <hr class="rule" />
+
+  <div class="article doc-prose">
+    <p class="lead">
+      Until now, applying a schema change meant <code>OVERWRITE</code>-ing the
+      whole table. That works, but it is a blunt instrument: it rewrites clauses
+      you never touched and makes every diff look total. The new CLI does the
+      careful thing instead.
+    </p>
+
+    <p>
+      <code>sz gen</code> now diffs your schema into clause-level
+      <code>ALTER TABLE</code> and <code>ALTER FIELD</code> statements (and
+      <code>REMOVE</code> + <code>DEFINE</code> for indexes). Migrations touch
+      only what changed and preserve everything they do not mention. Edit one
+      field type and you get one <code>ALTER FIELD</code>, not a rewritten table.
+    </p>
+
+    <h2>Try it</h2>
+    <p>
+      Flip the block below to SurrealQL to see the exact statements the generator
+      emits for an enum change plus a new optional field.
+    </p>
+
+    <CodeToggle ts={editTs} surql={migrationSurql} tsTitle="user.ts" />
+
+    <blockquote class="pull">
+      Safe migrations, not rip-and-replace — and every up/down round-trips on
+      real SurrealDB.
+    </blockquote>
+
+    <p>
+      Pair this with <code>sz check</code>, which replays every migration from
+      zero on a throwaway database and confirms it reproduces your declared
+      schema. Together they catch the bug every DDL tool has but few detect: a
+      migration that no longer builds the schema it claims to.
+    </p>
+  </div>
+</BlogLayout>
+
+<style>
+  .back {
+    font-size: 0.85rem;
+    color: var(--color-ink-3);
+    text-decoration: none;
+  }
+  .meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 1.5rem;
+  }
+  .tag {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    color: var(--color-soft);
+    background: color-mix(in oklab, var(--color-purple) 15%, transparent);
+    padding: 3px 10px;
+    border-radius: 20px;
+  }
+  .date {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--color-ink-3);
+  }
+  .title {
+    margin: 1rem 0 0;
+    font-size: clamp(2rem, 1.5rem + 2vw, 2.875rem);
+    line-height: 1.1;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    color: var(--color-ink);
+  }
+  .author {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 1.5rem;
+  }
+  .avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    font-size: 0.875rem;
+    font-weight: 700;
+    color: #fff;
+    background: linear-gradient(
+      135deg,
+      var(--color-purple),
+      var(--color-pink)
+    );
+  }
+  .ainfo {
+    display: flex;
+    flex-direction: column;
+  }
+  .an {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--color-ink);
+  }
+  .ar {
+    font-size: 0.78rem;
+    color: var(--color-ink-3);
+  }
+  .rule {
+    border: 0;
+    border-top: 1px solid var(--color-border-subtle);
+    margin: 1.5rem 0;
+  }
+  .article .lead {
+    font-size: 1.1875rem;
+    line-height: 1.65;
+    color: var(--color-ink);
+  }
+  .pull {
+    margin: 1.5rem 0;
+    padding: 0.5rem 0 0.5rem 1.5rem;
+    border-left: 3px solid var(--color-purple);
+    font-size: 1.375rem;
+    line-height: 1.45;
+    font-weight: 500;
+    color: var(--color-ink);
+  }
+</style>

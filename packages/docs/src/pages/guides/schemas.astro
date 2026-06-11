@@ -1,0 +1,82 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import PageHeader from "../../components/docs/PageHeader.astro";
+import CompatBadges from "../../components/docs/CompatBadges.astro";
+import CodeToggle from "../../components/docs/CodeToggle.astro";
+import Callout from "../../components/docs/Callout.astro";
+import PrevNext from "../../components/docs/PrevNext.astro";
+
+const headings = [
+  { id: "a-table-is-an-object-schema", text: "A table is an object schema" },
+  { id: "what-it-generates", text: "What it generates" },
+  { id: "it-is-just-zod", text: "It is just Zod" },
+];
+
+const schemaTs = `import { sz, defineTable } from "surreal-zod";
+
+export const User = defineTable("user", {
+  name: sz.string(),
+  email: sz.string().email(),
+  age: sz.int().optional(),
+  role: sz.enum(["admin", "member"]),
+  createdAt: sz.datetime().$default(surql\`time::now()\`),
+});`;
+
+const schemaSurql = `DEFINE TABLE user TYPE NORMAL SCHEMAFULL;
+DEFINE FIELD name ON TABLE user TYPE string;
+DEFINE FIELD email ON TABLE user TYPE string ASSERT string::is_email($value);
+DEFINE FIELD age ON TABLE user TYPE option<int>;
+DEFINE FIELD role ON TABLE user TYPE "admin" | "member";
+DEFINE FIELD createdAt ON TABLE user TYPE datetime DEFAULT time::now();`;
+---
+
+<DocsLayout
+  title="Defining schemas"
+  description="Author your SurrealDB tables as Zod schemas with sz.* and see the SurrealQL DDL each one generates."
+  activeHref="/guides/schemas"
+  topActive="Guides"
+  headings={headings}
+>
+  <PageHeader crumb="Guides&nbsp; /&nbsp; Defining schemas" title="Defining schemas">
+    <CompatBadges slot="badges" items={["SurrealDB 3.x", "Zod 4", "SDK v2.x"]} />
+    Author your SurrealDB tables as Zod schemas. <code>sz.*</code> is a 1:1
+    drop-in for <code>z.*</code> (same constructors, same chaining) so a table is
+    just an object schema.
+  </PageHeader>
+
+  <div class="doc-prose">
+    <h2 id="a-table-is-an-object-schema">A table is an object schema</h2>
+    <p>
+      Pass a name and a shape to <code>defineTable</code>. Every value is an
+      <code>sz.*</code> type; optionality, defaults and assertions are the
+      chained methods you already know. Flip the block to SurrealQL to see
+      exactly what it compiles to.
+    </p>
+
+    <CodeToggle ts={schemaTs} surql={schemaSurql} tsTitle="user.ts" />
+
+    <h2 id="what-it-generates">What it generates</h2>
+    <p>
+      The column type, the email assertion, the <code>option&lt;&gt;</code>
+      wrapper and the default are all derived. Fields emit <code>ON TABLE</code>,
+      never the bare form. Nothing above is hand-written SurrealQL.
+    </p>
+
+    <div id="it-is-just-zod">
+      <Callout variant="note" title="It is just Zod">
+        <p>
+          <code>infer</code> / <code>input</code> / <code>output</code>,
+          <code>coerce</code>, <code>nullish</code> are all there. Migrate an
+          existing schema by replacing <code>z.</code> with <code>sz.</code> A
+          few Zod-only types like <code>sz.symbol()</code> exist for
+          compatibility but are rejected as database fields.
+        </p>
+      </Callout>
+    </div>
+  </div>
+
+  <PrevNext
+    prev={{ label: "Getting started", href: "/getting-started" }}
+    next={{ label: "Migrations", href: "/guides/migrations" }}
+  />
+</DocsLayout>

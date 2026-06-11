@@ -1,0 +1,78 @@
+---
+/**
+ * NextSteps - a row of link cards (title + arrow + description), matching the
+ * "Next steps" block in the Getting started frame.
+ */
+interface Item {
+  title: string;
+  description: string;
+  href: string;
+}
+interface Props {
+  items: Item[];
+}
+const { items } = Astro.props;
+const arrow = '<path d="M7 7h10v10"/><path d="M7 17 17 7"/>';
+---
+
+<div class="next">
+  {
+    items.map((item) => (
+      <a class="card" href={item.href}>
+        <span class="head">
+          <span class="title">{item.title}</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" set:html={arrow} />
+        </span>
+        <span class="desc">{item.description}</span>
+      </a>
+    ))
+  }
+</div>
+
+<style>
+  .next {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+  .card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 16px;
+    border-radius: 10px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    text-decoration: none;
+    transition: border-color 0.15s ease, transform 0.15s ease;
+  }
+  .card:hover {
+    border-color: var(--color-soft);
+    transform: translateY(-1px);
+  }
+  .head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .title {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--color-ink);
+  }
+  .head svg {
+    width: 15px;
+    height: 15px;
+    color: var(--color-soft);
+  }
+  .desc {
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    color: var(--color-ink-3);
+  }
+  @media (max-width: 50rem) {
+    .next {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

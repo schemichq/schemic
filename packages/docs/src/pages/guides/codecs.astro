@@ -1,0 +1,81 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import PageHeader from "../../components/docs/PageHeader.astro";
+import CompatBadges from "../../components/docs/CompatBadges.astro";
+import CodeToggle from "../../components/docs/CodeToggle.astro";
+import Callout from "../../components/docs/Callout.astro";
+import PrevNext from "../../components/docs/PrevNext.astro";
+
+const headings = [
+  { id: "teach-a-type-how-to-store", text: "Teach a type how to store" },
+  { id: "built-in-codecs", text: "Built-in codecs" },
+];
+
+const codecTs = `import { sz } from "surreal-zod";
+import { Money } from "./money";
+
+const money = sz.instanceof(Money).$surreal(sz.string(), {
+  encode: (m) => m.toString(),   // app value  -> database
+  decode: (s) => new Money(+s),  // database    -> app value
+});
+
+export const Invoice = defineTable("invoice", {
+  total: money,
+  paidAt: sz.datetime().optional(),
+});`;
+
+const codecSurql = `DEFINE TABLE invoice TYPE NORMAL SCHEMAFULL;
+DEFINE FIELD total ON TABLE invoice TYPE string;
+DEFINE FIELD paidAt ON TABLE invoice TYPE option<datetime>;`;
+---
+
+<DocsLayout
+  title="Codecs & bring-your-own-types"
+  description="Store any class or value object in SurrealDB with a typed encode/decode pair via .$surreal()."
+  activeHref="/guides/codecs"
+  topActive="Guides"
+  headings={headings}
+>
+  <PageHeader
+    crumb="Guides&nbsp; /&nbsp; Codecs &amp; BYO types"
+    title="Codecs & bring-your-own-types"
+  >
+    <CompatBadges slot="badges" items={["SurrealDB 3.x", "Zod 4", "SDK v2.x"]} />
+    Domain types — money, big numbers, branded ids — become first-class database
+    fields. Teach surreal-zod how to store a type once with <code>.$surreal()</code>.
+  </PageHeader>
+
+  <div class="doc-prose">
+    <h2 id="teach-a-type-how-to-store">Teach a type how to store</h2>
+    <p>
+      Give <code>.$surreal()</code> two things: a wire type (any <code>sz.*</code>
+      field) and an <code>encode</code> / <code>decode</code> pair. Your app keeps
+      the rich type; the database sees the wire type.
+    </p>
+
+    <CodeToggle ts={codecTs} surql={codecSurql} tsTitle="invoice.ts" />
+
+    <h2 id="built-in-codecs">Built-in codecs</h2>
+    <p>
+      The native types ship their own codecs: <code>sz.datetime()</code> maps to
+      a JS <code>Date</code>, <code>sz.uuid()</code> to a string,
+      <code>sz.bytes()</code> to a <code>Uint8Array</code>, and
+      <code>sz.decimal()</code> to a <code>Decimal</code>. You only write a codec
+      for your own types.
+    </p>
+
+    <Callout variant="note" title="The wire type can be anything">
+      <p>
+        The wire type passed to <code>.$surreal()</code> is any <code>sz.*</code>
+        field — <code>sz.array(sz.string())</code>, <code>sz.recordId("user")</code>,
+        and so on — and surreal-zod uses it to pick the SurrealQL column type
+        automatically.
+      </p>
+    </Callout>
+  </div>
+
+  <PrevNext
+    prev={{ label: "Migrations", href: "/guides/migrations" }}
+    next={{ label: "Drift & verify", href: "/guides/drift-verify" }}
+  />
+</DocsLayout>

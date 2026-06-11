@@ -1,0 +1,73 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import PageHeader from "../../components/docs/PageHeader.astro";
+import CompatBadges from "../../components/docs/CompatBadges.astro";
+import CommandBlock from "../../components/docs/CommandBlock.astro";
+import Callout from "../../components/docs/Callout.astro";
+import PrevNext from "../../components/docs/PrevNext.astro";
+
+const headings = [
+  { id: "sz-check", text: "sz check replays your migrations" },
+  { id: "sz-diff-live", text: "sz diff against the live DB" },
+];
+---
+
+<DocsLayout
+  title="Drift & verify"
+  description="Catch hand-edited migrations and schema drift before they reach production with sz check and sz diff --live."
+  activeHref="/guides/drift-verify"
+  topActive="Guides"
+  headings={headings}
+>
+  <PageHeader crumb="Guides&nbsp; /&nbsp; Drift &amp; verify" title="Drift & verify">
+    <CompatBadges slot="badges" items={["SurrealDB 3.x", "Zod 4", "SDK v2.x"]} />
+    Two checks keep your schema honest: one proves your migrations build it, the
+    other compares it against the running database.
+  </PageHeader>
+
+  <div class="doc-prose">
+    <h2 id="sz-check">sz check replays your migrations</h2>
+    <p>
+      <code>sz check</code> replays every migration from zero on a throwaway
+      database and confirms it reproduces your declared schema — catching the bug
+      every DDL tool has but few detect: a hand-edited migration, or a change
+      nobody generated a migration for.
+    </p>
+
+    <CommandBlock
+      lines={[
+        { cmd: "sz check" },
+        { ok: "replayed 2 migrations on scratch db" },
+        { ok: "schema matches declared types" },
+      ]}
+    />
+
+    <h2 id="sz-diff-live">sz diff against the live DB</h2>
+    <p>
+      <code>sz diff --live</code> compares your schema against the actual
+      database, normalized through SurrealDB so there is no formatting noise.
+      It complements <code>sz check</code>: one checks migrations, the other
+      checks the live database.
+    </p>
+
+    <CommandBlock
+      lines={[
+        { cmd: "sz diff --live" },
+        { note: "1 difference found" },
+        { note: "field user.lastSeen exists in schema, missing in db" },
+      ]}
+    />
+
+    <Callout variant="caution" title="Drift is a warning, not a migration">
+      <p>
+        <code>sz diff --live</code> reports drift but does not change anything.
+        Generate a migration with <code>sz gen</code> and apply it to reconcile.
+      </p>
+    </Callout>
+  </div>
+
+  <PrevNext
+    prev={{ label: "Codecs & BYO types", href: "/guides/codecs" }}
+    next={{ label: "CLI reference", href: "/reference/cli" }}
+  />
+</DocsLayout>

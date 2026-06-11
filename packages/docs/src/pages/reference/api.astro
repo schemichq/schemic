@@ -1,0 +1,61 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import PageHeader from "../../components/docs/PageHeader.astro";
+import SigTable from "../../components/docs/SigTable.astro";
+
+const headings = [
+  { id: "primitives", text: "Primitives" },
+  { id: "collections", text: "Collections" },
+  { id: "type-helpers", text: "Type helpers" },
+];
+---
+
+<DocsLayout
+  title="sz.* API"
+  description="The sz.* constructor surface and the SurrealQL each maps to."
+  activeHref="/reference/api"
+  topActive="Reference"
+  headings={headings}
+>
+  <PageHeader crumb="Reference&nbsp; /&nbsp; sz.* API" title="sz.* API">
+    <code>sz</code> mirrors the Zod surface one-to-one. Every constructor below
+    is the <code>z.*</code> you know; the middle column is the SurrealQL it maps
+    to.
+  </PageHeader>
+
+  <SigTable
+    id="primitives"
+    title="Primitives"
+    rows={[
+      { sig: "sz.string()", type: "string", desc: "UTF-8 string" },
+      { sig: "sz.int()", type: "int", desc: "integer; also int32 / uint32 / bigint" },
+      { sig: "sz.decimal()", type: "decimal", desc: "arbitrary-precision Decimal" },
+      { sig: "sz.datetime()", type: "datetime", desc: "codec to and from JS Date" },
+      { sig: "sz.uuid()", type: "uuid", desc: "codec to and from string" },
+      { sig: "sz.boolean()", type: "bool", desc: "true / false" },
+    ]}
+  />
+
+  <SigTable
+    id="collections"
+    title="Collections"
+    rows={[
+      { sig: "sz.array(x)", type: "array<T>", desc: "ordered list; { max: N } sizes it" },
+      { sig: "sz.set(x)", type: "set<T>", desc: "distinct, deduplicated collection" },
+      { sig: "sz.object({ ... })", type: "object", desc: "nested, path-qualified subfields" },
+      { sig: 'sz.recordId("user")', type: "record<user>", desc: "typed link to another table" },
+      { sig: "sz.enum([...])", type: '"a" | "b"', desc: "string or numeric literal union" },
+    ]}
+  />
+
+  <SigTable
+    id="type-helpers"
+    title="Type helpers"
+    rows={[
+      { sig: "sz.infer<typeof T>", type: "App<T>", desc: "app-side type (decoded values)" },
+      { sig: "sz.input<typeof T>", type: "—", desc: "accepted input type" },
+      { sig: "App<T> / Wire<T>", type: "—", desc: "app-side vs wire-side row type" },
+      { sig: "Create<T>", type: "—", desc: "insert shape (defaults optional)" },
+    ]}
+  />
+</DocsLayout>

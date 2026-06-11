@@ -1,0 +1,78 @@
+---
+/**
+ * CommandBlock - a terminal-style block. Each line is one of:
+ *   { cmd: "..." }   -> "$ ..."  (accent prompt)
+ *   { ok: "..." }    -> "ok ..." (success check)
+ *   { note: "..." }  -> bullet note (muted)
+ */
+type Line =
+  | { cmd: string }
+  | { ok: string }
+  | { note: string };
+
+interface Props {
+  lines: Line[];
+}
+const { lines } = Astro.props;
+---
+
+<div class="cmd">
+  {
+    lines.map((line) =>
+      "cmd" in line ? (
+        <div class="line">
+          <span class="prefix prompt">$</span>
+          <span class="text plain">{line.cmd}</span>
+        </div>
+      ) : "ok" in line ? (
+        <div class="line">
+          <span class="prefix ok">+</span>
+          <span class="text muted">{line.ok}</span>
+        </div>
+      ) : (
+        <div class="line">
+          <span class="prefix dot">-</span>
+          <span class="text muted">{line.note}</span>
+        </div>
+      ),
+    )
+  }
+</div>
+
+<style>
+  .cmd {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 13px 16px;
+    background: var(--color-code-bg);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+  }
+  .line {
+    display: flex;
+    align-items: baseline;
+    gap: 9px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.5;
+  }
+  .prefix {
+    flex-shrink: 0;
+  }
+  .prompt {
+    color: var(--color-soft);
+  }
+  .ok {
+    color: var(--color-success);
+  }
+  .dot {
+    color: var(--color-ink-3);
+  }
+  .text.plain {
+    color: var(--color-code-plain);
+  }
+  .text.muted {
+    color: var(--color-ink-2);
+  }
+</style>

@@ -1,0 +1,73 @@
+---
+import DocsLayout from "../layouts/DocsLayout.astro";
+import DocHero from "../components/docs/DocHero.astro";
+import PillarGrid from "../components/docs/PillarGrid.astro";
+import PillarCard from "../components/docs/PillarCard.astro";
+import StartGrid from "../components/docs/StartGrid.astro";
+import StartCard from "../components/docs/StartCard.astro";
+---
+
+<DocsLayout
+  title="Introduction"
+  description="surreal-zod lets you author SurrealDB schemas with sz.*, generate SurrealQL DDL, and run safe migrations from a single TypeScript source of truth."
+  activeHref="/introduction"
+  topActive="Docs"
+>
+  <DocHero kicker="Introduction">
+    Your SurrealDB schema, in the Zod you already know.
+    <Fragment slot="lead">
+      surreal-zod lets you author SurrealDB schemas with <code>sz.*</code> (a 1:1
+      drop-in for <code>z.*</code>), generate SurrealQL DDL, and run safe
+      migrations. Your code is the source of truth; the database is downstream.
+    </Fragment>
+  </DocHero>
+
+  <PillarGrid>
+    <PillarCard icon="layers" title="Drop-in sz.*">
+      A 1:1 mirror of <code>z.*</code> — same constructors, <code>infer</code> /
+      <code>input</code> / <code>output</code>, <code>coerce</code>. Migrate with
+      find-and-replace.
+    </PillarCard>
+    <PillarCard icon="database" title="Generated SurrealQL">
+      Compile schemas to <code>DEFINE TABLE</code> / <code>FIELD</code> DDL.
+      Fields emit <code>ON TABLE</code>; nothing is hand-written.
+    </PillarCard>
+    <PillarCard icon="shield-check" title="End-to-end types">
+      <code>App&lt;T&gt;</code> on your side, <code>Wire&lt;T&gt;</code> on the
+      wire — both checked by the compiler.
+    </PillarCard>
+    <PillarCard icon="terminal" title="Migration CLI">
+      <code>gen</code>, <code>migrate</code>, <code>diff</code>, <code>check</code>,
+      <code>rollback</code>, <code>pull</code> — incremental ALTERs, not
+      rip-and-replace.
+    </PillarCard>
+    <PillarCard icon="puzzle" title="Bring your own types">
+      Store any class via <code>.$surreal(wire, &#123; encode, decode &#125;)</code>
+      — fully typed.
+    </PillarCard>
+    <PillarCard icon="git-compare" title="Drift &amp; verify">
+      Catch hand-edited migrations and schema drift before they reach
+      production.
+    </PillarCard>
+  </PillarGrid>
+
+  <h2 class="section-h2">Start here</h2>
+  <StartGrid>
+    <StartCard title="Getting started" href="/getting-started" variant="primary">
+      Install, define your first table, generate and apply a migration in four
+      steps.
+    </StartCard>
+    <StartCard title="Defining schemas" href="/guides/schemas">
+      Every sz.* type and field clause, and the SurrealQL each one emits.
+    </StartCard>
+  </StartGrid>
+</DocsLayout>
+
+<style>
+  .section-h2 {
+    margin: 2.25rem 0 0.25rem;
+    font-size: 1.3125rem;
+    font-weight: 600;
+    color: var(--color-ink);
+  }
+</style>

@@ -1,0 +1,46 @@
+---
+/**
+ * PageHeader - breadcrumb + title + optional badges slot + lead + rule.
+ * Used by guide and reference pages.
+ */
+interface Props {
+  crumb: string;
+  title: string;
+}
+const { crumb, title } = Astro.props;
+---
+
+<header class="ph">
+  <nav class="crumb" aria-label="Breadcrumb" set:html={crumb} />
+  <h1 class="ph-title">{title}</h1>
+  <slot name="badges" />
+  <p class="lead"><slot /></p>
+</header>
+<hr class="rule" />
+
+<style>
+  .crumb {
+    font-size: 0.78rem;
+    color: var(--color-ink-3);
+  }
+  .ph-title {
+    margin: 0.4rem 0 0;
+    font-size: 2.5rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--color-ink);
+    scroll-margin-top: 5rem;
+  }
+  .lead {
+    margin: 1rem 0 0;
+    max-width: 58ch;
+    font-size: 1.0625rem;
+    line-height: 1.55;
+    color: var(--color-ink-2);
+  }
+  .rule {
+    border: 0;
+    border-top: 1px solid var(--color-border-subtle);
+    margin: 1.75rem 0;
+  }
+</style>

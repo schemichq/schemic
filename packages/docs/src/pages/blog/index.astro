@@ -1,0 +1,211 @@
+---
+import BlogLayout from "../../layouts/BlogLayout.astro";
+
+const featured = {
+  date: "2026-06-10",
+  tag: "RELEASE",
+  title: "Incremental migrations: ALTER, not rip-and-replace",
+  excerpt:
+    "The CLI now diffs into clause-level ALTER TABLE and ALTER FIELD instead of blanket OVERWRITE. Migrations touch only what changed, preserve unmentioned clauses, and every up/down round-trips on real SurrealDB.",
+  href: "/blog/incremental-migrations",
+};
+
+const posts = [
+  {
+    date: "2026-06-09",
+    tag: "ENGINEERING",
+    title: "It is just Zod: how sz.* mirrors z. one-to-one",
+    excerpt:
+      "The same constructors and chaining, infer/input/output and coerce — so adoption cost is essentially zero.",
+    read: "6 min",
+    href: "/blog/incremental-migrations",
+  },
+  {
+    date: "2026-06-07",
+    tag: "DEEP DIVE",
+    title: "Bring your own types with .$surreal() codecs",
+    excerpt:
+      "Store any class — money, big numbers, branded ids — by teaching surreal-zod a typed encode/decode pair.",
+    read: "9 min",
+    href: "/blog/incremental-migrations",
+  },
+  {
+    date: "2026-06-02",
+    tag: "RELEASE",
+    title: "sz check: proving your migrations build your schema",
+    excerpt:
+      "Replay every migration from zero on a throwaway database and confirm it reproduces your declared schema.",
+    read: "5 min",
+    href: "/blog/incremental-migrations",
+  },
+];
+---
+
+<BlogLayout title="Blog">
+  <p class="kicker">THE SURREAL-ZOD BLOG</p>
+  <h1 class="headline">Notes from building schema-as-code.</h1>
+  <p class="sub">Releases, deep dives and design decisions behind surreal-zod.</p>
+
+  <a class="featured" href={featured.href}>
+    <div class="meta">
+      <span class="date">{featured.date}</span>
+      <span class="tag">{featured.tag}</span>
+      <span class="flag">FEATURED</span>
+    </div>
+    <h2 class="ft">{featured.title}</h2>
+    <p class="fx">{featured.excerpt}</p>
+    <span class="read">Read the post &rarr;</span>
+  </a>
+
+  <div class="list">
+    {
+      posts.map((p) => (
+        <a class="row" href={p.href}>
+          <span class="rdate">{p.date}</span>
+          <span class="rbody">
+            <span class="rtag">{p.tag}</span>
+            <span class="rtitle">{p.title}</span>
+            <span class="rx">{p.excerpt}</span>
+            <span class="rread">{p.read} read</span>
+          </span>
+        </a>
+      ))
+    }
+  </div>
+</BlogLayout>
+
+<style>
+  .kicker {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    color: var(--color-soft);
+  }
+  .headline {
+    margin: 1.25rem 0 0;
+    font-size: clamp(2.25rem, 1.6rem + 2.4vw, 3rem);
+    line-height: 1.08;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    color: var(--color-ink);
+  }
+  .sub {
+    margin: 1rem 0 0;
+    font-size: 1.125rem;
+    color: var(--color-ink-2);
+  }
+  .featured {
+    display: block;
+    margin-top: 2.25rem;
+    padding: 28px;
+    border-radius: 14px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    text-decoration: none;
+    transition: border-color 0.15s ease;
+  }
+  .featured:hover {
+    border-color: var(--color-soft);
+  }
+  .meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .date {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--color-ink-3);
+  }
+  .tag {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    color: var(--color-soft);
+    background: color-mix(in oklab, var(--color-purple) 15%, transparent);
+    padding: 3px 10px;
+    border-radius: 20px;
+  }
+  .flag {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--color-pink);
+  }
+  .ft {
+    margin: 0.875rem 0 0;
+    font-size: 1.875rem;
+    line-height: 1.15;
+    font-weight: 700;
+    color: var(--color-ink);
+  }
+  .fx {
+    margin: 0.75rem 0 0;
+    font-size: 0.97rem;
+    line-height: 1.6;
+    color: var(--color-ink-2);
+  }
+  .read {
+    display: inline-block;
+    margin-top: 1rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--color-soft);
+  }
+  .list {
+    margin-top: 1rem;
+    display: flex;
+    flex-direction: column;
+  }
+  .row {
+    display: flex;
+    gap: 28px;
+    padding: 22px 0;
+    border-bottom: 1px solid var(--color-border-subtle);
+    text-decoration: none;
+  }
+  .rdate {
+    flex-shrink: 0;
+    width: 96px;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--color-ink-3);
+    padding-top: 2px;
+  }
+  .rbody {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+  .rtag {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: var(--color-soft);
+  }
+  .rtitle {
+    font-size: 1.375rem;
+    font-weight: 600;
+    line-height: 1.2;
+    color: var(--color-ink);
+  }
+  .rx {
+    font-size: 0.9rem;
+    line-height: 1.55;
+    color: var(--color-ink-2);
+  }
+  .rread {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--color-ink-3);
+  }
+  @media (max-width: 40rem) {
+    .row {
+      flex-direction: column;
+      gap: 8px;
+    }
+  }
+</style>

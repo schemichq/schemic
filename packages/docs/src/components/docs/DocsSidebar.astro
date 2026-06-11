@@ -1,0 +1,95 @@
+---
+import { sidebarNav } from "../../config/docs-nav";
+
+interface Props {
+  activeHref?: string;
+}
+const { activeHref } = Astro.props;
+---
+
+<aside class="sidebar">
+  <nav aria-label="Docs">
+    {
+      sidebarNav.map((group) => (
+        <div class="group">
+          <p class="group-label">{group.label}</p>
+          <ul>
+            {group.items.map((item) => (
+              <li>
+                <a
+                  href={item.href}
+                  class:list={["item", { active: item.href === activeHref }]}
+                  aria-current={item.href === activeHref ? "page" : undefined}
+                >
+                  {item.label}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))
+    }
+  </nav>
+</aside>
+
+<style>
+  .sidebar {
+    width: 248px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--color-border);
+    align-self: stretch;
+  }
+  .sidebar nav {
+    position: sticky;
+    top: 54px;
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+    padding: 32px 20px;
+    max-height: calc(100vh - 54px);
+    overflow-y: auto;
+  }
+  .group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .group-label {
+    margin: 0 0 4px;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-ink-3);
+  }
+  ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .item {
+    display: block;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    color: var(--color-ink-2);
+    text-decoration: none;
+  }
+  .item:hover {
+    color: var(--color-ink);
+    background: color-mix(in oklab, var(--color-ink) 5%, transparent);
+  }
+  .item.active {
+    color: var(--color-soft);
+    font-weight: 600;
+    background: color-mix(in oklab, var(--color-purple) 14%, transparent);
+  }
+  @media (max-width: 60rem) {
+    .sidebar {
+      display: none;
+    }
+  }
+</style>

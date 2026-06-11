@@ -1,0 +1,111 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import PageHeader from "../../components/docs/PageHeader.astro";
+import CommandRef from "../../components/docs/CommandRef.astro";
+
+const headings = [
+  { id: "sz-gen", text: "sz gen" },
+  { id: "sz-migrate", text: "sz migrate" },
+  { id: "sz-status", text: "sz status" },
+  { id: "sz-rollback", text: "sz rollback" },
+  { id: "sz-check", text: "sz check" },
+  { id: "sz-diff", text: "sz diff" },
+  { id: "sz-pull", text: "sz pull" },
+];
+---
+
+<DocsLayout
+  title="CLI reference"
+  description="The sz binary: gen, migrate, status, rollback, check, diff and pull commands and their flags."
+  activeHref="/reference/cli"
+  topActive="Reference"
+  headings={headings}
+>
+  <PageHeader crumb="Reference&nbsp; /&nbsp; CLI" title="CLI reference">
+    The <code>sz</code> binary ships with the package. Every command operates on
+    your schema and the migrations directory. Database commands also take
+    connection overrides (<code>--url</code>, <code>--namespace</code>,
+    <code>--database</code>, <code>--username</code>, <code>--password</code>).
+  </PageHeader>
+
+  <CommandRef
+    id="sz-gen"
+    name="sz gen"
+    desc="Diff the schema, preview the migration script, and write it."
+    synopsis="sz gen [name] [-y] [--tables] [--functions] [--events] [--access]"
+    flags={[
+      { flag: "[name]", type: "arg", desc: "Title for the migration (otherwise prompted, or defaulted with -y)" },
+      { flag: "-y, --yes", type: "flag", desc: "Use the given or default name without prompting" },
+      { flag: "-c, --config <path>", type: "path", desc: "Path to surreal-zod.config.ts" },
+      { flag: "--tables / --functions / --events / --access", type: "flag", desc: "Restrict to a kind of object; each has a --no- variant" },
+    ]}
+  />
+
+  <CommandRef
+    id="sz-migrate"
+    name="sz migrate"
+    desc="Apply pending migrations (all, the next N, or up to a tag). Alias: up."
+    synopsis="sz migrate [count] [--to <tag>] [--url <url>]"
+    flags={[
+      { flag: "[count]", type: "number", desc: "Apply only the next N pending migrations" },
+      { flag: "--to <tag>", type: "tag", desc: "Apply up to and including this migration" },
+      { flag: "--url <url>", type: "string", desc: "Override the connection endpoint" },
+    ]}
+  />
+
+  <CommandRef
+    id="sz-status"
+    name="sz status"
+    desc="Show applied vs pending migrations (and any drift)."
+    synopsis="sz status [--json]"
+    flags={[
+      { flag: "--json", type: "flag", desc: "Output the status as JSON" },
+    ]}
+  />
+
+  <CommandRef
+    id="sz-rollback"
+    name="sz rollback"
+    desc="Roll back applied migrations (last N, or back to a tag). Alias: down."
+    synopsis="sz rollback [count] [--to <tag>]"
+    flags={[
+      { flag: "[count]", type: "number", desc: "Roll back the last N applied migrations" },
+      { flag: "--to <tag>", type: "tag", desc: "Roll back everything applied after this migration" },
+    ]}
+  />
+
+  <CommandRef
+    id="sz-check"
+    name="sz check"
+    desc="Validate schemas, then replay migrations to confirm they reproduce the schema."
+    synopsis="sz check [--schema]"
+    flags={[
+      { flag: "--schema", type: "flag", desc: "Validate the schema only — skip the migration replay (no database)" },
+    ]}
+  />
+
+  <CommandRef
+    id="sz-diff"
+    name="sz diff"
+    desc="Show pending schema changes without writing a migration."
+    synopsis="sz diff [--live] [--down] [--patch] [--pager]"
+    flags={[
+      { flag: "--live", type: "flag", desc: "Diff against the live database instead of the snapshot" },
+      { flag: "--down", type: "flag", desc: "Also show the rollback (down) statements" },
+      { flag: "--full", type: "flag", desc: "Show the full schema SQL, not just the changed parts" },
+      { flag: "-p, --patch", type: "flag", desc: "Output a unified diff (e.g. to pipe to a diff viewer)" },
+      { flag: "--pager [cmd]", type: "flag", desc: "Page through your git diff viewer (or <cmd>)" },
+      { flag: "--json", type: "flag", desc: "Output the diff as JSON" },
+    ]}
+  />
+
+  <CommandRef
+    id="sz-pull"
+    name="sz pull"
+    desc="Generate Zod schema files from the live database."
+    synopsis="sz pull [--force]"
+    flags={[
+      { flag: "--force", type: "flag", desc: "Overwrite existing schema files" },
+    ]}
+  />
+</DocsLayout>

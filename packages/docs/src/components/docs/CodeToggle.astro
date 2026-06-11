@@ -1,0 +1,278 @@
+---
+/**
+ * CodeToggle — a single code surface with a segmented control that flips
+ * between the TypeScript schema and the generated SurrealQL DDL, plus a Copy
+ * button. Self-contained: the brand Shiki theme below mirrors the code tokens
+ * in src/styles/tokens.css so it matches fenced blocks elsewhere.
+ *
+ * Usage (MDX):
+ *   import CodeToggle from "../../components/docs/CodeToggle.astro";
+ *   <CodeToggle ts={`...`} surql={`...`} />
+ */
+import { Code } from "astro:components";
+
+interface Props {
+  ts: string;
+  surql: string;
+  tsTitle?: string;
+  surqlTitle?: string;
+}
+
+const {
+  ts,
+  surql,
+  tsTitle = "schema.ts",
+  surqlTitle = "Generated SurrealQL",
+} = Astro.props;
+
+// Self-contained brand theme (TextMate shape, consumed by Shiki).
+const brandShikiTheme = {
+  name: "surreal-zod-dark",
+  type: "dark",
+  colors: {
+    "editor.background": "#100d18",
+    "editor.foreground": "#d8d3e4",
+  },
+  settings: [
+    { scope: ["comment", "punctuation.definition.comment"], settings: { foreground: "#5d5670", fontStyle: "italic" } },
+    {
+      scope: [
+        "keyword",
+        "storage",
+        "storage.type",
+        "storage.modifier",
+        "keyword.control",
+        "keyword.operator.new",
+        "keyword.operator.expression",
+        "keyword.other",
+        "constant.language",
+        "variable.language",
+      ],
+      settings: { foreground: "#c77dff" },
+    },
+    {
+      scope: ["entity.name.function", "support.function", "variable.function"],
+      settings: { foreground: "#7bd0ff" },
+    },
+    {
+      scope: [
+        "entity.name.type",
+        "entity.name.class",
+        "support.type",
+        "support.class",
+        "entity.other.inherited-class",
+        "storage.type.built-in",
+      ],
+      settings: { foreground: "#9fe3b0" },
+    },
+    {
+      scope: ["string", "string.quoted", "string.template", "constant.other.symbol", "punctuation.definition.string"],
+      settings: { foreground: "#ff85d6" },
+    },
+    { scope: ["constant.numeric", "constant.language.boolean"], settings: { foreground: "#9fe3b0" } },
+    {
+      scope: ["variable", "variable.other", "meta.definition.variable", "meta.object-literal.key", "support.variable.property"],
+      settings: { foreground: "#d8d3e4" },
+    },
+  ],
+};
+---
+
+<div class="code-toggle" data-code-toggle>
+  <div class="code-toggle__bar">
+    <div class="code-toggle__seg" role="tablist" aria-label="Code view">
+      <button
+        type="button"
+        class="code-toggle__tab is-active"
+        data-panel="ts"
+        role="tab"
+        aria-selected="true"
+      >
+        <span class="code-toggle__dot code-toggle__dot--ts" aria-hidden="true"></span>
+        TypeScript
+      </button>
+      <button
+        type="button"
+        class="code-toggle__tab"
+        data-panel="surql"
+        role="tab"
+        aria-selected="false"
+      >
+        <span class="code-toggle__dot code-toggle__dot--surql" aria-hidden="true"></span>
+        SurrealQL
+      </button>
+    </div>
+    <button type="button" class="code-toggle__copy" data-copy aria-label="Copy code">
+      <span data-copy-label>Copy</span>
+    </button>
+  </div>
+
+  <div class="code-toggle__panel is-active" data-view="ts" data-code={ts}>
+    <div class="code-toggle__filename">{tsTitle}</div>
+    <Code code={ts} lang="ts" theme={brandShikiTheme} />
+  </div>
+
+  <div class="code-toggle__panel" data-view="surql" data-code={surql} hidden>
+    <div class="code-toggle__filename">{surqlTitle}</div>
+    <Code code={surql} lang="sql" theme={brandShikiTheme} />
+  </div>
+</div>
+
+<style>
+  .code-toggle {
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    overflow: clip;
+    background: var(--color-code-bg);
+    margin: 1.25rem 0;
+  }
+
+  .code-toggle__bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.5rem 0.625rem;
+    background: var(--color-code-bg);
+    border-bottom: 1px solid var(--color-border-subtle);
+  }
+
+  .code-toggle__seg {
+    display: inline-flex;
+    gap: 0.25rem;
+    padding: 0.1875rem;
+    border-radius: 8px;
+    background: var(--color-canvas);
+    border: 1px solid var(--color-border-subtle);
+  }
+
+  .code-toggle__tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.3rem 0.7rem;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-ink-3);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    transition: color 0.12s ease, background 0.12s ease;
+  }
+  .code-toggle__tab:hover {
+    color: var(--color-ink-2);
+  }
+  .code-toggle__tab.is-active {
+    background: var(--color-canvas-2);
+    color: var(--color-ink);
+    box-shadow: inset 0 0 0 1px var(--color-border);
+  }
+
+  .code-toggle__dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 2px;
+  }
+  .code-toggle__dot--ts {
+    background: var(--color-code-fn);
+  }
+  .code-toggle__dot--surql {
+    background: var(--color-soft);
+  }
+
+  .code-toggle__copy {
+    border: 1px solid var(--color-border-subtle);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-ink-3);
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.3rem 0.6rem;
+    cursor: pointer;
+    transition: color 0.12s ease, border-color 0.12s ease;
+  }
+  .code-toggle__copy:hover {
+    color: var(--color-ink);
+    border-color: var(--color-border);
+  }
+  .code-toggle__copy.is-copied {
+    color: var(--color-success);
+    border-color: color-mix(in oklab, var(--color-success) 50%, transparent);
+  }
+
+  .code-toggle__panel[hidden] {
+    display: none;
+  }
+
+  .code-toggle__filename {
+    padding: 0.4rem 0.875rem 0;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.02em;
+    color: var(--color-ink-3);
+  }
+
+  /* Let the inner Shiki <pre> sit flush inside the framed surface. */
+  .code-toggle__panel :global(pre) {
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    background: var(--color-code-bg) !important;
+    padding: 0.875rem 1rem 1rem;
+    overflow-x: auto;
+  }
+  .code-toggle__panel :global(pre code) {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.6;
+  }
+</style>
+
+<script>
+  // Scoped per-instance so multiple CodeToggles coexist on one page.
+  function initCodeToggle(root: HTMLElement) {
+    const tabs = root.querySelectorAll<HTMLButtonElement>(".code-toggle__tab");
+    const panels = root.querySelectorAll<HTMLElement>(".code-toggle__panel");
+    const copyBtn = root.querySelector<HTMLButtonElement>("[data-copy]");
+    const copyLabel = root.querySelector<HTMLElement>("[data-copy-label]");
+
+    function show(name: string) {
+      tabs.forEach((t) => {
+        const active = t.dataset.panel === name;
+        t.classList.toggle("is-active", active);
+        t.setAttribute("aria-selected", active ? "true" : "false");
+      });
+      panels.forEach((p) => {
+        const active = p.dataset.view === name;
+        p.classList.toggle("is-active", active);
+        p.hidden = !active;
+      });
+    }
+
+    tabs.forEach((t) => {
+      t.addEventListener("click", () => show(t.dataset.panel || "ts"));
+    });
+
+    copyBtn?.addEventListener("click", async () => {
+      const active = root.querySelector<HTMLElement>(".code-toggle__panel.is-active");
+      const code = active?.dataset.code ?? "";
+      try {
+        await navigator.clipboard.writeText(code);
+        if (copyLabel) copyLabel.textContent = "Copied";
+        copyBtn.classList.add("is-copied");
+        setTimeout(() => {
+          if (copyLabel) copyLabel.textContent = "Copy";
+          copyBtn.classList.remove("is-copied");
+        }, 1400);
+      } catch {
+        /* clipboard unavailable; no-op */
+      }
+    });
+  }
+
+  document
+    .querySelectorAll<HTMLElement>("[data-code-toggle]")
+    .forEach((el) => initCodeToggle(el));
+</script>

@@ -1,0 +1,132 @@
+---
+/** CommandRef - a CLI command entry: name + description, synopsis, flag table. */
+interface Flag {
+  flag: string;
+  type: string;
+  desc: string;
+}
+interface Props {
+  id: string;
+  name: string;
+  desc: string;
+  synopsis: string;
+  flags: Flag[];
+}
+const { id, name, desc, synopsis, flags } = Astro.props;
+---
+
+<section class="cmd-ref">
+  <div class="head">
+    <h2 id={id} class="name">{name}</h2>
+    <p class="desc">{desc}</p>
+  </div>
+
+  <div class="synopsis"><span class="dollar">$</span> {synopsis}</div>
+
+  <div class="table">
+    <div class="row is-head">
+      <span class="c1">FLAG</span>
+      <span class="c2">TYPE</span>
+      <span class="c3">DESCRIPTION</span>
+    </div>
+    {
+      flags.map((f) => (
+        <div class="row">
+          <span class="c1 mono flag">{f.flag}</span>
+          <span class="c2 mono type">{f.type}</span>
+          <span class="c3">{f.desc}</span>
+        </div>
+      ))
+    }
+  </div>
+</section>
+
+<style>
+  .cmd-ref {
+    padding-top: 1.5rem;
+    margin-top: 1.25rem;
+    border-top: 1px solid var(--color-border-subtle);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .name {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 1.1875rem;
+    font-weight: 700;
+    color: var(--color-soft);
+    scroll-margin-top: 5rem;
+  }
+  .desc {
+    margin: 0;
+    font-size: 0.875rem;
+    color: var(--color-ink-2);
+  }
+  .synopsis {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--color-code-plain);
+    background: var(--color-code-bg);
+    border: 1px solid var(--color-border);
+    border-radius: 7px;
+    padding: 10px 14px;
+  }
+  .synopsis .dollar {
+    color: var(--color-soft);
+  }
+  .table {
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    overflow: clip;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 200px 110px 1fr;
+    align-items: center;
+    border-bottom: 1px solid var(--color-border-subtle);
+  }
+  .row:last-child {
+    border-bottom: 0;
+  }
+  .row span {
+    padding: 8px 16px;
+  }
+  .row.is-head {
+    background: var(--color-surface);
+  }
+  .row.is-head span {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--color-ink-3);
+  }
+  .mono {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+  }
+  .flag {
+    color: var(--color-pink);
+  }
+  .type {
+    color: var(--color-code-type);
+  }
+  .c3 {
+    font-size: 0.82rem;
+    color: var(--color-ink-2);
+  }
+  @media (max-width: 45rem) {
+    .row {
+      grid-template-columns: 1fr;
+    }
+    .row span {
+      padding: 6px 14px;
+    }
+  }
+</style>

@@ -1,0 +1,39 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import PageHeader from "../../components/docs/PageHeader.astro";
+import MappingTable from "../../components/docs/MappingTable.astro";
+
+const rows = [
+  { sz: "sz.string()", type: "string", status: "ok" },
+  { sz: "sz.int()", type: "int", status: "ok", notes: "int / int32 / uint32 / bigint" },
+  { sz: "sz.decimal()", type: "decimal", status: "ok", notes: "Decimal instance" },
+  { sz: "sz.datetime()", type: "datetime", status: "ok", notes: "codec to JS Date" },
+  { sz: "sz.uuid()", type: "uuid", status: "ok", notes: "codec to string" },
+  { sz: 'sz.recordId("user")', type: "record<user>", status: "ok", notes: "links, id-typed" },
+  { sz: "sz.array(x)", type: "array<T>", status: "ok" },
+  { sz: "sz.array(x, { max: N })", type: "array<T, N>", status: "ok", notes: "N = max size" },
+  { sz: "sz.set(x)", type: "set<T>", status: "ok", notes: "distinct dedup" },
+  { sz: "sz.object({ ... })", type: "object", status: "ok", notes: "path-qualified subfields" },
+  { sz: 'sz.enum(["a","b"])', type: '"a" | "b"', status: "ok", notes: "nativeEnum too" },
+  { sz: "sz.union([a, b])", type: "string | number", status: "ok", notes: "scalar unions" },
+  { sz: "sz.discriminatedUnion(...)", type: "object", status: "partial", notes: "per-branch structure lost" },
+  { sz: "sz.string().email()", type: "string ASSERT ...", status: "ok", notes: "string::is_email($value)" },
+  { sz: "—", type: "range", status: "gap", notes: "no sz.range() yet" },
+  { sz: "—", type: "regex", status: "gap", notes: "no sz.regex() yet" },
+];
+---
+
+<DocsLayout
+  title="DDL mapping"
+  description="How each sz.* constructor maps to a SurrealQL field TYPE, with support status."
+  activeHref="/reference/ddl-mapping"
+  topActive="Reference"
+>
+  <PageHeader crumb="Reference&nbsp; /&nbsp; DDL mapping" title="DDL mapping">
+    How each <code>sz.*</code> constructor maps to a SurrealQL field
+    <code>TYPE</code>. Generated fields always use the <code>ON TABLE</code>
+    form.
+  </PageHeader>
+
+  <MappingTable rows={rows} />
+</DocsLayout>

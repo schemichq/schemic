@@ -1,0 +1,87 @@
+/*
+ * Docs entry (bespoke docs shell under src/pages/** via DocsLayout).
+ * Full Tailwind import (preflight) + brand tokens. The docs chrome is hand-
+ * built to match design/website.pen, not Starlight.
+ */
+@import "tailwindcss";
+@import "./tokens.css";
+
+@layer base {
+  html {
+    color-scheme: dark;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background-color: color-mix(in oklab, var(--color-purple) 40%, transparent);
+    color: var(--color-ink);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border) transparent;
+  }
+}
+
+/*
+ * Long-form prose for guide pages. Structured pages (getting started, intro)
+ * use dedicated components instead.
+ */
+.doc-prose {
+  color: var(--color-ink-2);
+  font-size: 0.9375rem;
+  line-height: 1.7;
+}
+.doc-prose > * + * {
+  margin-block-start: 1rem;
+}
+.doc-prose h2 {
+  color: var(--color-ink);
+  font-size: 1.4375rem;
+  font-weight: 600;
+  line-height: 1.25;
+  margin-block-start: 2.25rem;
+  scroll-margin-top: 5rem;
+}
+.doc-prose h3 {
+  color: var(--color-ink);
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin-block-start: 1.75rem;
+  scroll-margin-top: 5rem;
+}
+.doc-prose a {
+  color: var(--color-soft);
+  text-decoration: none;
+}
+.doc-prose a:hover {
+  text-decoration: underline;
+}
+.doc-prose strong {
+  color: var(--color-ink);
+  font-weight: 600;
+}
+.doc-prose ul,
+.doc-prose ol {
+  padding-inline-start: 1.25rem;
+}
+.doc-prose li {
+  margin-block: 0.35rem;
+}
+.doc-prose :not(pre) > code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  color: var(--color-ink-2);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border-subtle);
+  padding: 0.1em 0.38em;
+  border-radius: 5px;
+}

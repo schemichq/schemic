@@ -1,0 +1,154 @@
+---
+import DocsLayout from "../layouts/DocsLayout.astro";
+import Step from "../components/docs/Step.astro";
+import CommandBlock from "../components/docs/CommandBlock.astro";
+import CodeToggle from "../components/docs/CodeToggle.astro";
+import NextSteps from "../components/docs/NextSteps.astro";
+
+const headings = [
+  { id: "install", text: "Install" },
+  { id: "define-a-schema", text: "Define a schema" },
+  { id: "generate-the-migration", text: "Generate the migration" },
+  { id: "apply-it", text: "Apply it" },
+  { id: "next-steps", text: "Next steps" },
+];
+
+const schemaTs = `import { sz, defineTable } from "surreal-zod";
+
+export const User = defineTable("user", {
+  name: sz.string(),
+  email: sz.string().email(),
+  age: sz.int().optional(),
+  role: sz.enum(["admin", "member"]),
+  createdAt: sz.datetime().$default(surql\`time::now()\`),
+});`;
+
+const schemaSurql = `DEFINE TABLE user TYPE NORMAL SCHEMAFULL;
+DEFINE FIELD name ON TABLE user TYPE string;
+DEFINE FIELD email ON TABLE user TYPE string ASSERT string::is_email($value);
+DEFINE FIELD age ON TABLE user TYPE option<int>;
+DEFINE FIELD role ON TABLE user TYPE "admin" | "member";
+DEFINE FIELD createdAt ON TABLE user TYPE datetime DEFAULT time::now();`;
+
+const nextSteps = [
+  {
+    title: "Defining schemas",
+    description: "Every sz.* type and field clause, and the SurrealQL each emits.",
+    href: "/guides/schemas",
+  },
+  {
+    title: "Migrations",
+    description: "Incremental, non-destructive ALTERs instead of rip-and-replace.",
+    href: "/guides/migrations",
+  },
+  {
+    title: "CLI reference",
+    description: "gen, migrate, status, rollback, check, diff, pull.",
+    href: "/reference/cli",
+  },
+];
+---
+
+<DocsLayout
+  title="Getting started"
+  description="From an empty project to a migrated SurrealDB schema in four steps."
+  activeHref="/getting-started"
+  topActive="Docs"
+  headings={headings}
+>
+  <nav class="crumb" aria-label="Breadcrumb">Start here&nbsp; /&nbsp; Getting started</nav>
+  <h1 class="page-h1">Getting started</h1>
+  <p class="lead">
+    From an empty project to a migrated SurrealDB schema in four steps. If you
+    know Zod, you already know every line of code below.
+  </p>
+  <hr class="rule" />
+
+  <div class="steps">
+    <Step n={1} id="install" title="Install">
+      <p>
+        Add surreal-zod to your project. It ships the sz.* schema API and the sz
+        migration CLI in one package.
+      </p>
+      <CommandBlock lines={[{ cmd: "bun add surreal-zod" }]} />
+    </Step>
+
+    <Step n={2} id="define-a-schema" title="Define a schema">
+      <p>
+        Create a table as an object schema. This is plain Zod with sz.* in place
+        of z.* — flip the block to see the SurrealQL it generates.
+      </p>
+      <CodeToggle ts={schemaTs} surql={schemaSurql} tsTitle="user.ts" />
+    </Step>
+
+    <Step n={3} id="generate-the-migration" title="Generate the migration">
+      <p>
+        Diff your schema against the last known state and write an incremental
+        SurrealQL migration.
+      </p>
+      <CommandBlock
+        lines={[
+          { cmd: "sz gen" },
+          { ok: "diff: 1 new table, 5 fields" },
+          { ok: "wrote migrations/0001_init.surql" },
+        ]}
+      />
+    </Step>
+
+    <Step n={4} id="apply-it" title="Apply it">
+      <p>
+        Run the pending migrations against your database. sz check can later
+        replay them to prove they reproduce your schema.
+      </p>
+      <CommandBlock
+        lines={[
+          { cmd: "sz migrate" },
+          { ok: "applied 0001_init.surql" },
+          { note: "database is up to date" },
+        ]}
+      />
+    </Step>
+  </div>
+
+  <h2 id="next-steps" class="section-h2">Next steps</h2>
+  <NextSteps items={nextSteps} />
+</DocsLayout>
+
+<style>
+  .crumb {
+    font-size: 0.78rem;
+    color: var(--color-ink-3);
+  }
+  .page-h1 {
+    margin: 0.4rem 0 0;
+    font-size: 2.5rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--color-ink);
+    scroll-margin-top: 5rem;
+  }
+  .lead {
+    margin: 1rem 0 0;
+    max-width: 56ch;
+    font-size: 1.0625rem;
+    line-height: 1.55;
+    color: var(--color-ink-2);
+  }
+  .rule {
+    border: 0;
+    border-top: 1px solid var(--color-border-subtle);
+    margin: 1.75rem 0;
+  }
+  .steps {
+    display: flex;
+    flex-direction: column;
+    gap: 30px;
+  }
+  .section-h2 {
+    margin: 2.5rem 0 1.1rem;
+    font-size: 1.3125rem;
+    font-weight: 600;
+    color: var(--color-ink);
+    scroll-margin-top: 5rem;
+  }
+</style>

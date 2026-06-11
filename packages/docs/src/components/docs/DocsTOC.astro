@@ -1,0 +1,106 @@
+---
+import type { TocItem } from "../../config/docs-nav";
+
+interface Props {
+  headings?: TocItem[];
+}
+const { headings = [] } = Astro.props;
+---
+
+<aside class="toc">
+  {
+    headings.length > 0 && (
+      <nav aria-label="On this page">
+        <p class="toc-label">On this page</p>
+        <ul>
+          {headings.map((h) => (
+            <li>
+              <a href={`#${h.id}`} class="toc-link" data-toc-id={h.id}>
+                {h.text}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </nav>
+    )
+  }
+</aside>
+
+<style>
+  .toc {
+    width: 228px;
+    flex-shrink: 0;
+    border-left: 1px solid var(--color-border);
+  }
+  .toc nav {
+    position: sticky;
+    top: 54px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 44px 24px;
+  }
+  .toc-label {
+    margin: 0;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-ink-3);
+  }
+  ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .toc-link {
+    display: block;
+    padding: 3px 0 3px 10px;
+    border-left: 2px solid transparent;
+    font-size: 0.82rem;
+    color: var(--color-ink-3);
+    text-decoration: none;
+  }
+  .toc-link:hover {
+    color: var(--color-ink-2);
+  }
+  .toc-link.active {
+    color: var(--color-soft);
+    border-left-color: var(--color-purple);
+  }
+  @media (max-width: 75rem) {
+    .toc {
+      display: none;
+    }
+  }
+</style>
+
+<script>
+  // Highlight the TOC entry for the heading currently in view.
+  const links = Array.from(
+    document.querySelectorAll<HTMLAnchorElement>(".toc-link"),
+  );
+  if (links.length) {
+    const byId = new Map(links.map((l) => [l.dataset.tocId, l]));
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            links.forEach((l) => l.classList.remove("active"));
+            byId.get(entry.target.id)?.classList.add("active");
+          }
+        }
+      },
+      { rootMargin: "0px 0px -75% 0px", threshold: 0 },
+    );
+    for (const id of byId.keys()) {
+      if (id) {
+        const el = document.getElementById(id);
+        if (el) observer.observe(el);
+      }
+    }
+  }
+</script>
