@@ -1,0 +1,72 @@
+/*
+ * surreal-zod brand tokens -> Tailwind v4 theme.
+ * Source of truth: design/website.pen (Pencil) variables, Concept 7.1 (dark).
+ * Shared by the marketing landing and the Starlight docs so both stay in sync.
+ * This file is ONLY an @theme block (no base/body rules) so it is safe to
+ * import into multiple Tailwind roots.
+ */
+@theme {
+  /* Typography (fontsource variable families) */
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Surfaces */
+  --color-canvas: #0e0c14;
+  --color-canvas-2: #13101c;
+  --color-surface: #16131f;
+  --color-surface-2: #1c1826;
+  --color-code-bg: #100d18;
+
+  /* Borders */
+  --color-border: #2a2438;
+  --color-border-subtle: #211b2d;
+
+  /* Text */
+  --color-ink: #f5f3fa;
+  --color-ink-2: #aaa1bb;
+  --color-ink-3: #6f6781;
+
+  /* Accents */
+  --color-purple: #9600ff;
+  --color-pink: #ff85d6;
+  --color-soft: #c77dff;
+  --color-hot: #ff00a0;
+  --color-success: #46d39a;
+  --color-danger: #ff5d6c;
+
+  /* Code tokens */
+  --color-code-comment: #5d5670;
+  --color-code-fn: #7bd0ff;
+  --color-code-keyword: #c77dff;
+  --color-code-plain: #d8d3e4;
+  --color-code-string: #ff85d6;
+  --color-code-type: #9fe3b0;
+
+  /* --- Starlight bridge: accent + gray scales (starlight-tailwind) --- */
+  /* Accent ramp around brand purple #9600ff */
+  --color-accent-50: #f4ecff;
+  --color-accent-100: #e9d8ff;
+  --color-accent-200: #d4b0ff;
+  --color-accent-300: #bd87ff;
+  --color-accent-400: #a855ff;
+  --color-accent-500: #9600ff;
+  --color-accent-600: #8400e6;
+  --color-accent-700: #6b00bd;
+  --color-accent-800: #520091;
+  --color-accent-900: #3a0066;
+  --color-accent-950: #220040;
+
+  /* Gray ramp tuned toward the purple canvas */
+  --color-gray-50: #f5f3fa;
+  --color-gray-100: #e8e4f0;
+  --color-gray-200: #c8c2d6;
+  --color-gray-300: #aaa1bb;
+  --color-gray-400: #8b8299;
+  --color-gray-500: #6f6781;
+  --color-gray-600: #463f57;
+  --color-gray-700: #2a2438;
+  --color-gray-800: #1c1826;
+  --color-gray-900: #16131f;
+  --color-gray-950: #0e0c14;
+}

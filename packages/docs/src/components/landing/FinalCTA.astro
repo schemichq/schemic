@@ -1,0 +1,53 @@
+---
+const arrow = '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>';
+---
+
+<section class="relative overflow-hidden border-t border-border-subtle px-6 py-28">
+  <!-- ambient purple glow -->
+  <div
+    class="pointer-events-none absolute inset-x-0 top-0 mx-auto h-[460px] max-w-3xl"
+    style="background: radial-gradient(60% 80% at 50% 0%, color-mix(in oklab, var(--color-purple) 18%, transparent), transparent 70%);"
+    aria-hidden="true"
+  >
+  </div>
+
+  <div class="relative mx-auto flex max-w-2xl flex-col items-center text-center">
+    <h2
+      class="font-display text-[44px] font-semibold tracking-tight text-balance sm:text-5xl"
+    >
+      <span class="text-ink">One schema. </span><span
+        class="bg-gradient-to-r from-purple to-pink bg-clip-text text-transparent"
+        >Zero drift.</span
+      >
+    </h2>
+    <p class="mt-4 max-w-xl text-[17px] leading-relaxed text-ink-2">
+      Generate the DDL, run the migrations, keep your types — straight from the
+      schema you already wrote.
+    </p>
+
+    <div class="mt-8 flex flex-wrap items-center justify-center gap-3.5">
+      <a
+        href="/getting-started"
+        class="rounded-full bg-gradient-to-r from-purple to-pink px-6 py-3.5 text-[15px] font-semibold text-white shadow-[0_8px_30px_-6px_var(--color-purple)] transition-transform hover:scale-[1.03]"
+      >
+        Get started
+      </a>
+      <a
+        href="/introduction"
+        class="inline-flex items-center gap-2 rounded-full border border-border bg-code-bg px-5 py-3 text-sm font-medium text-ink transition-colors hover:border-ink-3"
+      >
+        Read the docs
+        <svg
+          class="size-3.5 text-ink-2"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          set:html={arrow}
+        />
+      </a>
+    </div>
+  </div>
+</section>

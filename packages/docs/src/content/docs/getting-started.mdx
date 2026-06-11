@@ -1,0 +1,38 @@
+---
+title: Getting started
+description: Install surreal-zod and define your first schema.
+---
+
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+
+:::note[Placeholder]
+This page is a scaffold. Commands and snippets are illustrative and will be
+finalized in a later pass.
+:::
+
+## Install
+
+<Tabs syncKey="pkg">
+  <TabItem label="bun">```sh bun add surreal-zod zod surrealdb ```</TabItem>
+  <TabItem label="npm">```sh npm install surreal-zod zod surrealdb ```</TabItem>
+  <TabItem label="pnpm">```sh pnpm add surreal-zod zod surrealdb ```</TabItem>
+</Tabs>
+
+## Define a schema
+
+```ts
+import { sz, defineTable } from "surreal-zod";
+
+export const User = defineTable("user", {
+  email: sz.email().unique(),
+  name: sz.string().optional(),
+  createdAt: sz.date().default(() => new Date()),
+});
+```
+
+## Generate + migrate
+
+```sh
+sz gen       # diff schema -> write up/down migration
+sz migrate   # apply pending migrations
+```

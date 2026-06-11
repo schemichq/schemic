@@ -1,0 +1,189 @@
+---
+import CodeBlock from "./CodeBlock.astro";
+
+const kw = "text-code-keyword";
+const fn = "text-code-fn";
+const ty = "text-code-type";
+const st = "text-code-string";
+const pl = "text-code-plain";
+const vr = "text-pink";
+const cm = "text-code-comment";
+const mut = "text-ink-3";
+const ok = "text-success";
+
+// --- mini code blocks per card ---
+const dropInLines = [
+  [{ t: "email", c: pl }, { t: ": ", c: pl }, { t: "sz", c: fn }, { t: ".", c: pl }, { t: "email", c: fn }, { t: "().", c: pl }, { t: "unique", c: fn }, { t: "(),", c: pl }],
+  [{ t: "name", c: pl }, { t: ": ", c: pl }, { t: "sz", c: fn }, { t: ".", c: pl }, { t: "string", c: fn }, { t: "().", c: pl }, { t: "optional", c: fn }, { t: "(),", c: pl }],
+  [{ t: "role", c: pl }, { t: ": ", c: pl }, { t: "sz", c: fn }, { t: ".", c: pl }, { t: "enum", c: fn }, { t: "([", c: pl }, { t: '"admin"', c: st }, { t: ", ", c: pl }, { t: '"user"', c: st }, { t: "]),", c: pl }],
+  [{ t: "createdAt", c: pl }, { t: ": ", c: pl }, { t: "sz", c: fn }, { t: ".", c: pl }, { t: "datetime", c: fn }, { t: "().", c: pl }, { t: "$default", c: fn }, { t: "(", c: pl }, { t: "surql`time::now()`", c: st }, { t: "),", c: pl }],
+];
+
+const adoptLines = [
+  [{ t: "$ ", c: mut }, { t: "sz ", c: pl }, { t: "pull", c: fn }],
+  [{ t: "✓ ", c: ok }, { t: "schema/ ", c: ty }, { t: "from live DB", c: mut }],
+];
+
+const endTypesLines = [
+  [{ t: "type ", c: kw }, { t: "User", c: ty }, { t: " = ", c: pl }, { t: "App", c: fn }, { t: "<", c: pl }, { t: "typeof User", c: ty }, { t: ">", c: pl }],
+  [{ t: '// { id: RecordId<"user">;', c: cm }],
+  [{ t: "//   email: string; name?: string }", c: cm }],
+];
+
+const byoLines = [
+  [{ t: "sz", c: fn }, { t: ".", c: pl }, { t: "instanceof", c: fn }, { t: "(", c: pl }, { t: "Money", c: ty }, { t: ")", c: pl }],
+  [{ t: "  .", c: pl }, { t: "$surreal", c: fn }, { t: "(", c: pl }, { t: "sz", c: fn }, { t: ".", c: pl }, { t: "string", c: fn }, { t: "(), {", c: pl }],
+  [{ t: "    encode, decode,", c: pl }],
+  [{ t: "  })", c: pl }],
+];
+
+const liveLines = [
+  [{ t: "$ ", c: mut }, { t: "sz ", c: pl }, { t: "diff ", c: fn }, { t: "--live", c: ty }],
+  [{ t: "~ ", c: vr }, { t: "user.email", c: pl }, { t: "  ADD ASSERT", c: mut }],
+  [{ t: "+ ", c: ok }, { t: "post", c: pl }, { t: "  CREATE TABLE", c: mut }],
+];
+
+const cliChips = [
+  ["sz status", "sz check", "sz doctor"],
+  ["sz rollback", "sz seed", "sz pull"],
+];
+
+const icons: Record<string, string> = {
+  package: '<path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>',
+  database: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/>',
+  wrench: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+  braces: '<path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1"/><path d="M16 3h1a2 2 0 0 1 2 2v5a2 2 0 0 1 2 2 2 2 0 0 1-2 2v5a2 2 0 0 1-2 2h-1"/>',
+  shapes: '<path d="M8.3 10a.7.7 0 0 1-.626-1.079L11.4 3a.7.7 0 0 1 1.198-.043L16.3 8.9a.7.7 0 0 1-.572 1.1Z"/><rect x="3" y="14" width="7" height="7" rx="1"/><circle cx="17.5" cy="17.5" r="3.5"/>',
+  refresh: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/>',
+};
+---
+
+<section id="features" class="px-6 py-24 sm:py-28">
+  <div class="mx-auto max-w-6xl">
+    <!-- head -->
+    <div class="mx-auto max-w-3xl text-center">
+      <p class="font-mono text-xs uppercase tracking-[0.12em] text-pink">
+        // what you get
+      </p>
+      <h2
+        class="mt-3 font-display text-4xl font-semibold tracking-tight text-balance text-ink sm:text-[42px]"
+      >
+        Everything you get with surreal-zod.
+      </h2>
+      <p class="mx-auto mt-4 max-w-2xl text-[17px] leading-relaxed text-ink-2">
+        A drop-in <code class="font-mono text-soft">sz.*</code> schema, generated
+        SurrealQL DDL, a migration CLI, end-to-end types, the full
+        <code class="font-mono text-soft">define*</code> vocabulary, and a live round-trip
+        — all from one typed file.
+      </p>
+    </div>
+
+    <!-- row 1: big card + right column -->
+    <div class="mt-12 grid gap-5 lg:grid-cols-3">
+      <!-- Drop-in Zod API (wide) -->
+      <article
+        class="flex flex-col gap-3.5 rounded-2xl border border-border bg-surface p-[22px] lg:col-span-2"
+      >
+        <div class="flex items-center gap-2.5">
+          <span
+            class="grid size-[34px] place-items-center rounded-[9px] border border-border bg-pink/10 text-pink"
+          >
+            <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" set:html={icons.package} />
+          </span>
+          <h3 class="font-display text-lg font-semibold text-ink">Drop-in Zod API</h3>
+        </div>
+        <p class="text-sm leading-relaxed text-ink-2">
+          A 1:1 drop-in for <code class="font-mono text-soft">z.*</code> — refinements,
+          defaults, coercion, and <code class="font-mono text-soft">infer / input / output</code>.
+        </p>
+        <CodeBlock lines={dropInLines} />
+        <p class="text-[13px] leading-relaxed text-ink-3">
+          Migrate an existing schema by find-replacing <code class="font-mono text-ink-2">z.</code>
+          → <code class="font-mono text-ink-2">sz.</code> Nothing new to learn.
+        </p>
+      </article>
+
+      <!-- right column -->
+      <div class="flex flex-col gap-5">
+        <!-- Adopt any database -->
+        <article class="flex flex-1 flex-col gap-3 rounded-2xl border border-border bg-surface p-[22px]">
+          <div class="flex items-center gap-2.5">
+            <span class="grid size-[34px] place-items-center rounded-[9px] border border-border bg-pink/10 text-pink">
+              <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" set:html={icons.database} />
+            </span>
+            <h3 class="font-display text-lg font-semibold text-ink">Adopt any database</h3>
+          </div>
+          <p class="text-sm leading-relaxed text-ink-2">
+            Introspect a live database into typed schema files.
+          </p>
+          <CodeBlock lines={adoptLines} />
+        </article>
+
+        <!-- CLI toolbelt -->
+        <article class="flex flex-1 flex-col gap-3 rounded-2xl border border-border bg-surface p-[22px]">
+          <div class="flex items-center gap-2.5">
+            <span class="grid size-[34px] place-items-center rounded-[9px] border border-border bg-pink/10 text-pink">
+              <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" set:html={icons.wrench} />
+            </span>
+            <h3 class="font-display text-lg font-semibold text-ink">CLI toolbelt</h3>
+          </div>
+          <div class="flex flex-col gap-2">
+            {
+              cliChips.map((row) => (
+                <div class="flex gap-2">
+                  {row.map((chip) => (
+                    <span class="flex-1 rounded-md border border-border-subtle bg-code-bg px-2.5 py-1.5 text-center font-mono text-xs text-ink-2">
+                      {chip}
+                    </span>
+                  ))}
+                </div>
+              ))
+            }
+          </div>
+        </article>
+      </div>
+    </div>
+
+    <!-- row 2: three cards -->
+    <div class="mt-5 grid gap-5 sm:grid-cols-3">
+      <!-- End-to-end types -->
+      <article class="flex flex-col gap-3.5 rounded-2xl border border-border bg-surface p-[22px]">
+        <div class="flex items-center gap-2.5">
+          <span class="grid size-[34px] place-items-center rounded-[9px] border border-border bg-pink/10 text-pink">
+            <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" set:html={icons.braces} />
+          </span>
+          <h3 class="font-display text-lg font-semibold text-ink">End-to-end types</h3>
+        </div>
+        <p class="text-sm leading-relaxed text-ink-2">Infer row shapes straight from the schema.</p>
+        <CodeBlock lines={endTypesLines} />
+        <p class="text-[13px] leading-relaxed text-ink-3">
+          Unsupported types are flagged in your editor — not at migration time.
+        </p>
+      </article>
+
+      <!-- Bring your own types -->
+      <article class="flex flex-col gap-3.5 rounded-2xl border border-border bg-surface p-[22px]">
+        <div class="flex items-center gap-2.5">
+          <span class="grid size-[34px] place-items-center rounded-[9px] border border-border bg-pink/10 text-pink">
+            <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" set:html={icons.shapes} />
+          </span>
+          <h3 class="font-display text-lg font-semibold text-ink">Bring your own types</h3>
+        </div>
+        <p class="text-sm leading-relaxed text-ink-2">Store any class with a typed codec — app value in, wire type out.</p>
+        <CodeBlock lines={byoLines} />
+      </article>
+
+      <!-- Live round-trip -->
+      <article class="flex flex-col gap-3.5 rounded-2xl border border-border bg-surface p-[22px]">
+        <div class="flex items-center gap-2.5">
+          <span class="grid size-[34px] place-items-center rounded-[9px] border border-border bg-pink/10 text-pink">
+            <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" set:html={icons.refresh} />
+          </span>
+          <h3 class="font-display text-lg font-semibold text-ink">Live round-trip</h3>
+        </div>
+        <p class="text-sm leading-relaxed text-ink-2">Diff against the running database.</p>
+        <CodeBlock lines={liveLines} />
+      </article>
+    </div>
+  </div>
+</section>

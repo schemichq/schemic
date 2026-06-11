@@ -1,0 +1,287 @@
+---
+// Token color classes (brand code tokens)
+const kw = "text-code-keyword";
+const fn = "text-code-fn";
+const ty = "text-code-type";
+const st = "text-code-string";
+const pl = "text-code-plain";
+const vr = "text-pink";
+
+type Tok = { t: string; c: string };
+type Line = { num: number | null; hl?: boolean; tokens: Tok[] };
+
+const tsLines: Line[] = [
+  { num: 1, tokens: [{ t: "export ", c: kw }, { t: "const ", c: kw }, { t: "User", c: ty }, { t: " = ", c: pl }, { t: "defineTable", c: fn }, { t: "(", c: pl }, { t: '"user"', c: st }, { t: ", {", c: pl }] },
+  { num: 2, tokens: [{ t: "  id", c: pl }, { t: ": ", c: pl }, { t: "sz", c: pl }, { t: ".", c: pl }, { t: "string", c: fn }, { t: "(),", c: pl }] },
+  { num: 3, hl: true, tokens: [{ t: "  email", c: pl }, { t: ": ", c: pl }, { t: "sz", c: pl }, { t: ".", c: pl }, { t: "email", c: fn }, { t: "().", c: pl }, { t: "unique", c: fn }, { t: "(),", c: pl }] },
+  { num: 4, tokens: [{ t: "  name", c: pl }, { t: ": ", c: pl }, { t: "sz", c: pl }, { t: ".", c: pl }, { t: "string", c: fn }, { t: "().", c: pl }, { t: "optional", c: fn }, { t: "(),", c: pl }] },
+  { num: 5, tokens: [{ t: "  createdAt", c: pl }, { t: ": ", c: pl }, { t: "sz", c: pl }, { t: ".", c: pl }, { t: "datetime", c: fn }, { t: "()", c: pl }] },
+  { num: 6, tokens: [{ t: "    .", c: pl }, { t: "$default", c: fn }, { t: "(", c: pl }, { t: "surql", c: fn }, { t: "`", c: st }, { t: "time::now", c: fn }, { t: "()", c: pl }, { t: "`", c: st }, { t: ")", c: pl }] },
+  { num: 7, tokens: [{ t: "    .", c: pl }, { t: "$readonly", c: fn }, { t: "(),", c: pl }] },
+  { num: 8, tokens: [{ t: "});", c: pl }] },
+];
+
+const surqlLines: Line[] = [
+  { num: 1, tokens: [{ t: "DEFINE TABLE ", c: kw }, { t: "user ", c: ty }, { t: "TYPE NORMAL SCHEMAFULL", c: kw }, { t: ";", c: pl }] },
+  { num: 2, hl: true, tokens: [{ t: "DEFINE FIELD ", c: kw }, { t: "email ", c: pl }, { t: "ON TABLE ", c: kw }, { t: "user ", c: ty }, { t: "TYPE ", c: kw }, { t: "string", c: ty }] },
+  { num: null, hl: true, tokens: [{ t: "  ASSERT ", c: kw }, { t: "string::is_email", c: fn }, { t: "(", c: pl }, { t: "$value", c: vr }, { t: ");", c: pl }] },
+  { num: 3, hl: true, tokens: [{ t: "DEFINE INDEX ", c: kw }, { t: "user_email_idx ", c: pl }, { t: "ON TABLE ", c: kw }, { t: "user", c: ty }] },
+  { num: null, hl: true, tokens: [{ t: "  FIELDS ", c: kw }, { t: "email ", c: pl }, { t: "UNIQUE", c: kw }, { t: ";", c: pl }] },
+  { num: 4, tokens: [{ t: "DEFINE FIELD ", c: kw }, { t: "name ", c: pl }, { t: "ON TABLE ", c: kw }, { t: "user ", c: ty }, { t: "TYPE ", c: kw }, { t: "option", c: kw }, { t: "<", c: pl }, { t: "string", c: ty }, { t: ">;", c: pl }] },
+  { num: 5, tokens: [{ t: "DEFINE FIELD ", c: kw }, { t: "createdAt ", c: pl }, { t: "ON TABLE ", c: kw }, { t: "user ", c: ty }, { t: "TYPE ", c: kw }, { t: "datetime", c: ty }] },
+  { num: null, tokens: [{ t: "  DEFAULT ", c: kw }, { t: "time::now", c: fn }, { t: "() ", c: pl }, { t: "READONLY", c: kw }, { t: ";", c: pl }] },
+];
+
+const termLines = [
+  { sym: "$", symC: "text-ink-3", msg: " sz generate add_users", msgC: "text-code-plain" },
+  { sym: "-", symC: "text-ink-3", msg: " planning migration against live schema...", msgC: "text-ink-3" },
+  { sym: "+", symC: "text-success", msg: " DEFINE TABLE user TYPE NORMAL SCHEMAFULL", msgC: "text-success" },
+  { sym: "+", symC: "text-success", msg: " DEFINE FIELD email ON TABLE user ... ASSERT string::is_email", msgC: "text-success" },
+  { sym: "+", symC: "text-success", msg: " DEFINE INDEX user_email_idx ON TABLE user FIELDS email UNIQUE", msgC: "text-success" },
+  { sym: "✓", symC: "text-success", msg: " wrote migrations/0001_add_users.surql", msgC: "text-ink-2" },
+];
+
+const icons: Record<string, string> = {
+  file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+  terminal: '<path d="m4 17 6-6-6-6"/><path d="M12 19h8"/>',
+  braces: '<path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1"/><path d="M16 3h1a2 2 0 0 1 2 2v5a2 2 0 0 1 2 2 2 2 0 0 1-2 2v5a2 2 0 0 1-2 2h-1"/>',
+  repeat: '<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>',
+};
+
+const rail = [
+  { label: "Schema → DDL", icon: "file", active: true },
+  { label: "Migrations (CLI)", icon: "terminal", active: false },
+  { label: "End-to-end types", icon: "braces", active: false },
+  { label: "Live round-trip", icon: "repeat", active: false },
+];
+---
+
+<section id="demo" class="relative px-6 py-24 sm:py-28">
+  <div class="mx-auto max-w-6xl">
+    <!-- header -->
+    <div class="text-center">
+      <p class="font-mono text-xs uppercase tracking-[0.22em] text-ink-3">
+        // schema in, surrealql out
+      </p>
+      <h2
+        class="mx-auto mt-4 max-w-2xl font-display text-3xl font-semibold tracking-tight text-balance text-ink-2 sm:text-4xl"
+      >
+        From <code class="font-mono text-soft">sz.*</code> schema to generated{" "}
+        <span
+          class="bg-gradient-to-r from-purple to-pink bg-clip-text text-transparent"
+          >SurrealQL</span
+        >.
+      </h2>
+    </div>
+
+    <!-- window -->
+    <div
+      class="mt-12 overflow-hidden rounded-2xl border border-border bg-surface shadow-[0_30px_80px_-30px_rgba(0,0,0,0.8)]"
+    >
+      <div class="flex">
+        <!-- capabilities rail -->
+        <aside
+          class="hidden w-56 shrink-0 border-r border-border-subtle bg-canvas-2 p-3 lg:block"
+        >
+          <p
+            class="px-2 pt-1 font-mono text-[10px] uppercase tracking-[0.16em] text-ink-3"
+          >
+            Capabilities
+          </p>
+          <nav class="mt-3 flex flex-col gap-1">
+            {
+              rail.map((item) => (
+                <span
+                  class:list={[
+                    "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm",
+                    item.active
+                      ? "bg-surface-2 text-ink shadow-[inset_2px_0_0_0_var(--color-purple)]"
+                      : "text-ink-2",
+                  ]}
+                >
+                  <svg
+                    class:list={[
+                      "size-4 shrink-0",
+                      item.active ? "text-soft" : "text-ink-3",
+                    ]}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    set:html={icons[item.icon]}
+                  />
+                  {item.label}
+                </span>
+              ))
+            }
+          </nav>
+        </aside>
+
+        <!-- editor column -->
+        <div class="min-w-0 flex-1">
+          <!-- window header -->
+          <div
+            class="flex items-center justify-between border-b border-border-subtle px-4 py-3"
+          >
+            <div class="flex items-center gap-1.5">
+              <span class="size-3 rounded-full bg-[#ff5f57]"></span>
+              <span class="size-3 rounded-full bg-[#febc2e]"></span>
+              <span class="size-3 rounded-full bg-[#28c840]"></span>
+            </div>
+            <span class="font-mono text-xs text-ink-3">surreal-zod</span>
+            <span
+              class="inline-flex items-center gap-1.5 rounded-md border border-purple/40 bg-purple/10 px-2.5 py-1 font-mono text-[11px] text-soft"
+            >
+              <svg class="size-2.5" viewBox="0 0 24 24" fill="currentColor"
+                ><path d="M8 5v14l11-7z"></path></svg
+              >
+              sz generate
+            </span>
+          </div>
+
+          <!-- panes: side-by-side w/ bare seam arrow on desktop, stacked on mobile -->
+          <div class="relative grid lg:grid-cols-2">
+            <!-- left pane (schema.ts) -->
+            <div
+              class="flex min-w-0 flex-col border-b border-border-subtle lg:border-r lg:border-b-0"
+            >
+              <div
+                class="flex items-center justify-between border-b border-border-subtle px-4 py-2.5"
+              >
+                <span class="font-mono text-xs text-ink">schema.ts</span>
+                <span class="font-mono text-[11px] text-ink-3">TypeScript</span>
+              </div>
+              <div
+                class="min-w-0 overflow-x-auto bg-code-bg py-4 font-mono text-[13px] leading-6"
+              >
+                {
+                  tsLines.map((line) => (
+                    <div
+                      class:list={[
+                        "flex border-l-2 pr-4",
+                        line.hl
+                          ? "border-purple bg-purple/10"
+                          : "border-transparent",
+                      ]}
+                    >
+                      <span class="w-10 shrink-0 select-none pr-3 text-right text-ink-3">
+                        {line.num}
+                      </span>
+                      <code class="whitespace-pre">
+                        {line.tokens.map((tk) => (
+                          <span class={tk.c}>{tk.t}</span>
+                        ))}
+                      </code>
+                    </div>
+                  ))
+                }
+              </div>
+            </div>
+
+            <!-- right pane (user.surql) -->
+            <div class="flex min-w-0 flex-col">
+              <div
+                class="flex items-center justify-between border-b border-border-subtle bg-pink/[0.03] px-4 py-2.5"
+              >
+                <span class="font-mono text-xs text-ink">user.surql</span>
+                <span class="font-mono text-[11px] text-ink-3">SurrealQL</span>
+              </div>
+              <div
+                class="relative min-w-0 overflow-x-auto bg-code-bg py-4 font-mono text-[13px] leading-6"
+              >
+                <div
+                  class="pointer-events-none absolute inset-0 bg-gradient-to-r from-transparent to-pink/[0.04]"
+                >
+                </div>
+                {
+                  surqlLines.map((line) => (
+                    <div
+                      class:list={[
+                        "relative flex border-l-2 pr-4",
+                        line.hl
+                          ? "border-purple bg-purple/10"
+                          : "border-transparent",
+                      ]}
+                    >
+                      <span class="w-10 shrink-0 select-none pr-3 text-right text-ink-3">
+                        {line.num}
+                      </span>
+                      <code class="whitespace-pre">
+                        {line.tokens.map((tk) => (
+                          <span class={tk.c}>{tk.t}</span>
+                        ))}
+                      </code>
+                    </div>
+                  ))
+                }
+              </div>
+            </div>
+
+            <!-- bare seam arrow (desktop only) -->
+            <div
+              class="absolute left-1/2 top-5 hidden -translate-x-1/2 -translate-y-1/2 bg-surface px-2 text-soft lg:block"
+            >
+              <svg
+                class="size-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                ><path d="M5 12h14"></path><path d="m13 6 6 6-6 6"></path></svg
+              >
+            </div>
+          </div>
+
+          <!-- map note -->
+          <div
+            class="flex items-center gap-2 border-y border-border-subtle bg-purple/10 px-4 py-2.5 text-xs text-ink-2"
+          >
+            <span
+              class="size-1.5 shrink-0 rounded-full bg-gradient-to-r from-purple to-pink"
+            ></span>
+            <span>
+              Highlighted — one <code class="font-mono text-soft"
+                >sz.email().unique()</code
+              > compiles to a typed <code class="font-mono text-code-type"
+                >FIELD</code
+              > + a <code class="font-mono text-code-type">UNIQUE INDEX</code>.
+            </span>
+          </div>
+
+          <!-- terminal -->
+          <div class="bg-code-bg px-4 py-3.5 font-mono text-xs leading-6">
+            {
+              termLines.map((l) => (
+                <div class="whitespace-pre">
+                  <span class={l.symC}>{l.sym}</span>
+                  <span class={l.msgC}>{l.msg}</span>
+                </div>
+              ))
+            }
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- footer row -->
+    <div
+      class="mt-6 flex flex-col items-center justify-between gap-4 sm:flex-row"
+    >
+      <p class="text-sm text-ink-2">
+        Define your tables and fields in TypeScript — the SurrealQL DDL is
+        generated for you.
+      </p>
+      <a
+        href="/getting-started"
+        class="inline-flex shrink-0 items-center gap-2 rounded-xl border border-border bg-surface px-5 py-2.5 text-sm font-medium text-ink transition-colors hover:border-ink-3"
+      >
+        Open the playground
+        <span aria-hidden="true">&rarr;</span>
+      </a>
+    </div>
+  </div>
+</section>

@@ -1,0 +1,27 @@
+---
+// A small syntax-highlighted code block (no line numbers).
+// `lines` is an array of lines; each line is an array of { t, c } tokens.
+type Tok = { t: string; c: string };
+interface Props {
+  lines: Tok[][];
+  class?: string;
+}
+const { lines, class: cls = "" } = Astro.props;
+---
+
+<div
+  class:list={[
+    "overflow-x-auto rounded-[10px] border border-border-subtle bg-code-bg px-4 py-3.5 font-mono text-[13px] leading-[1.6]",
+    cls,
+  ]}
+>
+  {
+    lines.map((line) => (
+      <div class="whitespace-pre">
+        {line.map((tk) => (
+          <span class={tk.c}>{tk.t}</span>
+        ))}
+      </div>
+    ))
+  }
+</div>

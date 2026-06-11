@@ -1,0 +1,96 @@
+---
+const ok = "text-success";
+const mut = "text-ink-3";
+const sec = "text-ink-2";
+const soft = "text-soft";
+
+type Out = { t: string; c: string };
+type Block = { cmd: string; outputs: Out[] };
+
+const blocks: Block[] = [
+  {
+    cmd: "sz generate add_users",
+    outputs: [
+      { t: "  ~ diffing schema.ts against the live schema…", c: mut },
+      { t: "  + DEFINE TABLE user TYPE NORMAL SCHEMAFULL", c: ok },
+      { t: "  + DEFINE FIELD email ON TABLE user … UNIQUE", c: ok },
+      { t: "  ✓ wrote migrations/0001_add_users.surql", c: sec },
+    ],
+  },
+  {
+    cmd: "sz migrate",
+    outputs: [
+      { t: "  ▸ applying 0001_add_users.surql → surrealdb", c: soft },
+      { t: "  ✓ migrated user · 3 fields · 1 index", c: sec },
+      { t: "  ✓ schema up to date", c: ok },
+    ],
+  },
+  {
+    cmd: "sz diff --live",
+    outputs: [
+      { t: "  ~ comparing schema.ts ↔ running database", c: mut },
+      { t: "  ✓ no drift — live schema matches your code", c: ok },
+    ],
+  },
+];
+---
+
+<section
+  id="cli"
+  class="border-y border-border-subtle bg-canvas-2 px-6 py-24 sm:py-28"
+>
+  <div class="mx-auto flex max-w-[920px] flex-col items-center">
+    <!-- head -->
+    <div class="text-center">
+      <p class="font-mono text-xs uppercase tracking-[0.12em] text-pink">
+        // the cli
+      </p>
+      <h2
+        class="mt-3 font-display text-4xl font-semibold tracking-tight text-ink sm:text-[42px]"
+      >
+        Migrations are first-class.
+      </h2>
+      <p class="mx-auto mt-4 max-w-2xl text-[17px] leading-relaxed text-ink-2">
+        Write a migration from your schema, apply it, and check for drift against
+        the live database — three commands, no SurrealQL by hand.
+      </p>
+    </div>
+
+    <!-- terminal -->
+    <div
+      class="mt-9 w-full overflow-hidden rounded-2xl border border-border bg-code-bg shadow-[0_30px_70px_-30px_rgba(0,0,0,0.7),0_0_70px_-26px_rgba(150,0,255,0.3)]"
+    >
+      <!-- title bar -->
+      <div
+        class="flex items-center justify-between bg-surface px-4.5 py-3.5"
+      >
+        <div class="flex items-center gap-2">
+          <span class="size-3 rounded-full bg-[#ff5f57]"></span>
+          <span class="size-3 rounded-full bg-[#febc2e]"></span>
+          <span class="size-3 rounded-full bg-[#28c840]"></span>
+        </div>
+        <span class="font-mono text-xs text-ink-3">surreal-zod — cli</span>
+        <span class="font-mono text-[11px] text-success">● running</span>
+      </div>
+
+      <!-- body -->
+      <div
+        class="overflow-x-auto px-5 py-5 font-mono text-[13px] leading-[1.6]"
+      >
+        {
+          blocks.map((block, i) => (
+            <div class:list={[i > 0 && "mt-4"]}>
+              <div class="whitespace-pre">
+                <span class="text-pink">$</span>
+                <span class="text-code-plain"> {block.cmd}</span>
+              </div>
+              {block.outputs.map((o) => (
+                <div class:list={["whitespace-pre", o.c]}>{o.t}</div>
+              ))}
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  </div>
+</section>

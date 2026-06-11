@@ -1,0 +1,16 @@
+# build output
+dist/
+
+# generated types / content cache
+.astro/
+
+# dependencies
+node_modules/
+
+# environment
+.env
+.env.*
+!.env.example
+
+# os
+.DS_Store

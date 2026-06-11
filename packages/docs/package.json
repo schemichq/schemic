@@ -1,0 +1,25 @@
+{
+  "name": "@surreal-zod/docs",
+  "type": "module",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Marketing site + documentation for surreal-zod.",
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro",
+    "check": "astro check"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.40.0",
+    "@astrojs/starlight-tailwind": "^5.0.0",
+    "@fontsource-variable/geist": "^5.2.9",
+    "@fontsource-variable/geist-mono": "^5.2.8",
+    "@tailwindcss/vite": "^4.3.0",
+    "astro": "^6.4.6",
+    "sharp": "^0.35.0",
+    "tailwindcss": "^4.3.0"
+  }
+}

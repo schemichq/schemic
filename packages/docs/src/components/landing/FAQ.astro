@@ -1,0 +1,86 @@
+---
+const code = (s: string) => `<code class="font-mono text-soft">${s}</code>`;
+
+const faqs: { q: string; a: string }[] = [
+  {
+    q: "Is it really just Zod?",
+    a: `Yes — ${code("sz.*")} is a 1:1 drop-in for ${code("z.*")}. Migrate an existing schema by find-replacing ${code("z.")} → ${code("sz.")} If you know Zod, there is nothing new to learn.`,
+  },
+  {
+    q: "Why not write SurrealQL by hand?",
+    a: `Hand-written DDL drifts from your types the moment either changes. surreal-zod keeps SurrealQL and TypeScript as one source of truth — generated, never out of sync.`,
+  },
+  {
+    q: "How do migrations run?",
+    a: `Three commands cover the whole loop — ${code("sz generate")} writes the migration, ${code("sz migrate")} applies it, and ${code("sz diff --live")} checks for drift against the running database.`,
+  },
+  {
+    q: "Which SurrealDB version?",
+    a: `Built for SurrealDB 3.x and the full ${code("define*")} vocabulary — tables, fields, indexes, events, functions, and access. MIT licensed.`,
+  },
+  {
+    q: "Can I adopt it on an existing database?",
+    a: `Yes. ${code("sz pull")} introspects the live database and generates the matching ${code("sz.*")} schema files, so you start from the database you already have and migrate forward.`,
+  },
+  {
+    q: "Does it replace the surrealdb SDK?",
+    a: `No — it sits on top of it. You keep the official SDK for queries; surreal-zod owns the schema, the generated DDL, the migrations, and the row types.`,
+  },
+  {
+    q: "How is it different from surqlize?",
+    a: `surqlize is a query builder; surreal-zod is complementary — it owns the schema, the generated DDL, and the migrations. Pair it with surqlize or the official SDK for queries.`,
+  },
+  {
+    q: "Can I drop down to raw SurrealQL?",
+    a: `Always. The ${code("surql")} tag composes raw SurrealQL into any default, event, permission, or function — or for ad-hoc queries, use the SDK directly.`,
+  },
+];
+
+const plus = '<path d="M5 12h14"/><path d="M12 5v14"/>';
+---
+
+<section
+  id="faq"
+  class="border-y border-border-subtle bg-canvas-2 px-6 py-24 sm:py-28"
+>
+  <div class="mx-auto max-w-[1040px]">
+    <div class="text-center">
+      <p class="font-mono text-xs uppercase tracking-[0.12em] text-pink">
+        // common questions
+      </p>
+      <h2
+        class="mt-3 font-display text-4xl font-semibold tracking-tight text-ink"
+      >
+        Questions, answered.
+      </h2>
+    </div>
+
+    <div class="mt-12 grid gap-5 md:grid-cols-2">
+      {
+        faqs.map((f) => (
+          <div class="rounded-2xl border border-border bg-surface p-6">
+            <div class="flex items-start gap-2.5">
+              <svg
+                class="mt-0.5 size-4 shrink-0 text-pink"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                set:html={plus}
+              />
+              <h3 class="font-display text-base font-semibold text-ink">
+                {f.q}
+              </h3>
+            </div>
+            <p
+              class="mt-2.5 pl-[26px] text-sm leading-relaxed text-ink-2"
+              set:html={f.a}
+            />
+          </div>
+        ))
+      }
+    </div>
+  </div>
+</section>

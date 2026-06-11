@@ -1,0 +1,24 @@
+---
+title: Introduction
+description: What surreal-zod is and why it exists.
+---
+
+surreal-zod lets you author your **SurrealDB** schema in TypeScript using a drop-in
+for Zod (`sz.*`). From that single source of truth it generates the SurrealQL DDL,
+infers your end-to-end types, and runs safe, reviewable migrations.
+
+:::note[Placeholder]
+This page is a scaffold. Real content lands in a later pass.
+:::
+
+## Why schema-as-code
+
+- **One source of truth** — your schema lives in TypeScript, in git.
+- **Generated DDL** — `DEFINE TABLE / FIELD / INDEX / EVENT / FUNCTION / ACCESS`.
+- **End-to-end types** — `App<>` (app-side) and `Wire<>` (DB-wire-side).
+- **Safe migrations** — incremental `ALTER`, drift detection, rollbacks.
+
+## Next steps
+
+- [Getting started](/getting-started)
+- [Defining schemas](/guides/schemas)
