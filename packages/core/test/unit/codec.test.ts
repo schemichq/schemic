@@ -8,7 +8,10 @@ const UUID = "0190b6e0-1234-7890-abcd-ef0123456789";
 describe("native codecs (schema-level)", () => {
   test("datetime: DateTime <-> Date", () => {
     const schema = sz.datetime().schema;
-    const decoded = z.decode(schema, new DateTime(new Date("2020-01-01T00:00:00.000Z")));
+    const decoded = z.decode(
+      schema,
+      new DateTime(new Date("2020-01-01T00:00:00.000Z")),
+    );
     expect(decoded).toBeInstanceOf(Date);
     expect((decoded as Date).toISOString()).toBe("2020-01-01T00:00:00.000Z");
 
@@ -76,13 +79,17 @@ describe("field-level codec (SField.decode / encode)", () => {
 
   test("async + deprecated parse alias", async () => {
     const f = sz.datetime();
-    const decoded = await f.decodeAsync(new DateTime(new Date("2020-01-01T00:00:00.000Z")));
+    const decoded = await f.decodeAsync(
+      new DateTime(new Date("2020-01-01T00:00:00.000Z")),
+    );
     expect(decoded).toBeInstanceOf(Date);
     expect(await f.encodeAsync(new Date())).toBeInstanceOf(DateTime);
     const safe = await f.safeEncodeAsync(new Date());
     expect(safe.success).toBe(true);
     // `parse` runs the decode direction (deprecated alias).
-    expect(f.parse(new DateTime(new Date("2020-01-01T00:00:00.000Z")))).toBeInstanceOf(Date);
+    expect(
+      f.parse(new DateTime(new Date("2020-01-01T00:00:00.000Z"))),
+    ).toBeInstanceOf(Date);
     expect(f.safeParse(new DateTime(new Date())).success).toBe(true);
   });
 });
@@ -121,7 +128,12 @@ describe("table decode/encode", () => {
   });
 
   test("safeDecode reports failure without throwing", () => {
-    const bad = T.safeDecode({ id: new RecordId("t", "1"), when: "nope", tag: 1, data: 2 });
+    const bad = T.safeDecode({
+      id: new RecordId("t", "1"),
+      when: "nope",
+      tag: 1,
+      data: 2,
+    });
     expect(bad.success).toBe(false);
   });
 
@@ -134,8 +146,13 @@ describe("table decode/encode", () => {
     });
     expect(ok.success).toBe(true);
 
-    // @ts-expect-error - `when` must be a Date on the app side
-    const bad = T.safeEncode({ id: new RecordId("t", "1"), when: 123, tag: UUID, data: new Uint8Array() });
+    const bad = T.safeEncode({
+      id: new RecordId("t", "1"),
+      // @ts-expect-error - `when` must be a Date on the app side
+      when: 123,
+      tag: UUID,
+      data: new Uint8Array(),
+    });
     expect(bad.success).toBe(false);
   });
 

@@ -87,6 +87,10 @@ export interface SurrealMeta {
   /** Single-field index: `.index()` (normal) / `.unique()` (uniqueness). Emits a `DEFINE
    * INDEX <table>_<field>_idx ON TABLE <table> FIELDS <field> [UNIQUE]`. */
   index?: { unique?: boolean };
+  /** `REFERENCE [ON DELETE …]` on a record-link field. See `.reference()`. */
+  reference?:
+    | true
+    | { onDelete?: "reject" | "cascade" | "ignore" | "unset" | BoundQuery };
 }
 
 /** Render a primitive as a clean SurrealQL literal; non-primitives return "". */
@@ -116,7 +120,25 @@ function toExpr(value: unknown): BoundQuery {
  * xid/ksuid/cidrv4/cidrv6/guid/base64/base64url/e164/jwt/emoji) stay assert-free — no
  * fabricated regex. `uuid` is the native `uuid` type, not a string format (no assert).
  */
-const STRING_IS_FORMATS = new Set(["email", "url", "ulid", "ipv4", "ipv6"]);
+const STRING_IS_FORMATS = new Set([
+  "email",
+  "url",
+  "ulid",
+  "ipv4",
+  "ipv6",
+  // batch 2: 3.1.3 `string::is_*` validators with no Zod format builder (plain string
+  // app-side; the ASSERT enforces the format in SurrealDB).
+  "alpha",
+  "alphanum",
+  "ascii",
+  "numeric",
+  "semver",
+  "hexadecimal",
+  "latitude",
+  "longitude",
+  "ip",
+  "domain",
+]);
 
 /** Map a Zod string format to its SurrealDB `string::is_*` assert, when one exists. */
 function formatAssert(format: string): string | undefined {
@@ -218,22 +240,23 @@ function deriveAsserts(schema: z.ZodType): string[] {
 }
 
 /** The schema one wrapper down — what `unwrap()` returns. */
-type InnerOf<S extends z.ZodType> =
-  S extends z.ZodOptional<infer I extends z.ZodType>
+type InnerOf<S extends z.ZodType> = S extends z.ZodOptional<
+  infer I extends z.ZodType
+>
+  ? I
+  : S extends z.ZodNullable<infer I extends z.ZodType>
     ? I
-    : S extends z.ZodNullable<infer I extends z.ZodType>
+    : S extends z.ZodDefault<infer I extends z.ZodType>
       ? I
-      : S extends z.ZodDefault<infer I extends z.ZodType>
+      : S extends z.ZodPrefault<infer I extends z.ZodType>
         ? I
-        : S extends z.ZodPrefault<infer I extends z.ZodType>
+        : S extends z.ZodCatch<infer I extends z.ZodType>
           ? I
-          : S extends z.ZodCatch<infer I extends z.ZodType>
+          : S extends z.ZodReadonly<infer I extends z.ZodType>
             ? I
-            : S extends z.ZodReadonly<infer I extends z.ZodType>
+            : S extends z.ZodArray<infer I extends z.ZodType>
               ? I
-              : S extends z.ZodArray<infer I extends z.ZodType>
-                ? I
-                : S;
+              : S;
 
 /**
  * A Zod schema paired with SurrealQL DDL metadata. `Flags` tracks input traits
@@ -529,6 +552,45 @@ export class SField<
     });
   }
   /**
+   * Mark a record-link field as a `REFERENCE` so the DB tracks back-links. `onDelete` sets the
+   * `ON DELETE` action — `"reject" | "cascade" | "ignore" | "unset"`, or a `surql` expression
+   * (emitted as `ON DELETE THEN …`). Omit it for a bare `REFERENCE`.
+   */
+  reference(opts?: {
+    onDelete?: "reject" | "cascade" | "ignore" | "unset" | BoundQuery;
+  }): SField<S, Flags> {
+    return new SField(this.schema, {
+      ...this.surreal,
+      reference:
+        opts?.onDelete === undefined ? true : { onDelete: opts.onDelete },
+    });
+  }
+  /**
+   * Teach surreal-zod how to store this value in SurrealDB: give the **wire type** as an `sz.*`
+   * field (its SurrealQL DDL type and Zod schema are derived from it) plus a codec
+   * (`encode`: app -> wire, `decode`: wire -> app). This turns an otherwise-unmappable field
+   * (e.g. `sz.custom`/`sz.instanceof`) into a real table field and clears the no-mapping brand;
+   * `sz.input<>` then reports the wire type. Omit the codec for an identity mapping (the app
+   * value is stored as-is). `$`-prefixed to avoid clashing with Zod.
+   */
+  $surreal<WF extends AnyField | z.ZodType, A = z.output<S>>(
+    wire: WF,
+    codec?: {
+      encode: (app: A) => z.output<SchemaOf<WF>>;
+      decode: (wire: z.output<SchemaOf<WF>>) => A;
+    },
+  ): SField<z.ZodCodec<SchemaOf<WF>, S>, Exclude<Flags, NoDdl>> {
+    const wireSchema = toZod(wire) as SchemaOf<WF>;
+    const c = z.codec(wireSchema, this.schema, {
+      decode: (w) => (codec ? codec.decode(w as never) : w) as never,
+      encode: (a) => (codec ? codec.encode(a as A) : a) as never,
+    });
+    return new SField(c, this.surreal) as SField<
+      z.ZodCodec<SchemaOf<WF>, S>,
+      Exclude<Flags, NoDdl>
+    >;
+  }
+  /**
    * Mark the field DB-managed and client-hidden. It still emits its `DEFINE FIELD`
    * (so SCHEMAFULL writes from a record-access SIGNUP block succeed) plus
    * `PERMISSIONS NONE`, but is excluded from the public app/create/update surface.
@@ -549,6 +611,17 @@ function datetimeCodec() {
   const codec = z.codec(z.instanceof(DateTime), z.date(), {
     decode: (dt) => new Date(dt.toString()),
     encode: (d) => new DateTime(d),
+  });
+  surrealTypeRegistry.set(codec, "datetime");
+  return codec;
+}
+
+/** Like `datetimeCodec`, but the app side coerces to `Date` (`sz.coerce.date`). Same `datetime` DDL. */
+function coercedDatetimeCodec() {
+  const codec = z.codec(z.instanceof(DateTime), z.coerce.date(), {
+    decode: (dt): Date => new Date(dt.toString()),
+    // the schema coerces the value to a `Date` before `encode` runs (typed `unknown` by Zod).
+    encode: (d) => new DateTime(d as Date),
   });
   surrealTypeRegistry.set(codec, "datetime");
   return codec;
@@ -639,8 +712,8 @@ export class RecordIdField<
     return new RecordIdField<T, V2>(this.tables, schema, this.surreal);
   }
 
-  /** Build a RecordId. Single-table: `make(id)`; multi-table: `make(table, id)`. */
-  make(idOrTable: V | T, id?: V): RecordId<T, V> {
+  /** Build a RecordId. Single-table: `for(id)`; multi-table: `for(table, id)`. */
+  for(idOrTable: V | T, id?: V): RecordId<T, V> {
     return (
       id === undefined
         ? new RecordId(this.tables[0]!, idOrTable as V)
@@ -671,6 +744,16 @@ export class RecordIdField<
 /** Unwrap an SField to its Zod schema (raw Zod schemas pass through). */
 const toZod = (v: AnyField | z.ZodType): z.ZodType =>
   v instanceof SField ? v.schema : v;
+
+/**
+ * Internal `Flags` brand for a field with no SurrealQL mapping. It rides the `Flags` channel,
+ * so it survives every wrapper (`.optional()`/`.array()`/…); `defineTable`/`defineRelation`
+ * reject a branded field at compile time, and `.$surreal(...)` clears it. (Runtime `inferField`
+ * is the backstop for nested/dynamic shapes.)
+ */
+type NoDdl = "~no-ddl";
+const noDdl = <S extends z.ZodType>(f: SField<S>): SField<S, NoDdl> =>
+  f as SField<S, NoDdl>;
 type ZodsOf<T extends readonly (AnyField | z.ZodType)[]> = {
   -readonly [K in keyof T]: SchemaOf<T[K]>;
 };
@@ -721,6 +804,19 @@ export const sz = {
   emoji: (params?: Parameters<typeof z.emoji>[0]) =>
     formatField(z.emoji(params), "emoji"),
 
+  // String fields validated by SurrealDB's `string::is_*` (no Zod format — plain string
+  // app-side, the baked ASSERT enforces the format in the DB).
+  alpha: () => formatField(z.string(), "alpha"),
+  alphanum: () => formatField(z.string(), "alphanum"),
+  ascii: () => formatField(z.string(), "ascii"),
+  numeric: () => formatField(z.string(), "numeric"),
+  semver: () => formatField(z.string(), "semver"),
+  hexadecimal: () => formatField(z.string(), "hexadecimal"),
+  latitude: () => formatField(z.string(), "latitude"),
+  longitude: () => formatField(z.string(), "longitude"),
+  ip: () => formatField(z.string(), "ip"),
+  domain: () => formatField(z.string(), "domain"),
+
   // Numbers. int/int32/uint32 -> DDL `int`; float -> DDL `float` (def.format-driven).
   int: (params?: Parameters<typeof z.int>[0]) => new SField(z.int(params)),
   float: (params?: Parameters<typeof z.float64>[0]) =>
@@ -770,14 +866,18 @@ export const sz = {
     objectFieldsRegistry.set(schema, fields);
     return new SField(schema);
   },
-  /** An array of `element` (an SField or a raw Zod schema). */
+  /** An array of `element`. `opts.max` -> sized `array<T, N>` (N is the MAX length). */
   array: <F extends AnyField | z.ZodType>(
     element: F,
-  ): SField<z.ZodArray<SchemaOf<F>>> =>
-    (element instanceof SField
-      ? element
-      : new SField(element)
-    ).array() as SField<z.ZodArray<SchemaOf<F>>>,
+    opts?: { max?: number },
+  ): SField<z.ZodArray<SchemaOf<F>>> => {
+    const base = (
+      element instanceof SField ? element : new SField(element)
+    ).array() as SField<z.ZodArray<SchemaOf<F>>>;
+    return opts?.max === undefined
+      ? base
+      : new SField(base.schema.max(opts.max), base.surreal);
+  },
   /** A literal value type. */
   literal: <const T extends string | number | boolean | bigint>(value: T) =>
     new SField(z.literal(value)),
@@ -817,11 +917,16 @@ export const sz = {
     value: V,
   ): SField<z.ZodMap<SchemaOf<K>, SchemaOf<V>>> =>
     new SField(z.map(toZod(key) as SchemaOf<K>, toZod(value) as SchemaOf<V>)),
-  /** A `Set<element>` -> SurrealQL `array<element>`. */
+  /** A `Set<element>` -> SurrealQL `set<element>`. `opts.max` -> sized `set<T, N>` (MAX). */
   set: <V extends AnyField | z.ZodType>(
     element: V,
-  ): SField<z.ZodSet<SchemaOf<V>>> =>
-    new SField(z.set(toZod(element) as SchemaOf<V>)),
+    opts?: { max?: number },
+  ): SField<z.ZodSet<SchemaOf<V>>> => {
+    const base = z.set(toZod(element) as SchemaOf<V>);
+    return new SField(
+      opts?.max === undefined ? base : base.max(opts.max),
+    ) as SField<z.ZodSet<SchemaOf<V>>>;
+  },
   /** The intersection of two schemas (object fields are merged in DDL). */
   intersection: <
     A extends AnyField | z.ZodType,
@@ -877,17 +982,61 @@ export const sz = {
       FlagsOf<F>
     >,
 
+  /** Optional **and** nullable — Zod's `nullish`. */
+  nullish: <F extends AnyField | z.ZodType>(
+    field: F,
+  ): SField<z.ZodNullable<z.ZodOptional<SchemaOf<F>>>, FlagsOf<F>> => {
+    const f = field instanceof SField ? field : new SField(field);
+    return f.optional().nullable() as SField<
+      z.ZodNullable<z.ZodOptional<SchemaOf<F>>>,
+      FlagsOf<F>
+    >;
+  },
+
+  /**
+   * Zod-style coercion. Each maps to the **same** SurrealQL type as its non-coerced builder —
+   * coercion only loosens the app/input side; the DB/wire type is unchanged.
+   */
+  coerce: {
+    string: () => new SField(z.coerce.string()),
+    number: () => new SField(z.coerce.number()),
+    boolean: () => new SField(z.coerce.boolean()),
+    bigint: () => new SField(z.coerce.bigint()),
+    date: () => new SField(coercedDatetimeCodec()),
+  },
+
   // Catch-alls.
   any: () => new SField(z.any()),
   unknown: () => new SField(z.unknown()),
   null: () => new SField(z.null()),
+
+  // --- Non-Surreal types ---
+  // Present so a global `z.*` -> `sz.*` swap never collides. They carry NO SurrealQL mapping,
+  // so they're rejected as a table field at compile time (and by `inferField` at runtime) —
+  // unless you teach them to serialize via `.$surreal(type, codec)`.
+  symbol: () => noDdl(new SField(z.symbol())),
+  undefined: () => noDdl(new SField(z.undefined())),
+  void: () => noDdl(new SField(z.void())),
+  never: () => noDdl(new SField(z.never())),
+  nan: () => noDdl(new SField(z.nan())),
+  custom: <T>(check?: (val: unknown) => boolean) =>
+    noDdl(new SField(z.custom<T>(check))),
+  instanceof: <T extends Parameters<typeof z.instanceof>[0]>(cls: T) =>
+    noDdl(new SField(z.instanceof(cls))),
+  promise: <F extends AnyField | z.ZodType>(schema: F) =>
+    noDdl(new SField(z.promise(toZod(schema)))),
+  /** Zod's function factory (not a schema/field — present for drop-in `z.*` parity). */
+  function: (...args: Parameters<typeof z.function>) => z.function(...args),
 };
 
 // --- Tables & relations ---
 
 export type Shape = Record<string, AnyField | z.ZodType>;
-type SchemaOf<F> =
-  F extends SField<infer S, infer _> ? S : F extends z.ZodType ? F : never;
+type SchemaOf<F> = F extends SField<infer S, infer _>
+  ? S
+  : F extends z.ZodType
+    ? F
+    : never;
 type FlagsOf<F> = F extends SField<z.ZodType, infer Fl> ? Fl : never;
 /**
  * Whether a field carries the `"internal"` flag (set by `.$internal()`). The
@@ -895,12 +1044,11 @@ type FlagsOf<F> = F extends SField<z.ZodType, infer Fl> ? Fl : never;
  * flags widen to `string`, and `"internal" extends string` would wrongly be true),
  * so `ZShape<Shape>` keeps every key for shape-agnostic refs like `TableDef<string, Shape>`.
  */
-type IsInternal<F> =
-  string extends FlagsOf<F>
-    ? false
-    : "internal" extends FlagsOf<F>
-      ? true
-      : false;
+type IsInternal<F> = string extends FlagsOf<F>
+  ? false
+  : "internal" extends FlagsOf<F>
+    ? true
+    : false;
 /** The public zshape — internal fields are excluded (see `ZShapeAll` for the system view). */
 type ZShape<S extends Shape> = {
   [K in keyof S as IsInternal<S[K]> extends true ? never : K]: SchemaOf<S[K]>;
@@ -917,13 +1065,16 @@ type ZShapeAll<S extends Shape> = { [K in keyof S]: SchemaOf<S[K]> };
 type SZObject<S extends Shape> = z.ZodObject<ZShape<S>> & {
   readonly "~szShape"?: S;
 };
-type ToField<F> =
-  F extends SField<infer Sc, infer Fl> ? SField<Sc, Fl> : SField<SchemaOf<F>>;
+type ToField<F> = F extends SField<infer Sc, infer Fl>
+  ? SField<Sc, Fl>
+  : SField<SchemaOf<F>>;
 type Fields<S extends Shape> = { [K in keyof S]: ToField<S[K]> };
-type Unwrap<F> =
-  F extends SField<z.ZodOptional<infer Inner extends z.ZodType>, infer Fl>
-    ? SField<Inner, Fl>
-    : F;
+type Unwrap<F> = F extends SField<
+  z.ZodOptional<infer Inner extends z.ZodType>,
+  infer Fl
+>
+  ? SField<Inner, Fl>
+  : F;
 type PartialShape<S extends Shape> = {
   [K in keyof S]: SField<z.ZodOptional<SchemaOf<S[K]>>, FlagsOf<S[K]>>;
 };
@@ -937,7 +1088,7 @@ export interface TableConfig {
   comment?: string;
   /** Table-level `PERMISSIONS`. Omitted ops default to NONE in SurrealDB. See `.permissions()`. */
   permissions?: TablePermissions;
-  relation?: { from: string[]; to: string[] };
+  relation?: { from: string[]; to: string[]; enforced?: boolean };
   /** Composite (multi-field) indexes. See `.index(name, fields, opts)`. */
   indexes?: TableIndex[];
   /** Row-change events. See `.event(name, { when?, then })`. */
@@ -1163,37 +1314,35 @@ type InputOptional<F> = undefined extends z.input<SchemaOf<F>> ? true : false;
  * `| undefined` that inferring from an optional property can introduce, so the result is the
  * clean shape — or `never` for any non-object schema.
  */
-type ShapeOf<Sc> =
-  Sc extends z.ZodOptional<infer I>
+type ShapeOf<Sc> = Sc extends z.ZodOptional<infer I>
+  ? ShapeOf<I>
+  : Sc extends z.ZodDefault<infer I>
     ? ShapeOf<I>
-    : Sc extends z.ZodDefault<infer I>
+    : Sc extends z.ZodReadonly<infer I>
       ? ShapeOf<I>
-      : Sc extends z.ZodReadonly<infer I>
+      : Sc extends z.ZodNullable<infer I>
         ? ShapeOf<I>
-        : Sc extends z.ZodNullable<infer I>
-          ? ShapeOf<I>
-          : Sc extends { "~szShape"?: infer NS }
-            ? NS extends Shape
-              ? NS
-              : never
-            : never;
+        : Sc extends { "~szShape"?: infer NS }
+          ? NS extends Shape
+            ? NS
+            : never
+          : never;
 
 /**
  * The element `Shape` of an `sz.object(...).array()` field (`never` otherwise). Peels the
  * same identity-preserving wrappers off the array, then reads the element's `~szShape`.
  */
-type ArrayShapeOf<Sc> =
-  Sc extends z.ZodOptional<infer I>
+type ArrayShapeOf<Sc> = Sc extends z.ZodOptional<infer I>
+  ? ArrayShapeOf<I>
+  : Sc extends z.ZodDefault<infer I>
     ? ArrayShapeOf<I>
-    : Sc extends z.ZodDefault<infer I>
+    : Sc extends z.ZodReadonly<infer I>
       ? ArrayShapeOf<I>
-      : Sc extends z.ZodReadonly<infer I>
+      : Sc extends z.ZodNullable<infer I>
         ? ArrayShapeOf<I>
-        : Sc extends z.ZodNullable<infer I>
-          ? ArrayShapeOf<I>
-          : Sc extends z.ZodArray<infer E>
-            ? ShapeOf<E>
-            : never;
+        : Sc extends z.ZodArray<infer E>
+          ? ShapeOf<E>
+          : never;
 
 /**
  * The create-input VALUE type for a field. A nested `sz.object` recurses into its own
@@ -1693,18 +1842,17 @@ export class SystemView<Name extends string, S extends Shape> {
 }
 
 // --- Smart id: the `id` field describes the id value type; wrapped as record<thisTable, V>. ---
-type IdValue<Id> =
-  Id extends RecordIdField<string, infer V>
-    ? V
-    : Id extends SField<infer Sc, infer _>
-      ? z.output<Sc> extends RecordIdValue
-        ? z.output<Sc>
+type IdValue<Id> = Id extends RecordIdField<string, infer V>
+  ? V
+  : Id extends SField<infer Sc, infer _>
+    ? z.output<Sc> extends RecordIdValue
+      ? z.output<Sc>
+      : RecordIdValue
+    : Id extends z.ZodType
+      ? z.output<Id> extends RecordIdValue
+        ? z.output<Id>
         : RecordIdValue
-      : Id extends z.ZodType
-        ? z.output<Id> extends RecordIdValue
-          ? z.output<Id>
-          : RecordIdValue
-        : RecordIdValue;
+      : RecordIdValue;
 type WithSmartId<Name extends string, S extends Shape> = Omit<S, "id"> & {
   id: RecordIdField<
     Name,
@@ -1745,9 +1893,27 @@ function applySmartId(name: string, shape: Shape): Record<string, AnyField> {
  * from the `name` arg, not from `typeof <theConst>`, so it sidesteps the self-in-its-own-
  * initializer cycle (TS 7022) that would otherwise widen the whole table to `any`.
  */
+/**
+ * Reject a shape field carrying the `NoDdl` brand (no SurrealQL mapping) at compile time: the
+ * offending key resolves to an error string, so the shape literal won't type-check. Give such a
+ * field `.$surreal(type, codec)` to make it storable, or drop it.
+ */
+type RejectNoDdl<S extends Shape> = {
+  // `string extends FlagsOf` -> flags are unresolved (e.g. the callback form leaves `S` broad);
+  // only reject when the brand is a concrete member, never on the generic fallback.
+  [K in keyof S]: string extends FlagsOf<S[K]>
+    ? S[K]
+    : NoDdl extends FlagsOf<S[K]>
+      ? "no SurrealQL mapping for this field — give it `.$surreal(type, codec)` or remove it"
+      : S[K];
+};
+
 export function defineTable<Name extends string, S extends Shape>(
   name: Name,
-  shape: S | ((self: RecordIdField<Name>) => S),
+  // The object form is rejected at compile time (`RejectNoDdl`); the callback form keeps its
+  // precise `S` inference (a `& RejectNoDdl<S>` in a function-return position collapses it),
+  // so a no-DDL field there is caught by the runtime `inferField` backstop instead.
+  shape: (S & RejectNoDdl<S>) | ((self: RecordIdField<Name>) => S),
 ): TableDef<Name, WithSmartId<Name, S>> {
   const resolved =
     typeof shape === "function" ? shape(new RecordIdField([name])) : shape;
@@ -1763,14 +1929,13 @@ export function defineTable<Name extends string, S extends Shape>(
 // biome-ignore lint/suspicious/noExplicitAny: shape-agnostic table reference for relation endpoints
 type AnyTable = TableDef<string, any>;
 type TableRef = AnyTable | readonly AnyTable[];
-type NamesOf<T> =
-  T extends TableDef<infer N extends string, infer _>
-    ? N
-    : T extends readonly (infer E)[]
-      ? E extends TableDef<infer N extends string, infer _>
-        ? N
-        : never
-      : never;
+type NamesOf<T> = T extends TableDef<infer N extends string, infer _>
+  ? N
+  : T extends readonly (infer E)[]
+    ? E extends TableDef<infer N extends string, infer _>
+      ? N
+      : never
+    : never;
 
 /** A relation's full shape: the edge fields plus the `in`/`out` record endpoints. */
 type RelationShape<
@@ -1817,13 +1982,21 @@ export class RelationDef<
     private readonly edge: S,
     private readonly fromNames: string[] = [],
     private readonly toNames: string[] = [],
+    private readonly isEnforced: boolean = false,
   ) {
     super(
       name,
       relationFields(name, edge, fromNames, toNames) as unknown as Fields<
         RelationShape<Name, S, In, Out>
       >,
-      { schemafull: true, relation: { from: fromNames, to: toNames } },
+      {
+        schemafull: true,
+        relation: {
+          from: fromNames,
+          to: toNames,
+          ...(isEnforced ? { enforced: true } : {}),
+        },
+      },
     );
   }
   /** Restrict the source endpoint(s) (`in`). */
@@ -1833,6 +2006,7 @@ export class RelationDef<
       this.edge,
       tableNames(ref),
       this.toNames,
+      this.isEnforced,
     ) as unknown as RelationDef<Name, S, NamesOf<F>, Out>;
   }
   /** Restrict the target endpoint(s) (`out`). */
@@ -1842,7 +2016,18 @@ export class RelationDef<
       this.edge,
       this.fromNames,
       tableNames(ref),
+      this.isEnforced,
     ) as unknown as RelationDef<Name, S, In, NamesOf<T>>;
+  }
+  /** Require both endpoints to exist on RELATE (`TYPE RELATION … ENFORCED`). */
+  enforced(): RelationDef<Name, S, In, Out> {
+    return new RelationDef(
+      this.name,
+      this.edge,
+      this.fromNames,
+      this.toNames,
+      true,
+    ) as unknown as RelationDef<Name, S, In, Out>;
   }
 }
 
@@ -1852,7 +2037,7 @@ export class RelationDef<
  */
 export function defineRelation<Name extends string, S extends Shape = {}>(
   name: Name,
-  fields?: S,
+  fields?: S & RejectNoDdl<S>,
 ): RelationDef<Name, S> {
   return new RelationDef(name, (fields ?? {}) as S);
 }
@@ -2034,13 +2219,41 @@ export function defineAccess(name: string): AccessDef {
 /** A schema object declared apart from a table (collected by the CLI loader and emitted on its own). */
 export type StandaloneDef = EventDef | FunctionDef | AccessDef;
 
-/** The app-facing type (what your code reads). */
-export type App<T extends { object: z.ZodType }> = z.output<T["object"]>;
-/** The DB wire type (what crosses the wire). */
-export type Wire<T extends { object: z.ZodType }> = z.input<T["object"]>;
+/**
+ * The underlying Zod schema of any sz value: a field (`SField`), a table/relation def
+ * (anything carrying an `.object`), or a raw Zod type.
+ */
+type ZodOf<T> = T extends { object: infer O }
+  ? O extends z.ZodType
+    ? O
+    : never
+  : SchemaOf<T>;
+
+/** The app-facing type (what your code reads). Same as `sz.output` / Zod's `infer`. */
+export type App<T> = z.output<ZodOf<T>>;
+/** The DB wire type (what crosses the wire). Same as `sz.input`. */
+export type Wire<T> = z.input<ZodOf<T>>;
+
+/**
+ * Zod-style inference helpers, exposed on `sz` (a type-only namespace merged with the `sz`
+ * value — the same trick Zod uses for `z.infer`). They accept fields, table/relation defs,
+ * and raw schemas alike:
+ *   - `sz.infer<T>` / `sz.output<T>` / `sz.TypeOf<T>` -> the decoded **app** type (== `App<T>`)
+ *   - `sz.input<T>`                                   -> the **wire/DB** type (== `Wire<T>`)
+ */
+export namespace sz {
+  export type infer<T> = z.output<ZodOf<T>>;
+  export type output<T> = z.output<ZodOf<T>>;
+  export type input<T> = z.input<ZodOf<T>>;
+  export type TypeOf<T> = z.output<ZodOf<T>>;
+  /** Any sz field — the `z.ZodTypeAny` analogue, for typing generic schemas. */
+  export type Field = AnyField;
+}
 /** The typed input for creating a record (DB-filled fields optional). */
-export type Create<T> =
-  T extends TableDef<string, infer S> ? CreateShape<S> : never;
+export type Create<T> = T extends TableDef<string, infer S>
+  ? CreateShape<S>
+  : never;
 /** The typed input for updating a record (partial; excludes id and readonly fields). */
-export type Update<T> =
-  T extends TableDef<string, infer S> ? UpdateShape<S> : never;
+export type Update<T> = T extends TableDef<string, infer S>
+  ? UpdateShape<S>
+  : never;

@@ -36,7 +36,10 @@
     "test": "bun test",
     "test:unit": "bun test test/unit",
     "test:live": "bun test test/live",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write ."
   },
   "dependencies": {
     "commander": "^14.0.2",

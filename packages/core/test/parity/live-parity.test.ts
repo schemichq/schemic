@@ -40,7 +40,9 @@ async function connectScratch(): Promise<Surreal | null> {
         await db.query(`DEFINE NAMESPACE IF NOT EXISTS ${NS};`);
         await db.use({ namespace: NS, database: DB });
         // Fresh, empty scratch db.
-        await db.query(`REMOVE DATABASE IF EXISTS ${DB}; DEFINE DATABASE ${DB};`);
+        await db.query(
+          `REMOVE DATABASE IF EXISTS ${DB}; DEFINE DATABASE ${DB};`,
+        );
         await db.use({ namespace: NS, database: DB });
       })(),
       new Promise<never>((_, reject) => {
@@ -59,7 +61,9 @@ async function connectScratch(): Promise<Surreal | null> {
 const db = await connectScratch();
 const live = describe.skipIf(!db);
 if (!db)
-  console.warn("[parity-live] SurrealDB unreachable — skipping live parity tests");
+  console.warn(
+    "[parity-live] SurrealDB unreachable — skipping live parity tests",
+  );
 
 /** Apply a multi-statement DDL string one statement at a time, returning rejections. */
 async function applyEach(
@@ -142,9 +146,9 @@ live("DB accepts surreal-zod's generated DDL", () => {
   });
 
   test("INFO FOR TABLE STRUCTURE round-trips the field types we care about", async () => {
-    const [info] = await db!.query<[{ fields: { name: string; kind?: string }[] }]>(
-      "INFO FOR TABLE pl_big STRUCTURE;",
-    );
+    const [info] = await db!.query<
+      [{ fields: { name: string; kind?: string }[] }]
+    >("INFO FOR TABLE pl_big STRUCTURE;");
     const kind = (n: string) => info.fields.find((f) => f.name === n)?.kind;
     expect(kind("uid")).toBe("uuid");
     expect(kind("dt")).toBe("datetime");
@@ -164,9 +168,9 @@ live("DB accepts surreal-zod's generated DDL", () => {
       .from(Big)
       .to(Big);
     const Open = defineRelation("pl_rel_open", {});
-    expect(await applyEach(db!, emitTable(Rel, { exists: "overwrite" }))).toEqual(
-      [],
-    );
+    expect(
+      await applyEach(db!, emitTable(Rel, { exists: "overwrite" })),
+    ).toEqual([]);
     expect(
       await applyEach(db!, emitTable(Open, { exists: "overwrite" })),
     ).toEqual([]);
@@ -174,9 +178,7 @@ live("DB accepts surreal-zod's generated DDL", () => {
 
   test("table-level clauses (ANY / DROP / PERMISSIONS / composite index)", async () => {
     const any = defineTable("pl_any", { id: z.string() }).typeAny();
-    const drop = defineTable("pl_drop", { id: z.string() })
-      .schemaless()
-      .drop();
+    const drop = defineTable("pl_drop", { id: z.string() }).schemaless().drop();
     const perms = defineTable("pl_perms", { id: z.string() }).permissions({
       select: true,
       create: surql`$auth.id != NONE`,
@@ -187,23 +189,23 @@ live("DB accepts surreal-zod's generated DDL", () => {
       b: sz.string(),
     }).index("ab_idx", ["a", "b"], { unique: true });
     for (const t of [any, drop, perms, comp]) {
-      expect(await applyEach(db!, emitTable(t, { exists: "overwrite" }))).toEqual(
-        [],
-      );
+      expect(
+        await applyEach(db!, emitTable(t, { exists: "overwrite" })),
+      ).toEqual([]);
     }
   });
 
   test("event / function / access (record, jwt, bearer) apply cleanly", async () => {
-    const ev = defineTable("pl_ev", { id: z.string(), email: sz.email() }).event(
-      "reverify",
-      {
-        when: surql`$before.email != $after.email`,
-        then: surql`UPDATE $after.id SET email = $after.email`,
-      },
-    );
-    expect(await applyEach(db!, emitTable(ev, { exists: "overwrite" }))).toEqual(
-      [],
-    );
+    const ev = defineTable("pl_ev", {
+      id: z.string(),
+      email: sz.email(),
+    }).event("reverify", {
+      when: surql`$before.email != $after.email`,
+      then: surql`UPDATE $after.id SET email = $after.email`,
+    });
+    expect(
+      await applyEach(db!, emitTable(ev, { exists: "overwrite" })),
+    ).toEqual([]);
 
     const fn = defineFunction("pl_greet", { name: sz.string() })
       .returns(sz.string())
@@ -218,7 +220,9 @@ live("DB accepts surreal-zod's generated DDL", () => {
         .signin(surql`SELECT * FROM pl_big WHERE email = $email`)
         .duration({ token: "1h", session: "12h" }),
       defineAccess("pl_jwt").jwt({ alg: "HS512", key: "supersecretvalue" }),
-      defineAccess("pl_svc").bearer({ for: "record" }).duration({ grant: "30d" }),
+      defineAccess("pl_svc")
+        .bearer({ for: "record" })
+        .duration({ grant: "30d" }),
     ];
     for (const a of accesses) {
       expect(
@@ -228,29 +232,73 @@ live("DB accepts surreal-zod's generated DDL", () => {
   });
 });
 
+live("batch 1 + 2 features round-trip on the DB", () => {
+  test("sz.set() -> set<T>, sized array<T,N> / set<T,N> round-trip", async () => {
+    const T = defineTable("pl_b2_coll", {
+      id: z.string(),
+      tags: sz.set(sz.string()),
+      sized: sz.array(sz.string(), { max: 3 }),
+      sizedset: sz.set(sz.int(), { max: 5 }),
+    });
+    expect(await applyEach(db!, emitTable(T, { exists: "overwrite" }))).toEqual(
+      [],
+    );
+    const [info] = await db!.query<
+      [{ fields: { name: string; kind?: string }[] }]
+    >("INFO FOR TABLE pl_b2_coll STRUCTURE;");
+    const kind = (n: string) => info.fields.find((f) => f.name === n)?.kind;
+    expect(kind("tags")).toBe("set<string>");
+    expect(kind("sized")).toBe("array<string, 3>");
+    expect(kind("sizedset")).toBe("set<int, 5>");
+  });
+
+  test("record REFERENCE [ON DELETE …] via .reference()", async () => {
+    const T = defineTable("pl_b2_ref", {
+      id: z.string(),
+      author: sz.recordId("pl_b2_ref").reference({ onDelete: "cascade" }),
+      friends: sz
+        .array(sz.recordId("pl_b2_ref"))
+        .reference({ onDelete: "unset" }),
+    });
+    expect(await applyEach(db!, emitTable(T, { exists: "overwrite" }))).toEqual(
+      [],
+    );
+  });
+
+  test("TYPE RELATION … ENFORCED via .enforced()", async () => {
+    const A = defineTable("pl_b2_a", { id: z.string() });
+    const Rel = defineRelation("pl_b2_rel", {}).from(A).to(A).enforced();
+    expect(await applyEach(db!, emitTable(A, { exists: "overwrite" }))).toEqual(
+      [],
+    );
+    expect(
+      await applyEach(db!, emitTable(Rel, { exists: "overwrite" })),
+    ).toEqual([]);
+  });
+
+  test("all 10 batch-2 string::is_* validators are accepted (names are real)", async () => {
+    const T = defineTable("pl_b2_val", {
+      id: z.string(),
+      a: sz.alpha(),
+      an: sz.alphanum(),
+      asc: sz.ascii(),
+      num: sz.numeric(),
+      sv: sz.semver(),
+      hx: sz.hexadecimal(),
+      lat: sz.latitude(),
+      lon: sz.longitude(),
+      ip: sz.ip(),
+      dom: sz.domain(),
+    });
+    expect(await applyEach(db!, emitTable(T, { exists: "overwrite" }))).toEqual(
+      [],
+    );
+  });
+});
+
 // --- These document live-confirmed GAPS: features the DB ACCEPTS but surreal-zod
 //     cannot express (or expresses lossily). Marked todo so the suite stays green. ---
 live("known gaps (DB supports these; surreal-zod does not)", () => {
-  test("set<T> is a DISTINCT round-tripping type on the DB (sz.set emits array<T>)", async () => {
-    await db!.query(
-      "DEFINE TABLE pl_set SCHEMAFULL; DEFINE FIELD s ON TABLE pl_set TYPE set<string>;",
-    );
-    const [info] = await db!.query<[{ fields: { name: string; kind?: string }[] }]>(
-      "INFO FOR TABLE pl_set STRUCTURE;",
-    );
-    // The DB keeps `set<string>` (it is NOT normalized to array<string>) — so emitting
-    // array<string> for sz.set() genuinely loses the dedup semantics.
-    expect(info.fields.find((f) => f.name === "s")?.kind).toBe("set<string>");
-  });
-
-  test("REFERENCE / ON DELETE is accepted by the DB (no surreal-zod API)", async () => {
-    const rejected = await applyEach(
-      db!,
-      "DEFINE TABLE pl_ref SCHEMAFULL; DEFINE FIELD author ON TABLE pl_ref TYPE option<array<record<pl_ref>>> REFERENCE ON DELETE UNSET;",
-    );
-    expect(rejected).toEqual([]); // DB accepts it; surreal-zod can't emit it
-  });
-
   test("object-literal union is accepted by the DB (surreal-zod emits plain object)", async () => {
     const rejected = await applyEach(
       db!,
@@ -259,9 +307,10 @@ live("known gaps (DB supports these; surreal-zod does not)", () => {
     expect(rejected).toEqual([]);
   });
 
-  test.todo("GAP: sz.set() should emit set<T> — see PARITY.md", () => {});
-  test.todo("GAP: .reference()/ON DELETE record-reference builder — see PARITY.md", () => {});
-  test.todo("GAP: FULLTEXT / vector (HNSW) indexes + DEFINE ANALYZER — see PARITY.md", () => {});
+  test.todo(
+    "GAP: FULLTEXT / vector (HNSW) indexes + DEFINE ANALYZER — see PARITY.md",
+    () => {},
+  );
 });
 
 afterAll(async () => {

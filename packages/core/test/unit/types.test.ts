@@ -100,6 +100,68 @@ describe("App<> / Wire<>", () => {
   });
 });
 
+describe("sz.infer / sz.input / sz.output / sz.TypeOf (Zod drop-in helpers)", () => {
+  test("on a table def: infer/output/TypeOf == App, input == Wire", () => {
+    expectTypeOf<sz.infer<typeof User>>().toEqualTypeOf<App<typeof User>>();
+    expectTypeOf<sz.output<typeof User>>().toEqualTypeOf<App<typeof User>>();
+    expectTypeOf<sz.TypeOf<typeof User>>().toEqualTypeOf<App<typeof User>>();
+    expectTypeOf<sz.input<typeof User>>().toEqualTypeOf<Wire<typeof User>>();
+    // codec fields resolve per channel, exactly like App/Wire
+    expectTypeOf<sz.infer<typeof User>["createdAt"]>().toEqualTypeOf<Date>();
+    expectTypeOf<
+      sz.input<typeof User>["createdAt"]
+    >().toEqualTypeOf<DateTime>();
+  });
+
+  test("generalizes beyond tables: a bare sz.object schema and a single field", () => {
+    const Addr = sz.object({ city: sz.string(), zip: sz.string().optional() });
+    expectTypeOf<sz.infer<typeof Addr>>().toEqualTypeOf<{
+      city: string;
+      zip?: string | undefined;
+    }>();
+    expectTypeOf<
+      sz.output<ReturnType<typeof sz.email>>
+    >().toEqualTypeOf<string>();
+  });
+});
+
+describe("no-DDL fields: type-level rejection + $surreal escape hatch", () => {
+  class Money {
+    constructor(readonly cents: number) {}
+    toString() {
+      return String(this.cents);
+    }
+  }
+
+  test("a no-DDL field is rejected in a table shape (object form)", () => {
+    // @ts-expect-error - sz.symbol() has no SurrealQL mapping
+    defineTable("reject_a", { x: sz.symbol() });
+    // the brand survives wrappers:
+    // @ts-expect-error - sz.never().optional() is still no-DDL
+    defineTable("reject_b", { x: sz.never().optional() });
+  });
+
+  test("$surreal makes a custom type a real field, with app/wire types", () => {
+    const T = defineTable("money_tbl", {
+      id: z.string(),
+      price: sz.instanceof(Money).$surreal(sz.string(), {
+        encode: (m) => m.toString(),
+        decode: (s) => new Money(Number(s)),
+      }),
+    });
+    expectTypeOf<App<typeof T>["price"]>().toEqualTypeOf<Money>();
+    expectTypeOf<Wire<typeof T>["price"]>().toEqualTypeOf<string>();
+  });
+
+  test("the codec is type-checked against the wire field", () => {
+    sz.instanceof(Money).$surreal(sz.string(), {
+      // @ts-expect-error - encode must return a string (the sz.string() wire)
+      encode: (m) => m.cents,
+      decode: (s) => new Money(Number(s)),
+    });
+  });
+});
+
 describe("encode / safeEncode return types (#6, #7)", () => {
   test("encode returns Partial<Wire<>>: codec fields are wire-typed (DateTime, not Date)", () => {
     const made = User.encode({ name: "Alice", email: "alice@example.com" });

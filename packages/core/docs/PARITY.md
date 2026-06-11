@@ -52,49 +52,67 @@ defineTable("t", { /* … */ }).index("t_count", [], { count: true })
 //→ DEFINE INDEX t_count ON TABLE t COUNT;
 ```
 
+### ✅ Recently closed — batch 2
+
+Four more gaps closed — DDL-asserted in `ddl-parity.test.ts` **and live round-trip verified on
+SurrealDB 3.1.3** (`live-parity.test.ts`):
+
+```ts
+// Record REFERENCE [ON DELETE …] — referential integrity on links
+sz.recordId("person").reference({ onDelete: "cascade" })
+//→ DEFINE FIELD author ON TABLE comment TYPE record<person> REFERENCE ON DELETE CASCADE;
+
+// TYPE RELATION … ENFORCED — require both endpoints on RELATE
+defineRelation("liked").from(User).to(Post).enforced()
+//→ DEFINE TABLE liked TYPE RELATION FROM user TO post ENFORCED SCHEMAFULL;
+
+// Sized array<T,N> / set<T,N> — N is the MAX size (maps to Zod .max(); set stays set)
+sz.array(sz.string(), { max: 5 })
+//→ DEFINE FIELD tags ON TABLE t TYPE array<string, 5>;
+
+// +10 string::is_* validators (no Zod format builder; string + DB ASSERT)
+sz.alpha() / sz.alphanum() / sz.ascii() / sz.numeric() / sz.semver() /
+sz.hexadecimal() / sz.latitude() / sz.longitude() / sz.ip() / sz.domain()
+//→ DEFINE FIELD f ON TABLE t TYPE string ASSERT string::is_<name>($value);
+```
+
 ### Prioritized schema-layer gaps that SHOULD be closed (ranked by value)
 
-1. **Record references — `REFERENCE [ON DELETE …]`** (❌, high value).
-   2.x+ referential integrity. The DB accepts it; surreal-zod has no builder.
-   SurQL needed:
-   ```surql
-   DEFINE FIELD author ON comment TYPE record<person> REFERENCE ON DELETE CASCADE;
-   DEFINE FIELD friends ON person TYPE option<array<record<person>>> REFERENCE ON DELETE UNSET;
-   ```
-   Suggested API: `sz.recordId("person").reference({ onDelete: "cascade" })`.
-
-2. **Full-text search + analyzers** (❌, high value for search apps).
+1. **Full-text search + analyzers** (❌, high value for search apps).
    `DEFINE ANALYZER` (prerequisite) and `DEFINE INDEX … FULLTEXT ANALYZER … BM25 HIGHLIGHTS`.
    ```surql
    DEFINE ANALYZER ascii TOKENIZERS class FILTERS lowercase, ascii;
    DEFINE INDEX nameIdx ON TABLE user FIELDS name FULLTEXT ANALYZER ascii BM25 HIGHLIGHTS;
    ```
 
-3. **Vector indexes — HNSW / MTREE / DISKANN** (❌, high value for AI/RAG).
+2. **Vector indexes — HNSW / DISKANN** (❌, high value for AI/RAG).
    ```surql
    DEFINE INDEX emb ON document FIELDS embedding HNSW DIMENSION 768 DIST COSINE TYPE F32;
    ```
 
-4. **`TYPE RELATION … ENFORCED`** (❌, medium). Enforce endpoint existence on RELATE.
-   `defineRelation(...).from(A).to(B)` should support an `.enforced()` toggle.
-
-5. **Object-literal unions** (⚠️ lossy, medium). A discriminated/object union collapses to
+3. **Object-literal unions** (⚠️ lossy, medium). A discriminated/object union collapses to
    plain `object`, losing per-branch structure. The DB accepts:
    ```surql
    DEFINE FIELD r ON t TYPE { kind: "a", x: string } | { kind: "b", y: number };
    ```
 
-6. **`array<T, N>` / `set<T, N>` max-size param** (❌, low). No API.
-   `DEFINE FIELD pts ON t TYPE array<float, 3>;`
+4. **Event `ASYNC [RETRY n] [MAXDEPTH n]` + `COMMENT`** (❌, medium). `defineEvent`/`.event()`
+   emit only `WHEN`/`THEN`.
 
-7. **Computed / view tables — `AS SELECT … FROM …`** (❌, low; arguably ORM scope).
+5. **`range` / `regex` bare types** (❌, low). No `sz.range()` / `sz.regex()`.
 
-8. **Other `DEFINE` objects**: `PARAM`, `USER`, `SEQUENCE`, `CONFIG`, `API`, `BUCKET`,
-   `MODEL`, `NAMESPACE`, `DATABASE` (❌). Mostly out of the per-table schema-author scope,
-   but `DEFINE PARAM` and `DEFINE SEQUENCE` are reasonable near-term additions.
+6. **Computed / view tables — `AS SELECT … FROM …`** (❌, low; arguably ORM scope).
 
-> **Closed in batch 1** (`b76269d`): `set<T>`, `COMPUTED`, `CHANGEFEED`, `COUNT` index — see
-> the examples above and the ✅ matrix rows below.
+7. **RECORD access `WITH JWT` / `WITH ISSUER`** (❌, medium). Cannot pin a RECORD access's
+   own JWT signing config.
+
+8. **Other `DEFINE` objects**: `PARAM`, `SEQUENCE` (reasonable near-term), plus `USER`,
+   `CONFIG`, `API`, `BUCKET`, `MODEL`, `MODULE`, `NAMESPACE`, `DATABASE … STRICT` (mostly
+   out of the per-table schema-author scope).
+
+> **Closed in batch 1** (`b76269d`): `set<T>`, `COMPUTED`, `CHANGEFEED`, `COUNT` index.
+> **Closed in batch 2**: record `REFERENCE [ON DELETE …]`, `RELATION … ENFORCED`, sized
+> `array<T,N>` / `set<T,N>`, +10 `string::is_*` validators — see the ✅ matrix rows below.
 
 ### What is solidly covered (✅)
 
@@ -108,15 +126,15 @@ defineTable("t", { /* … */ }).index("t_count", [], { count: true })
 - **Literals / enums / unions / tuples**: literal scalars, `enum`, `nativeEnum`
   (string + numeric), scalar unions, `[a, b]` tuples.
 - **Collections**: nested `object` (path-qualified subfields), arrays of objects (`.*`
-  subfields), `set<T>` (dedup, batch 1), open-keyed `record`/`map` (`.* ` value field),
+  subfields), `set<T>` (dedup, batch 1), sized `array<T,N>`/`set<T,N>` (batch 2), open-keyed `record`/`map` (`.* ` value field),
   deep nesting, intersection merge, `FLEXIBLE`.
 - **Field clauses**: `DEFAULT` (+ `ALWAYS`), `VALUE`, `COMPUTED` (`.$computed(surql\`…\`)` —
-  batch 1), `ASSERT` (custom surql + derived from `$min/$max/$length/$regex/$gt/$gte/$lt/$lte`,
+  batch 1), `REFERENCE [ON DELETE …]` (`.reference({ onDelete })` — batch 2), `ASSERT` (custom surql + derived from `$min/$max/$length/$regex/$gt/$gte/$lt/$lte`,
   AND-combined), `READONLY`, `COMMENT`, per-op `PERMISSIONS` (incl. `same as`),
   `$internal()` → `PERMISSIONS NONE`.
-- **String formats**: `string::is_email/url/ipv4/ipv6/ulid` baked as ASSERT (validated to
+- **String formats**: `string::is_email/url/ipv4/ipv6/ulid` + batch 2 `alpha/alphanum/ascii/numeric/semver/hexadecimal/latitude/longitude/ip/domain` baked as ASSERT (validated to
   exist on 3.1.3); non-bakeable formats (jwt/cuid/nanoid/base64/…) stay assert-free.
-- **Table clauses**: `TYPE NORMAL/ANY/RELATION` (with `FROM`/`TO`), `SCHEMAFULL`/`SCHEMALESS`,
+- **Table clauses**: `TYPE NORMAL/ANY/RELATION` (with `FROM`/`TO`, `ENFORCED` — batch 2), `SCHEMAFULL`/`SCHEMALESS`,
   `DROP`, `COMMENT`, table-level `PERMISSIONS`, `CHANGEFEED` (batch 1), `OVERWRITE` / `IF NOT EXISTS`.
 - **Indexes**: single-field `.index()`/`.unique()`, composite `.index(name, fields, {unique})`,
   `COUNT` (`.index(name, [], { count: true })` — batch 1).
@@ -162,13 +180,13 @@ defineTable("t", { /* … */ }).index("t_count", [], { count: true })
 | optional | `option<T>` | `.optional()` | ✅ | DB shows `none \| T` |
 | nullable | `T \| null` | `.nullable()` | ✅ | |
 | nullish | `option<T \| null>` | `.nullish()` | ✅ | folds correctly |
-| string formats (bakeable) | `string ASSERT string::is_*($value)` | `sz.email()/url()/ipv4()/ipv6()/ulid()` | ✅ | validators confirmed on 3.1.3 |
+| string formats (bakeable) | `string ASSERT string::is_*($value)` | `sz.email()/url()/ipv4()/ipv6()/ulid()` + batch 2: `alpha/alphanum/ascii/numeric/semver/hexadecimal/latitude/longitude/ip/domain` | ✅ | validators confirmed on 3.1.3 |
 | string formats (other) | `string` | `sz.jwt()/cuid()/nanoid()/base64()/…` | ✅ | no fabricated regex |
 | set (dedup) | `set<T>` | `sz.set(x)` | ✅ | batch 1 — emits `set<T>`, round-trips (was lossy → `array`) |
 | **object-literal union** | `{a:..}\|{b:..}` | `sz.discriminatedUnion(...)` → `object` | ⚠️ | per-branch structure lost |
 | **range** | `range` | — | ❌ | no `sz.range()` (bare `range` is a valid field type) |
 | **regex** | `regex` | — | ❌ | no `sz.regexType()` |
-| **array/set max-size** | `array<T,N>` / `set<T,N>` | — | ❌ | no size param |
+| array/set max-size | `array<T,N>` / `set<T,N>` | `sz.array(x,{max:N})` / `sz.set(x,{max:N})` | ✅ batch 2 | N = MAX size |
 
 ### DEFINE statements
 
@@ -198,7 +216,7 @@ defineTable("t", { /* … */ }).index("t_count", [], { count: true })
 | TYPE ANY | `TYPE ANY` | `.typeAny()` | ✅ |
 | TYPE RELATION (FROM/TO) | `TYPE RELATION FROM a TO b` | `defineRelation(...).from(A).to(B)` | ✅ |
 | TYPE RELATION (open) | `TYPE RELATION` | `defineRelation(...)` | ✅ |
-| **RELATION … ENFORCED** | `TYPE RELATION … ENFORCED` | — | ❌ |
+| RELATION … ENFORCED | `TYPE RELATION … ENFORCED` | `defineRelation(...).enforced()` | ✅ batch 2 |
 | SCHEMAFULL/SCHEMALESS | both | `.schemafull()` / `.schemaless()` | ✅ |
 | DROP | `DROP` | `.drop()` | ✅ |
 | COMMENT | `COMMENT "…"` | `.comment(...)` | ✅ |
@@ -222,7 +240,7 @@ defineTable("t", { /* … */ }).index("t_count", [], { count: true })
 | PERMISSIONS | `PERMISSIONS FOR select/create/update …` | `.$permissions(...)` (+ `same as`) | ✅ |
 | internal (hidden) | `PERMISSIONS NONE` | `.$internal()` | ✅ |
 | COMPUTED | `COMPUTED <expr>` | `.$computed(surql`…`)` | ✅ batch 1 |
-| **REFERENCE / ON DELETE** | `REFERENCE [ON DELETE CASCADE\|REJECT\|IGNORE\|UNSET\|THEN …]` | — | ❌ |
+| REFERENCE / ON DELETE | `REFERENCE [ON DELETE CASCADE\|REJECT\|IGNORE\|UNSET\|THEN …]` | `.reference({ onDelete })` | ✅ batch 2 |
 
 ### Indexes
 
@@ -270,7 +288,8 @@ used internally by the CLI/migration layer, but are not part of the authoring su
   `INFO … STRUCTURE`. Equivalent; just a canonicalization the migration diff already handles.
 - **`set<T>` is real and distinct** on 3.1.3 (not normalized to `array`). Batch 1 fixed
   `sz.set()` to emit `set<T>` and pull to reverse it back to `sz.set(...)`.
-- **`string::is_*` validators** for email/url/ipv4/ipv6/ulid (and uuid/datetime) all exist on
+- **`string::is_*` validators** for email/url/ipv4/ipv6/ulid (and batch 2:
+  alpha/alphanum/ascii/numeric/semver/hexadecimal/latitude/longitude/ip/domain) all exist on
   3.1.3 — the baked asserts are correct. (3.x uses the underscore form, e.g. `string::is_email`.)
 - **`range<int>` is invalid DDL** — only bare `range` is a field type. `references` /
   `references<table>` are also NOT field types on 3.1.3 (back-references are the `<~` /

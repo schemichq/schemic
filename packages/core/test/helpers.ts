@@ -25,7 +25,10 @@ export async function tryConnect(): Promise<Surreal | null> {
         });
       })(),
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error("connect timeout")), CONNECT_TIMEOUT);
+        timer = setTimeout(
+          () => reject(new Error("connect timeout")),
+          CONNECT_TIMEOUT,
+        );
       }),
     ]);
     return db;

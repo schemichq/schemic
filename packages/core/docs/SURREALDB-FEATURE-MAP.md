@@ -41,15 +41,17 @@ defineTable("t", {…}).changefeed("3d", { includeOriginal: true }) //→ … CH
 defineTable("t", {…}).index("rows", [], { count: true })          //→ DEFINE INDEX rows ON TABLE t COUNT
 ```
 
-The matrix rows and the 🆕-gaps section below are annotated `✅ batch 1` where closed.
+**Batch 2** then closed: record `REFERENCE [ON DELETE …]`, `RELATION … ENFORCED`, sized
+`array<T,N>`/`set<T,N>`, and +10 `string::is_*` validators. The matrix rows and gaps section
+below are annotated `✅ batch 1` / `✅ batch 2` where closed.
 
 ## Summary — counts per status
 
 | Status | Meaning | Count (schema-relevant features) |
 |---|---|---|
-| ✅ | Supported by surreal-zod today | ~74 (incl. batch 1: `set<T>`, `COMPUTED`, `CHANGEFEED`, `COUNT`) |
+| ✅ | Supported by surreal-zod today | ~80 (batch 1: `set<T>`/`COMPUTED`/`CHANGEFEED`/`COUNT`; batch 2: `REFERENCE`/`RELATION ENFORCED`/sized array-set/+10 validators) |
 | ⚠️ | Partial / lossy | 2 (object-literal union→object, variadic tuple→array) |
-| ❌ | **Schema-layer gap** (DDL the DB accepts, no `sz.*` builder) | **20** (was 24; batch 1 closed 4) |
+| ❌ | **Schema-layer gap** (DDL the DB accepts, no `sz.*` builder) | **~16** (was 24; batch 1 + batch 2 each closed 4) |
 | 🔮 | Future ORM/query-layer (DML, ~570 functions, operators, params, graph) | ~620 (cataloged, not DDL) |
 | 🚫 | Out-of-scope (clients, protocols, deployment, cloud, CLI-admin) | ~470 doc pages |
 
@@ -57,10 +59,10 @@ The matrix rows and the 🆕-gaps section below are annotated `✅ batch 1` wher
 
 | Category | Features cataloged | Schema-relevant status spread |
 |---|---|---|
-| Data types | 28 types + subtypes | mostly ✅ (set<T> ✅ batch 1); 4 ❌ (range, regex, sized array/set, literal-object-union) |
+| Data types | 28 types + subtypes | mostly ✅ (set<T> batch 1, sized array/set batch 2); 3 ❌ (range, regex, literal-object-union) |
 | `DEFINE` statements | 21 kinds | 6 ✅, 1 ⚠️, **14 ❌** |
-| Table clauses | 11 | 9 ✅ (CHANGEFEED batch 1), **2 ❌** |
-| Field clauses | 11 | 9 ✅ (COMPUTED batch 1), **2 ❌** |
+| Table clauses | 11 | 10 ✅ (CHANGEFEED batch 1, ENFORCED batch 2), **1 ❌** (AS SELECT) |
+| Field clauses | 11 | 10 ✅ (COMPUTED batch 1, REFERENCE batch 2), **1 ❌** |
 | Index kinds | 9 | 4 ✅ (COUNT batch 1), **5 ❌** |
 | Analyzer tokenizers/filters | 4 + 7 | **0 ✅** (whole `DEFINE ANALYZER` is ❌) |
 | Function namespaces | 26 (~570 sigs) | 🔮 (query-layer; 5 string `is_*` baked as ASSERT) |
@@ -130,8 +132,9 @@ are:
     round-trips with full per-branch structure. surreal-zod collapses **both** `discriminatedUnion`
     **and** plain `union` of objects to bare `object`.
 
-11. **`set<T, N>` sized set** 🆕 (❌, low) — `PARITY.md` flagged `array<T,N>`; the sized form also
-    applies to sets. *Live-verified* `set<int, 5>` round-trips.
+11. **`set<T, N>` sized set** ✅ **batch 2** (was ❌) — sized `array<T,N>` / `set<T,N>` via
+    `sz.array(x, { max })` / `sz.set(x, { max })` (N = MAX size; set stays set).
+    *Live-verified* `set<int, 5>` round-trips.
 
 > **#1 (`COMPUTED`)** was the standout — a high-value, schema-author-facing field clause the prior
 > audit treated as out-of-scope query syntax. **Closed in batch 1** (along with `COUNT` index, plus
@@ -186,20 +189,20 @@ Docs root: https://surrealdb.com/docs/reference/query-language/language-primitiv
 | optional / nullable / nullish | `option<T>` / `T\|null` / `option<T\|null>` | `.optional()/.nullable()/.nullish()` | ✅ | …/data-types/none-and-null |
 | none / null | `none` / `null` | `sz.null()` (none via optionality) | ✅ | …/data-types/none-and-null |
 | set (dedup) | `set<T>` | `sz.set(x)` | ✅ batch 1 | emits `set<T>`, round-trips (was lossy → `array`). …/data-types/sets |
-| **sized array / set** | `array<T,N>` / `set<T,N>` | — | ❌ | **Live-verified** `array<float,3>`, `set<int,5>` round-trip. …/data-types/arrays |
+| sized array / set | `array<T,N>` / `set<T,N>` | `sz.array(x,{max:N})` / `sz.set(x,{max:N})` | ✅ batch 2 | N = MAX size; set stays set. **Live-verified** `array<float,3>`, `set<int,5>`. …/data-types/arrays |
 | **object-literal union** | `{a:..} \| {b:..}` (any shapes) | `sz.union`/`discriminatedUnion` of objects → `object` | ⚠️ | **lossy.** Live: full per-branch structure round-trips. …/data-types/literals |
 | **range** | `range` | — | ❌ | **Live-verified** bare `range` valid field type. …/data-types/ranges |
 | **regex** | `regex` | — | ❌ | **Live-verified** bare `regex` valid field type. …/data-types/regex |
-| string formats (bakeable) | `string ASSERT string::is_*($value)` | `sz.email()/url()/ipv4()/ipv6()/ulid()` | ✅ | (see string fns) |
+| string formats (bakeable) | `string ASSERT string::is_*($value)` | `sz.email()/url()/ipv4()/ipv6()/ulid()` + batch 2 `alpha/alphanum/ascii/numeric/semver/hexadecimal/latitude/longitude/ip/domain` | ✅ | (see string fns) |
 | string formats (other) | `string` | `sz.jwt()/cuid()/nanoid()/base64()/…` | ✅ | (no fabricated regex) |
 | futures (runtime) | `<future>{ … }` | — | 🔮 | …/data-types/futures (also valid INSIDE schema DEFAULT/VALUE) |
 | closures (runtime) | `\|$x\| { … }` | — | 🔮 | …/data-types/closures |
 | values / casting | `<int>x`, `<set<T>>x`, `<regex>x`, … | (codecs handle wire) | 🔮 | …/language-primitives/casting |
 
-> **Bakeable string validators that EXIST on 3.1.3 but aren't yet baked** (potential ✅ wins for
-> `sz.*` format methods): `string::is_alpha`, `is_alphanum`, `is_ascii`, `is_numeric`, `is_uuid`,
-> `is_datetime`, `is_semver`, `is_hexadecimal`, `is_latitude`, `is_longitude`, `is_ip`,
-> `is_domain`, `is_record`. (surreal-zod bakes only email/url/ipv4/ipv6/ulid today.)
+> **String validators — batch 2 baked**: `string::is_alpha/alphanum/ascii/numeric/semver/
+> hexadecimal/latitude/longitude/ip/domain` (`sz.alpha()` … `sz.domain()`), on top of the
+> original email/url/ipv4/ipv6/ulid. Intentionally NOT baked: `is_uuid` (use native `sz.uuid()`),
+> `is_datetime` (native `sz.datetime()`), `is_record` (niche).
 
 ---
 
@@ -208,8 +211,8 @@ Docs root: https://surrealdb.com/docs/reference/query-language/statements/define
 
 | Statement | surreal-zod | Status | Notes (live-verified syntax on 3.1.3) |
 |---|---|---|---|
-| DEFINE TABLE | `defineTable`/`defineRelation` | ✅ | head clauses below; `CHANGEFEED` ✅ batch 1; **`AS SELECT`/`ENFORCED` ❌** |
-| DEFINE FIELD | `sz.*` + `$`-clauses | ✅ | `COMPUTED` ✅ batch 1; **`REFERENCE` ❌** (below) |
+| DEFINE TABLE | `defineTable`/`defineRelation` | ✅ | head clauses below; `CHANGEFEED` ✅ batch 1; `ENFORCED` ✅ batch 2; **`AS SELECT` ❌** |
+| DEFINE FIELD | `sz.*` + `$`-clauses | ✅ | `COMPUTED` ✅ batch 1; `REFERENCE` ✅ batch 2 |
 | DEFINE INDEX | `.index()/.unique()/.index(name,fields,{unique\|count})` | ✅ (plain/unique/composite/count) | `COUNT` ✅ batch 1; **FULLTEXT/HNSW/DISKANN/CONCURRENTLY/DEFER ❌** |
 | DEFINE EVENT | `.event()` / `defineEvent()` | ✅ (WHEN/THEN) | **`ASYNC RETRY/MAXDEPTH` 🆕❌, `COMMENT` ❌** |
 | DEFINE FUNCTION | `defineFunction()` | ✅ | args/returns/body/permissions/comment all supported |
@@ -237,7 +240,7 @@ Full syntax (verbatim): `DEFINE TABLE [OVERWRITE|IF NOT EXISTS] @name [DROP] [SC
 |---|---|---|
 | TYPE NORMAL / ANY | default / `.typeAny()` | ✅ |
 | TYPE RELATION (FROM/TO, open) | `defineRelation().from(A).to(B)` | ✅ |
-| RELATION … ENFORCED | — | ❌ (live ✅ DDL) |
+| RELATION … ENFORCED | `defineRelation(...).enforced()` | ✅ batch 2 |
 | SCHEMAFULL / SCHEMALESS | `.schemafull()/.schemaless()` | ✅ |
 | DROP | `.drop()` | ✅ |
 | COMMENT | `.comment()` | ✅ |
@@ -261,7 +264,7 @@ Full syntax (verbatim): `DEFINE FIELD … ON [TABLE] @t [TYPE @type | object [FL
 | READONLY | `.$readonly()` | ✅ |
 | COMMENT | `.$comment()` | ✅ |
 | PERMISSIONS (select/create/update) + `$internal()` | `.$permissions()` | ✅ |
-| **REFERENCE [ON DELETE REJECT\|CASCADE\|IGNORE\|UNSET\|THEN]** | — | ❌ (live ✅) |
+| REFERENCE [ON DELETE REJECT\|CASCADE\|IGNORE\|UNSET\|THEN] | `.reference({ onDelete })` | ✅ batch 2 |
 | COMPUTED @expr 🆕 | `.$computed(surql`…`)` | ✅ batch 1 (derived/read-only column) |
 
 ### Index kinds — https://surrealdb.com/docs/reference/query-language/statements/define/indexes
@@ -426,16 +429,18 @@ is the only doc-vs-server discrepancy found (docs ahead of 3.1.3).
 
 ## Net recommendation (ranked schema-layer fixes)
 
-1. `set<T>` → emit `set<T>` not `array<T>` (one-line fix in `ddl.ts inferField` `case "set"`).
-2. **`COMPUTED` field clause** 🆕 — `.$computed(surql)` (high value, brand-new clause).
-3. Record `REFERENCE [ON DELETE …]` — `.reference({ onDelete })`.
-4. FULLTEXT + `DEFINE ANALYZER` (search apps).
-5. Vector indexes HNSW / DISKANN (AI/RAG).
-6. Object-literal unions — emit `{…} | {…}` for unions/discriminatedUnions of objects.
-7. `array<T,N>` / `set<T,N>` sized.
-8. `CHANGEFEED`, `RELATION ENFORCED`, `COUNT` index 🆕, `DEFINE EVENT … ASYNC` 🆕.
-9. `range` / `regex` bare types (`sz.range()` / `sz.regexType()`).
-10. `DEFINE PARAM`, `DEFINE SEQUENCE` (reasonable near-term additions).
-11. Bake the additional `string::is_*` validators that exist on 3.1.3 (alpha/alphanum/ascii/numeric/
-    uuid/datetime/semver/hex/latitude/longitude/ip/domain/record).
+**Done — batch 1:** `set<T>` · `COMPUTED` field clause · `CHANGEFEED` · `COUNT` index.
+**Done — batch 2:** record `REFERENCE [ON DELETE …]` · `RELATION … ENFORCED` · sized
+`array<T,N>`/`set<T,N>` · +10 `string::is_*` validators (alpha/alphanum/ascii/numeric/semver/
+hexadecimal/latitude/longitude/ip/domain).
+
+**Remaining (ranked):**
+1. FULLTEXT + `DEFINE ANALYZER` (search apps).
+2. Vector indexes HNSW / DISKANN (AI/RAG).
+3. Object-literal unions — emit `{…} | {…}` for unions/discriminatedUnions of objects.
+4. `DEFINE EVENT … ASYNC [RETRY/MAXDEPTH]` + `COMMENT`.
+5. `range` / `regex` bare types (`sz.range()` / `sz.regex()`).
+6. RECORD access `WITH JWT` / `WITH ISSUER`.
+7. `DEFINE PARAM`, `DEFINE SEQUENCE` (reasonable near-term).
+8. Admin / view tables (`AS SELECT`) / `USER`/`CONFIG`/`API`/`BUCKET`/`MODEL`/`MODULE`/`DATABASE STRICT`.
 </content>

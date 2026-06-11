@@ -13,7 +13,13 @@
  * Compile with:  bunx tsc --noEmit -p tsconfig.json   (from this directory)
  */
 
-import { type App, type Shape, sz, defineTable, type TableDef } from "../../src/index.ts";
+import {
+  type App,
+  type Shape,
+  sz,
+  defineTable,
+  type TableDef,
+} from "../../src/index.ts";
 import type { RecordId } from "surrealdb";
 
 // ---------------------------------------------------------------------------
@@ -102,7 +108,9 @@ class Select<TD extends TableDef<string, Shape>, R = App<TD>> {
   }
 
   /** Project rows. RE-TYPES the result to the unwrapped projection. */
-  return<P extends Projection>(_cb: (row: Row<TD>) => P): Select<TD, Unwrap<P>> {
+  return<P extends Projection>(
+    _cb: (row: Row<TD>) => P,
+  ): Select<TD, Unwrap<P>> {
     throw new Error("poc: runtime not implemented");
   }
 
@@ -117,7 +125,9 @@ function select<TD extends TableDef<string, Shape>>(_table: TD): Select<TD> {
 }
 
 /** Extract the resolved result array type of a built query. */
-type ResultOf<Q> = Q extends Select<TableDef<string, Shape>, infer R> ? R[] : never;
+type ResultOf<Q> = Q extends Select<TableDef<string, Shape>, infer R>
+  ? R[]
+  : never;
 
 // ===========================================================================
 // TYPE CHECKS  (each `_check*` must be `true` for the file to compile)

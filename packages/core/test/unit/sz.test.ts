@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { objectFieldsRegistry, SField, surrealTypeRegistry, sz } from "../../src/pure";
+import { emitStatements, fieldType } from "../../src/ddl";
+import {
+  defineTable,
+  objectFieldsRegistry,
+  SField,
+  surrealTypeRegistry,
+  sz,
+} from "../../src/pure";
 
 const defType = (f: SField) => (f.schema._zod.def as { type: string }).type;
 const fmt = (f: SField) => (f.schema._zod.def as { format?: string }).format;
@@ -34,8 +41,100 @@ describe("native types register their SurrealQL type", () => {
     expect(surrealTypeRegistry.get(sz.decimal().schema)).toBe("decimal");
     expect(surrealTypeRegistry.get(sz.file().schema)).toBe("file");
     expect(surrealTypeRegistry.get(sz.geometry().schema)).toBe("geometry");
-    expect(surrealTypeRegistry.get(sz.geometry("point").schema)).toBe("geometry<point>");
-    expect(surrealTypeRegistry.get(sz.recordId("user").schema)).toBe("record<user>");
+    expect(surrealTypeRegistry.get(sz.geometry("point").schema)).toBe(
+      "geometry<point>",
+    );
+    expect(surrealTypeRegistry.get(sz.recordId("user").schema)).toBe(
+      "record<user>",
+    );
+  });
+});
+
+describe("coerce builders: same SurrealQL type, looser input", () => {
+  test("coerce.* maps to the same field type as the non-coerced builder", () => {
+    expect(fieldType(sz.coerce.string())).toBe(fieldType(sz.string()));
+    expect(fieldType(sz.coerce.number())).toBe(fieldType(sz.number()));
+    expect(fieldType(sz.coerce.boolean())).toBe(fieldType(sz.boolean()));
+    expect(fieldType(sz.coerce.bigint())).toBe(fieldType(sz.bigint()));
+    expect(fieldType(sz.coerce.date())).toBe("datetime");
+    expect(surrealTypeRegistry.get(sz.coerce.date().schema)).toBe("datetime");
+  });
+
+  test("coercion runs on the input side (string -> number, 1 -> boolean)", () => {
+    expect(sz.coerce.number().schema.parse("42")).toBe(42);
+    expect(sz.coerce.boolean().schema.parse(1)).toBe(true);
+  });
+});
+
+describe("non-Surreal types: present for z.* parity, rejected as table fields", () => {
+  test("the builders exist and are SFields", () => {
+    const builders = [
+      sz.symbol(),
+      sz.undefined(),
+      sz.void(),
+      sz.never(),
+      sz.nan(),
+      sz.custom(),
+      sz.instanceof(Date),
+      sz.promise(sz.string()),
+    ];
+    for (const f of builders) expect(f).toBeInstanceOf(SField);
+  });
+
+  test("using one as a table field throws a clear error", () => {
+    expect(() => fieldType(sz.symbol())).toThrow(/no SurrealQL type/);
+    expect(() => fieldType(sz.never())).toThrow(/no SurrealQL type/);
+    expect(() => fieldType(sz.custom())).toThrow(/no SurrealQL type/);
+    expect(() => fieldType(sz.instanceof(Date))).toThrow(/no SurrealQL type/);
+    expect(() =>
+      emitStatements(
+        // @ts-expect-error - sz.symbol() is also rejected at the type level
+        defineTable("t", { x: sz.symbol() }),
+      ),
+    ).toThrow(/no SurrealQL type/);
+  });
+});
+
+describe("nullish == optional + nullable", () => {
+  test("yields option<T | null>", () => {
+    expect(fieldType(sz.nullish(sz.string()))).toBe(
+      fieldType(sz.string().optional().nullable()),
+    );
+  });
+});
+
+describe("$surreal — declare a DDL type + optional codec", () => {
+  class Money {
+    constructor(readonly cents: number) {}
+    toString() {
+      return String(this.cents);
+    }
+  }
+
+  test("codec form: DDL derived from the wire field, round-trips, accepted in a table", () => {
+    const price = sz.instanceof(Money).$surreal(sz.string(), {
+      encode: (m) => m.toString(),
+      decode: (s) => new Money(Number(s)),
+    });
+    expect(fieldType(price)).toBe("string");
+    expect(price.encode(new Money(199))).toBe("199");
+    expect(price.decode("199")).toBeInstanceOf(Money);
+    // accepted as a table field now that it knows how to serialize:
+    expect(() =>
+      emitStatements(defineTable("st", { id: z.string(), price })),
+    ).not.toThrow();
+  });
+
+  test("the wire field can be any sz.* type (its DDL is derived)", () => {
+    const tags = sz.custom<Set<string>>().$surreal(sz.array(sz.string()), {
+      encode: (set) => [...set],
+      decode: (arr) => new Set(arr),
+    });
+    expect(fieldType(tags)).toBe("array<string>");
+  });
+
+  test("identity form: app value stored as the wire type (no conversion)", () => {
+    expect(fieldType(sz.custom<string>().$surreal(sz.string()))).toBe("string");
   });
 });
 
@@ -53,9 +152,14 @@ describe("composite builders", () => {
     expect(defType(sz.map(z.string(), sz.string()))).toBe("map");
     expect(defType(sz.union([sz.string(), sz.int()]))).toBe("union");
     expect(defType(sz.tuple([sz.string()]))).toBe("tuple");
-    expect(defType(sz.intersection(sz.object({ a: sz.string() }), sz.object({ b: sz.int() })))).toBe(
-      "intersection",
-    );
+    expect(
+      defType(
+        sz.intersection(
+          sz.object({ a: sz.string() }),
+          sz.object({ b: sz.int() }),
+        ),
+      ),
+    ).toBe("intersection");
     expect(defType(sz.enum(["a", "b"]))).toBe("enum");
     expect(defType(sz.literal("x"))).toBe("literal");
     expect(defType(sz.nativeEnum({ A: "a" }))).toBe("enum");
@@ -136,6 +240,8 @@ describe("field method wrappers", () => {
     expect(defType(sz.string().optional().unwrap())).toBe("string");
     expect(defType(sz.int().default(1).unwrap())).toBe("number");
     expect(defType(sz.string().array().unwrap())).toBe("string");
-    expect(sz.string().$comment("c").optional().unwrap().surreal.comment).toBe("c");
+    expect(sz.string().$comment("c").optional().unwrap().surreal.comment).toBe(
+      "c",
+    );
   });
 });

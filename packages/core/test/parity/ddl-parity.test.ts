@@ -102,6 +102,27 @@ describe("types — string formats (string::is_* baked when the DB has the valid
     );
   });
 
+  // FIXED (batch 2): additional 3.1.3 string::is_* validators (no Zod format builder).
+  test("batch-2 validators bake their string::is_* ASSERT", () => {
+    const cases: [SField, string][] = [
+      [sz.alpha(), "is_alpha"],
+      [sz.alphanum(), "is_alphanum"],
+      [sz.ascii(), "is_ascii"],
+      [sz.numeric(), "is_numeric"],
+      [sz.semver(), "is_semver"],
+      [sz.hexadecimal(), "is_hexadecimal"],
+      [sz.latitude(), "is_latitude"],
+      [sz.longitude(), "is_longitude"],
+      [sz.ip(), "is_ip"],
+      [sz.domain(), "is_domain"],
+    ];
+    for (const [field, fn] of cases) {
+      expect(fieldDdl(field)).toBe(
+        `DEFINE FIELD f ON TABLE t TYPE string ASSERT string::${fn}($value);`,
+      );
+    }
+  });
+
   test("non-bakeable formats stay a plain string (no fabricated regex)", () => {
     // The DB has no string::is_<fmt> for these — surreal-zod leaves them assert-free.
     expect(fieldDdl(sz.jwt())).toBe("DEFINE FIELD f ON TABLE t TYPE string;");
@@ -249,13 +270,25 @@ describe("types — GAPS (confirmed against the DB)", () => {
     );
     expect(ddl).toBe("DEFINE FIELD f ON TABLE t TYPE object;");
   });
-  test.todo('GAP: object-literal union should emit `{ kind: "a", x: string } | { kind: "b", y: number }`', () => {});
+  test.todo(
+    'GAP: object-literal union should emit `{ kind: "a", x: string } | { kind: "b", y: number }`',
+    () => {},
+  );
 
-  // array<T, N> / set<T, N> max-size param: no surreal-zod API.
-  test.todo("GAP: array/set max-size param (DB: TYPE array<string, 3> / set<int, 5>)", () => {});
+  // FIXED (batch 2): array<T, N> / set<T, N> max-size via `{ max }` (N is the MAX size).
+  test("sized array<T, N> / set<T, N> via { max }", () => {
+    expect(typeOf(sz.array(sz.string(), { max: 3 }))).toBe("array<string, 3>");
+    expect(typeOf(sz.set(sz.int(), { max: 5 }))).toBe("set<int, 5>");
+    // set stays `set` (never `array`), sized or not:
+    expect(typeOf(sz.set(sz.string()))).toBe("set<string>");
+    expect(typeOf(sz.set(sz.string(), { max: 2 }))).toBe("set<string, 2>");
+  });
 
   // range / regex / point(bare) / function — valid DB field types with no sz.* type.
-  test.todo("GAP: no sz.range() (DB: TYPE range), sz.regex() (TYPE regex)", () => {});
+  test.todo(
+    "GAP: no sz.range() (DB: TYPE range), sz.regex() (TYPE regex)",
+    () => {},
+  );
 });
 
 // ===========================================================================
@@ -321,8 +354,21 @@ describe("table clauses", () => {
       ).split("\n")[0],
     ).toContain("CHANGEFEED 1d INCLUDE ORIGINAL");
   });
-  test.todo("GAP: TYPE RELATION ... ENFORCED (referential integrity on relate endpoints)", () => {});
-  test.todo("GAP: computed/view tables (DB: DEFINE TABLE ... AS SELECT ... FROM ...)", () => {});
+  // FIXED (batch 2): TYPE RELATION ... ENFORCED via .enforced().
+  test("TYPE RELATION ... ENFORCED via .enforced()", () => {
+    const A = defineTable("usr", { id: z.string() });
+    const rel = defineRelation("friend", {}).from(A).to(A).enforced();
+    expect(emitTable(rel).split("\n")[0]).toBe(
+      "DEFINE TABLE friend TYPE RELATION FROM usr TO usr ENFORCED SCHEMAFULL;",
+    );
+    expect(emitTable(defineRelation("rel", {}).enforced()).split("\n")[0]).toBe(
+      "DEFINE TABLE rel TYPE RELATION ENFORCED SCHEMAFULL;",
+    );
+  });
+  test.todo(
+    "GAP: computed/view tables (DB: DEFINE TABLE ... AS SELECT ... FROM ...)",
+    () => {},
+  );
 });
 
 describe("relations", () => {
@@ -420,10 +466,30 @@ describe("field clauses", () => {
     );
   });
 
-  // GAP: record references — REFERENCE [ON DELETE ...]. The DB accepts
-  //   DEFINE FIELD author ON comment TYPE record<person> REFERENCE ON DELETE CASCADE;
-  // surreal-zod has no `.reference()` / ON DELETE builder.
-  test.todo("GAP: REFERENCE / ON DELETE (CASCADE|REJECT|IGNORE|UNSET|THEN) on record fields", () => {});
+  // FIXED (batch 2): record references — REFERENCE [ON DELETE ...] via .reference().
+  test("REFERENCE / ON DELETE on record fields", () => {
+    expect(fieldDdl(sz.recordId("person").reference())).toBe(
+      "DEFINE FIELD f ON TABLE t TYPE record<person> REFERENCE;",
+    );
+    expect(
+      fieldDdl(sz.recordId("person").reference({ onDelete: "cascade" })),
+    ).toBe(
+      "DEFINE FIELD f ON TABLE t TYPE record<person> REFERENCE ON DELETE CASCADE;",
+    );
+    // works on array<record<>> too, and a surql expr -> ON DELETE THEN:
+    expect(
+      fieldDdl(sz.array(sz.recordId("c")).reference({ onDelete: "unset" })),
+    ).toBe(
+      "DEFINE FIELD f ON TABLE t TYPE array<record<c>> REFERENCE ON DELETE UNSET;",
+    );
+    expect(
+      fieldDdl(
+        sz.recordId("person").reference({ onDelete: surql`DELETE $this` }),
+      ),
+    ).toBe(
+      "DEFINE FIELD f ON TABLE t TYPE record<person> REFERENCE ON DELETE THEN DELETE $this;",
+    );
+  });
 });
 
 // ===========================================================================
@@ -457,8 +523,14 @@ describe("indexes", () => {
     expect(ddl).toContain("DEFINE INDEX ab_idx ON TABLE t FIELDS a, b UNIQUE;");
   });
 
-  test.todo("GAP: FULLTEXT search index (DB: DEFINE INDEX ... FULLTEXT ANALYZER x BM25 HIGHLIGHTS)", () => {});
-  test.todo("GAP: HNSW / MTREE / DISKANN vector indexes (DB: ... HNSW DIMENSION n ...)", () => {});
+  test.todo(
+    "GAP: FULLTEXT search index (DB: DEFINE INDEX ... FULLTEXT ANALYZER x BM25 HIGHLIGHTS)",
+    () => {},
+  );
+  test.todo(
+    "GAP: HNSW / MTREE / DISKANN vector indexes (DB: ... HNSW DIMENSION n ...)",
+    () => {},
+  );
   test.todo("GAP: CONCURRENTLY / DEFER / COUNT index modifiers", () => {});
 });
 
@@ -498,5 +570,8 @@ describe("DEFINE statements", () => {
 
   test.todo("GAP: DEFINE ANALYZER (needed to back a FULLTEXT index)", () => {});
   test.todo("GAP: DEFINE PARAM ($global = value)", () => {});
-  test.todo("GAP: DEFINE USER / SEQUENCE / CONFIG / API / BUCKET / MODEL", () => {});
+  test.todo(
+    "GAP: DEFINE USER / SEQUENCE / CONFIG / API / BUCKET / MODEL",
+    () => {},
+  );
 });

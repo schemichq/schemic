@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { BoundExcluded, BoundIncluded, RecordId, RecordIdRange } from "surrealdb";
+import {
+  BoundExcluded,
+  BoundIncluded,
+  RecordId,
+  RecordIdRange,
+} from "surrealdb";
 import { sz, defineTable } from "../../src/pure";
 
 describe("recordId schema validation", () => {
@@ -25,16 +30,16 @@ describe("recordId schema validation", () => {
   });
 });
 
-describe(".make", () => {
-  test("single-table: make(id)", () => {
-    const r = sz.recordId("user").make("alice");
+describe(".for", () => {
+  test("single-table: for(id)", () => {
+    const r = sz.recordId("user").for("alice");
     expect(r).toBeInstanceOf(RecordId);
     expect(r.table.name).toBe("user");
     expect(r.id).toBe("alice");
   });
 
-  test("multi-table: make(table, id)", () => {
-    const r = sz.recordId(["user", "admin"]).make("admin", "root");
+  test("multi-table: for(table, id)", () => {
+    const r = sz.recordId(["user", "admin"]).for("admin", "root");
     expect(r.table.name).toBe("admin");
     expect(r.id).toBe("root");
   });
@@ -69,7 +74,7 @@ describe("TableDef.record()", () => {
     const User = defineTable("user", { id: z.string(), name: sz.string() });
     const link = User.record();
     expect(link.tables).toEqual(["user"]);
-    expect(link.make("x").table.name).toBe("user");
+    expect(link.for("x").table.name).toBe("user");
     // id value type carried over (string id rejects numeric)
     expect(link.schema.safeParse(new RecordId("user", "x")).success).toBe(true);
     expect(link.schema.safeParse(new RecordId("user", 5)).success).toBe(false);
