@@ -1,7 +1,7 @@
 import { watch as fsWatch } from "node:fs";
 import { relative } from "node:path";
 import { createInterface } from "node:readline/promises";
-import { Command, Option } from "commander";
+import { Command, Help, Option } from "commander";
 import type { Surreal } from "surrealdb";
 import {
   type ConnectionOverrides,
@@ -23,14 +23,16 @@ import { type FilterOpts, kindFlags, parseFilter } from "./filter";
 import { init } from "./init";
 import { applyStatements, diffAgainstDb, syncPlan } from "./introspect";
 import {
+  baseline,
+  commitMigration,
   migrate,
   newMigration,
   planMigration,
+  prepareMigration,
   rollback,
   seed,
   status,
   unlock,
-  writeMigration,
 } from "./migrate";
 import { pipeThroughPager, resolvePager } from "./pager";
 import { pull } from "./pull";
@@ -127,10 +129,12 @@ function diffSummary(
 /** Print a diff (inline word-diff) plus its summary. */
 function reportDiff(
   diff: Diff,
-  opts: { down?: boolean; live?: boolean; full?: boolean },
+  opts: { down?: boolean; live?: boolean; full?: boolean; inline?: boolean },
   pending?: number,
 ): void {
-  console.log(formatDiff(diff, { down: opts.down, full: opts.full }));
+  console.log(
+    formatDiff(diff, { down: opts.down, full: opts.full, inline: opts.inline }),
+  );
   const summary = diffSummary(diff, opts, pending);
   if (summary) console.log(summary);
 }
@@ -219,12 +223,21 @@ program
     `
 Examples:
   $ sz init                 scaffold database/ (schemas + migrations) + config
-  $ sz generate add_users   create a migration from schema changes
+  $ sz gen add_users        create a migration from schema changes
   $ sz migrate              apply pending migrations
   $ sz sync --watch         keep the database in sync while you edit
   $ sz diff --live          show how the schema differs from the live database
 `,
   );
+
+// Collapse negatable boolean flags to a single `--[no-]flag` line in help (instead of listing the
+// `--no-flag` form separately). Set before any subcommand is added so they inherit it.
+program.configureHelp({
+  optionTerm(option) {
+    const term = Help.prototype.optionTerm.call(this, option);
+    return option.negate ? term.replace("--no-", "--[no-]") : term;
+  },
+});
 
 program
   .command("init")
@@ -236,7 +249,7 @@ program
       console.log(style.dim(`  · ${f} (exists, skipped)`));
     console.log(
       created.length
-        ? `\n${ok("Initialized. Edit database/schemas, then run `sz generate`.")}`
+        ? `\n${ok("Initialized. Edit database/schemas, then run `sz gen`.")}`
         : "\nNothing to do — already initialized.",
     );
   });
@@ -257,10 +270,13 @@ kindFlags(
     "output a unified diff (e.g. to pipe to a diff viewer)",
   )
   .option(
-    "--pager <cmd>",
-    "page output through <cmd> (overrides your git diff viewer)",
+    "--pager [cmd]",
+    "page through your git diff viewer (or <cmd>); off by default",
   )
-  .option("--no-pager", "don't page output through a diff viewer")
+  .option(
+    "--inline",
+    "render changes as an inline word-diff instead of separate -/+ lines",
+  )
   .option("--json", "output the diff as JSON")
   .action(
     (
@@ -272,19 +288,19 @@ kindFlags(
           full?: boolean;
           patch?: boolean;
           pager?: string | boolean;
+          inline?: boolean;
           json?: boolean;
         },
     ) => {
       run(async () => {
         const config = await loadConfig({ config: opts.config });
         const filter = parseFilter(opts);
-        // Seamlessly route through the user's git diff viewer (e.g. delta) when interactive:
-        // a TTY, not watching, paging not disabled, and a pager resolves. `--patch` forces the
-        // unified-diff format (to the pager, or to stdout when piped / `--no-pager`).
-        // `--pager <cmd>` overrides; `--no-pager` (pager === false) disables; otherwise resolve the
-        // git diff viewer. Only paginate when interactive (TTY, not watching).
+        // External pager only when explicitly requested via `--pager` (the default renders inline).
+        // `--pager <cmd>` uses that command; bare `--pager` resolves the user's git diff viewer
+        // (`pager.diff`/`core.pager`/$GIT_PAGER/$PAGER). `--patch` forces the unified-diff format
+        // (to the pager, or to stdout when piped). Paging is incompatible with `--watch`.
         const pager =
-          opts.pager === false || opts.watch || !process.stdout.isTTY
+          opts.watch || opts.pager === undefined || opts.pager === false
             ? undefined
             : typeof opts.pager === "string"
               ? opts.pager
@@ -333,38 +349,48 @@ kindFlags(
     },
   );
 
-kindFlags(
-  configFlag(
-    program
-      .command("generate [name]")
-      .alias("gen")
-      .description("Diff schemas, preview the changes, and write a migration"),
-  ),
-)
-  .option("-y, --yes", "use the given/default name without prompting")
-  .action(
-    (
-      name: string | undefined,
-      opts: CommonOpts & FilterOpts & { yes?: boolean },
-    ) => {
-      run(async () => {
-        const config = await loadConfig({ config: opts.config });
-        const plan = await planMigration(config, parseFilter(opts));
-        if (isEmptyDiff(plan.diff)) {
-          console.log(ok("No schema changes — nothing to generate."));
-          return;
-        }
-        console.log("Changes to migrate:\n");
-        console.log(formatDiff(plan.diff));
-        console.log("");
-        const title = name ?? (opts.yes ? undefined : await promptTitle());
-        const res = writeMigration(config, plan, title);
-        console.log(
-          `${ok(res.file ?? "migration written")}  ${style.dim(`(+${res.up} up / ${res.down} down)`)}`,
-        );
-      });
-    },
-  );
+// `gen` is the primary command; `generate` is a hidden, undocumented alias (a separate hidden
+// command so help shows only `gen`, not `gen|generate`). Both share one action.
+const genAction = (
+  name: string | undefined,
+  opts: CommonOpts & FilterOpts & { yes?: boolean },
+) => {
+  run(async () => {
+    const config = await loadConfig({ config: opts.config });
+    const plan = await planMigration(config, parseFilter(opts));
+    if (isEmptyDiff(plan.diff)) {
+      console.log(ok("No schema changes — nothing to generate."));
+      return;
+    }
+    const kinds = summarizeKinds(plan.diff.up);
+    console.log(
+      `${plural(plan.diff.up.length, "change")} to migrate${kinds ? ` — ${kinds}` : ""}.`,
+    );
+    const title = name ?? (opts.yes ? undefined : await promptTitle());
+    const prepared = prepareMigration(config, plan, title);
+    if (!prepared) {
+      console.log(ok("No schema changes — nothing to generate."));
+      return;
+    }
+    // Show the actual migration script that will be written, then commit it.
+    console.log(`\n${prepared.content}`);
+    const res = commitMigration(config, prepared);
+    console.log(
+      `${ok(res.file ?? "migration written")}  ${style.dim(`(+${res.up} up / ${res.down} down)`)}`,
+    );
+  });
+};
+const addGenCommand = (cmd: Command): void => {
+  kindFlags(configFlag(cmd))
+    .option("-y, --yes", "use the given/default name without prompting")
+    .action(genAction);
+};
+addGenCommand(
+  program
+    .command("gen [name]")
+    .description("Diff schemas, preview the migration script, and write it"),
+);
+addGenCommand(program.command("generate [name]", { hidden: true }));
 
 dbFlags(
   program
@@ -405,7 +431,7 @@ dbFlags(
           return;
         }
         if (!rows.length) {
-          console.log("No migrations yet. Run `sz generate`.");
+          console.log("No migrations yet. Run `sz gen`.");
           return;
         }
         for (const r of rows) {
@@ -651,11 +677,20 @@ kindFlags(
       for (const f of files) console.log(`  ${style.green("+")} ${f}`);
       for (const f of skipped)
         console.log(style.dim(`  · ${f} (exists — use --force)`));
+      // Baseline: sync the snapshot and record the pulled state as an already-applied migration, so
+      // the schema matches the DB and `sz diff` doesn't report the freshly-pulled objects as pending.
+      const base = await baseline(db, config);
       console.log(
         files.length
           ? `\n${ok(`Pulled ${plural(files.length, "schema")} into ${config.schema}.`)}`
           : ok("Nothing to pull."),
       );
+      if (base.created)
+        console.log(
+          style.dim(
+            `  baseline ${base.tag} recorded (snapshot synced, marked applied).`,
+          ),
+        );
     }),
   );
 });

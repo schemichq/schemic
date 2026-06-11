@@ -309,20 +309,24 @@ export function tokenDiff(before: string, after: string): string {
   return out.join(" ");
 }
 
-/** Render one display item: `+`/`-` line for add/remove, inline word-diff for a change. */
-function renderItem(it: DiffItem): string {
+/**
+ * Render one display item: `+`/`-` line for add/remove. A change renders as separate red `-` /
+ * green `+` lines by default, or as a single inline word-diff when `inline` is set (the A/B toggle).
+ */
+function renderItem(it: DiffItem, inline = false): string {
   if (it.op === "add") return style.green(`  + ${it.ddl}`);
   if (it.op === "remove") return style.red(`  - ${it.ddl}`);
-  return `    ${tokenDiff(it.before, it.after)}`;
+  if (inline) return `    ${tokenDiff(it.before, it.after)}`;
+  return `${style.red(`  - ${it.before}`)}\n${style.green(`  + ${it.after}`)}`;
 }
 
 /** Render display items grouped by table (blank line between table groups). */
-export function formatItems(items: DiffItem[]): string {
+export function formatItems(items: DiffItem[], inline = false): string {
   const out: string[] = [];
   let prev: string | undefined;
   for (const it of items) {
     if (prev !== undefined && it.table !== prev) out.push("");
-    out.push(renderItem(it));
+    out.push(renderItem(it, inline));
     prev = it.table;
   }
   return out.join("\n");
@@ -393,14 +397,14 @@ export function formatPatch(diff: Diff): string {
 }
 
 /** `--full`: the whole desired schema — unchanged dim, additions green, changes word-diffed. */
-function formatFull(diff: Diff): string {
+function formatFull(diff: Diff, inline = false): string {
   const byKey = new Map((diff.items ?? []).map((it) => [it.key, it]));
   const out: string[] = [];
   let prev: string | undefined;
   for (const f of diff.full ?? []) {
     if (prev !== undefined && f.table !== prev) out.push("");
     const it = byKey.get(f.key);
-    if (it?.op === "change") out.push(`    ${tokenDiff(it.before, it.after)}`);
+    if (it?.op === "change") out.push(renderItem(it, inline));
     else if (it?.op === "add") out.push(style.green(`  + ${f.ddl}`));
     else out.push(style.dim(`    ${f.ddl}`));
     prev = f.table;
@@ -408,7 +412,7 @@ function formatFull(diff: Diff): string {
   const removed = (diff.items ?? []).filter((it) => it.op === "remove");
   if (removed.length) {
     out.push("");
-    for (const it of removed) out.push(renderItem(it));
+    for (const it of removed) out.push(renderItem(it, inline));
   }
   return out.join("\n");
 }
@@ -416,10 +420,12 @@ function formatFull(diff: Diff): string {
 /** A human-readable view of a diff's forward (and optionally reverse) changes. */
 export function formatDiff(
   diff: Diff,
-  opts: { down?: boolean; full?: boolean } = {},
+  opts: { down?: boolean; full?: boolean; inline?: boolean } = {},
 ): string {
   if (!diff.up.length) return "No changes.";
-  let out = opts.full ? formatFull(diff) : formatItems(diff.items ?? []);
+  let out = opts.full
+    ? formatFull(diff, opts.inline)
+    : formatItems(diff.items ?? [], opts.inline);
   if (opts.down) {
     out += `\n\n${style.dim("  rollback (down):")}\n${diff.down.map((s) => style.dim(`  ${s}`)).join("\n")}`;
   }
@@ -437,7 +443,7 @@ type CountKind =
   | "other";
 function kindOf(stmt: string): CountKind {
   const m =
-    /^(?:DEFINE|REMOVE)\s+(TABLE|FIELD|INDEX|EVENT|FUNCTION|ACCESS)\b/.exec(
+    /^(?:DEFINE|REMOVE|ALTER)\s+(TABLE|FIELD|INDEX|EVENT|FUNCTION|ACCESS)\b/.exec(
       stmt,
     );
   return m ? (m[1].toLowerCase() as CountKind) : "other";

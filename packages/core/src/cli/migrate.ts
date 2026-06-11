@@ -13,9 +13,11 @@ import {
 import {
   type Filter,
   filterSnapshot,
+  included,
   mergeSnapshot,
   parseFilter,
 } from "./filter";
+import { introspect } from "./introspect";
 import {
   checksum,
   listMigrations,
@@ -75,28 +77,62 @@ function nextTag(migrationsDir: string, name: string): string {
   return tag;
 }
 
+export interface PreparedMigration {
+  tag: string;
+  file: string;
+  /** The rendered `.surql` program (what will be written to disk). */
+  content: string;
+  next: Snapshot;
+  up: number;
+  down: number;
+}
+
+/** Compute a migration's tag, filename, and rendered `.surql` content WITHOUT writing anything. */
+export function prepareMigration(
+  config: ResolvedConfig,
+  plan: MigrationPlan,
+  name?: string,
+): PreparedMigration | null {
+  const { diff, next } = plan;
+  if (isEmptyDiff(diff)) return null;
+  mkdirSync(config.migrationsDir, { recursive: true });
+  const tag = nextTag(config.migrationsDir, name ?? "migration");
+  return {
+    tag,
+    file: `${tag}.surql`,
+    content: renderMigration(tag, diff),
+    next,
+    up: diff.up.length,
+    down: diff.down.length,
+  };
+}
+
+/** Write a prepared migration to disk (file + snapshot). */
+export function commitMigration(
+  config: ResolvedConfig,
+  prepared: PreparedMigration,
+): GenerateResult {
+  mkdirSync(config.migrationsDir, { recursive: true });
+  writeFileSync(join(config.migrationsDir, prepared.file), prepared.content);
+  writeSnapshot(config.metaDir, prepared.next);
+  return {
+    created: true,
+    tag: prepared.tag,
+    file: prepared.file,
+    up: prepared.up,
+    down: prepared.down,
+  };
+}
+
 /** Write a planned migration to disk (file + snapshot). No-op for an empty diff. */
 export function writeMigration(
   config: ResolvedConfig,
   plan: MigrationPlan,
   name?: string,
 ): GenerateResult {
-  const { diff, next } = plan;
-  if (isEmptyDiff(diff)) return { created: false };
-
-  mkdirSync(config.migrationsDir, { recursive: true });
-  const tag = nextTag(config.migrationsDir, name ?? "migration");
-  const file = `${tag}.surql`;
-  writeFileSync(join(config.migrationsDir, file), renderMigration(tag, diff));
-  writeSnapshot(config.metaDir, next);
-
-  return {
-    created: true,
-    tag,
-    file,
-    up: diff.up.length,
-    down: diff.down.length,
-  };
+  const prepared = prepareMigration(config, plan, name);
+  if (!prepared) return { created: false };
+  return commitMigration(config, prepared);
 }
 
 /** Diff the schemas against the snapshot and, if anything changed, write a migration. */
@@ -105,6 +141,77 @@ export async function generate(
   name?: string,
 ): Promise<GenerateResult> {
   return writeMigration(config, await planMigration(config), name);
+}
+
+/**
+ * Record a migration as already-applied WITHOUT running it — used to baseline an existing database
+ * (e.g. after `pull`), where the objects already exist so the DDL must not be re-executed.
+ */
+async function recordApplied(
+  db: Surreal,
+  config: ResolvedConfig,
+  m: PreparedMigration,
+): Promise<void> {
+  await ensureMigrationsTable(db, config.migrationsTable);
+  await db.query(
+    "CREATE type::record($tbl, $tag) CONTENT { tag: $tag, file: $file, checksum: $sum, applied_at: time::now() }",
+    {
+      tbl: config.migrationsTable,
+      tag: m.tag,
+      file: m.file,
+      sum: checksum(m.content),
+    },
+  );
+}
+
+/**
+ * Baseline the project against the LIVE database (e.g. after `pull`): snapshot the current DB state
+ * — respecting `filter`, the same one `pull` used — and, when it differs from the stored snapshot,
+ * write a migration capturing that delta, recorded as already-applied (those objects already exist
+ * in the DB, so the DDL must not re-run). Only what is actually in the DB is baselined: any
+ * hand-written schema not yet in the DB stays pending for the next `sz gen`. Returns the migration's
+ * metadata, or `created: false` when nothing changed.
+ */
+export async function baseline(
+  db: Surreal,
+  config: ResolvedConfig,
+  filter: Filter = parseFilter({}),
+): Promise<GenerateResult> {
+  // What actually exists in the live DB (canonical INFO snapshot), used ONLY to scope the baseline:
+  // the keys tell us which objects the DB really has, so hand-written schema not yet in the DB stays
+  // pending for the next `sz gen` instead of being silently marked applied.
+  const live = filterSnapshot(
+    await introspect(
+      db,
+      new Set([config.migrationsTable, `${config.migrationsTable}_lock`]),
+    ),
+    filter,
+  );
+  const liveKeys = new Set(Object.keys(live.statements));
+  // The snapshot stores GENERATOR-form DDL (what `sz gen`/`sz diff` compare against offline), NOT the
+  // INFO form — the two canonical forms differ (e.g. default `PERMISSIONS`, `ON TABLE`), so mixing
+  // them would make every later offline diff phantom. We take the just-pulled disk schema and keep
+  // only the objects that are present in the DB.
+  const { tables, defs } = await loadDefs(config.schemaPath);
+  const disk = buildSnapshot(tables, defs);
+  const pulled: Snapshot = { version: 1, statements: {} };
+  for (const [k, s] of Object.entries(disk.statements))
+    if (liveKeys.has(k) && included(filter, s)) pulled.statements[k] = s;
+
+  const prev = readSnapshot(config.metaDir);
+  const plan: MigrationPlan = {
+    diff: diffSnapshots(filterSnapshot(prev, filter), pulled),
+    next: mergeSnapshot(prev, pulled, filter),
+  };
+  const prepared = prepareMigration(config, plan, "baseline");
+  if (!prepared) {
+    // DB already matches the snapshot — just persist (in case excluded kinds shifted).
+    writeSnapshot(config.metaDir, plan.next);
+    return { created: false };
+  }
+  const res = commitMigration(config, prepared);
+  await recordApplied(db, config, prepared);
+  return res;
 }
 
 /** `DEFINE TABLE … SCHEMALESS` for the internal migrations-tracking table. */
