@@ -62,8 +62,14 @@ export function buildSnapshot(
   };
   for (const t of tables) {
     const file = fileFor(t);
-    for (const s of emitStatements(t))
-      statements[keyOf(s)] = file ? { ...s, file } : s;
+    try {
+      for (const s of emitStatements(t))
+        statements[keyOf(s)] = file ? { ...s, file } : s;
+    } catch (e) {
+      // Pin an emit failure (e.g. a non-Surreal field type) to the source file.
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new Error(file ? `${msg}\n  in ${file}` : msg);
+    }
   }
   for (const d of defs) {
     const s = emitDefStatement(d);

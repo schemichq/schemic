@@ -638,14 +638,15 @@ export function emitFieldStatements(
   opts?: DefineOptions,
 ): DefineStatement[] {
   const out: DefineStatement[] = [];
-  emit(
-    escapeIdent(name),
-    table,
-    inferField(field.schema),
-    field.surreal,
-    opts,
-    out,
-  );
+  let info: FieldInfo;
+  try {
+    info = inferField(field.schema);
+  } catch (e) {
+    // inferField only sees the schema; pin the failure to the field + table for the user.
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(`${msg} (field "${name}" on table "${table}")`);
+  }
+  emit(escapeIdent(name), table, info, field.surreal, opts, out);
   return out;
 }
 
