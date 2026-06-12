@@ -11,10 +11,34 @@ import {
 import { schemaStruct } from "./lower";
 import type { Snapshot, SnapshotStatement } from "./meta";
 import type { AnyTable } from "./schema";
+import { deepEqual } from "./struct";
+import type { DbStructured } from "./structure";
 import { colorEnabled, plural, style } from "./style";
 
 const keyOf = (s: Pick<DefineStatement, "kind" | "name" | "table">) =>
   `${s.kind}:${s.table ?? ""}:${s.name}`;
+
+/** Index a normalized DbStructured by statement key (matching `keyOf`) for structural equality. */
+function structIndex(db: DbStructured): Map<string, unknown> {
+  const idx = new Map<string, unknown>();
+  for (const t of db.tables) {
+    // The table STATEMENT is just the head — fields/indexes/events are their own statements.
+    idx.set(`table::${t.name}`, {
+      kind: t.kind,
+      schemafull: t.schemafull,
+      drop: t.drop,
+      comment: t.comment,
+      changefeed: t.changefeed,
+      permissions: t.permissions,
+    });
+    for (const f of t.fields) idx.set(`field:${t.name}:${f.name}`, f);
+    for (const i of t.indexes) idx.set(`index:${t.name}:${i.name}`, i);
+    for (const e of t.events) idx.set(`event:${t.name}:${e.name}`, e);
+  }
+  for (const fn of db.functions) idx.set(`function::${fn.name}`, fn);
+  for (const a of db.accesses) idx.set(`access::${a.name}`, a);
+  return idx;
+}
 
 /**
  * Build the canonical snapshot (keyed `DEFINE` statements) for the current schemas: every table's
@@ -164,12 +188,26 @@ export function diffSnapshots(prev: Snapshot, next: Snapshot): Diff {
     removed.filter((s) => s.kind === "table").map((s) => s.name),
   );
 
+  // Structural change-detection: a DDL difference that normalizes away (e.g. an enum/union/record
+  // reorder) is NOT a real change. Only applies when BOTH snapshots carry a Struct; older snapshots
+  // (or keys absent from the struct, like folded array elements) fall back to the DDL comparison.
+  const prevIdx = prev.struct ? structIndex(prev.struct) : null;
+  const nextIdx = next.struct ? structIndex(next.struct) : null;
   const added: SnapshotStatement[] = [];
   const changed: { old: SnapshotStatement; next: SnapshotStatement }[] = [];
   for (const k of Object.keys(nextS)) {
     const s = nextS[k];
-    if (!(k in prevS)) added.push(s);
-    else if (prevS[k].ddl !== s.ddl) changed.push({ old: prevS[k], next: s });
+    if (!(k in prevS)) {
+      added.push(s);
+      continue;
+    }
+    if (prevS[k].ddl === s.ddl) continue;
+    if (prevIdx && nextIdx) {
+      const a = prevIdx.get(k);
+      const b = nextIdx.get(k);
+      if (a !== undefined && b !== undefined && deepEqual(a, b)) continue; // cosmetic-only
+    }
+    changed.push({ old: prevS[k], next: s });
   }
   const addedTables = new Set(
     added.filter((s) => s.kind === "table").map((s) => s.name),
