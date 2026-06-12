@@ -17,8 +17,9 @@ import {
   type TablePermissions,
 } from "./pure";
 
-/** Inline a BoundQuery's bindings into a literal SurrealQL string for DDL use. */
-function inline(query: BoundQuery): string {
+/** Inline a BoundQuery's bindings into a literal SurrealQL string for DDL use. Exported so the
+ *  Struct-IR lowering (`fromTableDef`) renders DEFAULT/VALUE/COMPUTED/permission exprs identically. */
+export function inline(query: BoundQuery): string {
   let out = query.query;
   for (const [name, value] of Object.entries(query.bindings ?? {})) {
     out = out.replaceAll(`$${name}`, toSurqlString(value));
@@ -27,19 +28,26 @@ function inline(query: BoundQuery): string {
 }
 
 /**
- * Combine a field's `ASSERT` fragments into one clause: inline any `BoundQuery` entries
- * (custom `surql` asserts), keep strings (computed checks) as-is, dedupe while preserving
- * order, and AND-join. Each fragment is already a complete boolean expr. Returns "" when
- * there are no fragments.
+ * The bare AND-joined `ASSERT` expression (no `ASSERT ` keyword): inline any `BoundQuery` entries
+ * (custom `surql` asserts), keep strings (computed checks) as-is, dedupe while preserving order,
+ * and AND-join. Each fragment is already a complete boolean expr. Returns "" when there are none.
+ * Exported so the Struct-IR lowering (`fromTableDef`) can populate `StructField.assert` (the bare
+ * expr) while the DDL emitter prepends the `ASSERT ` keyword via {@link renderAsserts}.
  */
-function renderAsserts(asserts: SurrealMeta["asserts"]): string {
+export function assertExpr(asserts: SurrealMeta["asserts"]): string {
   if (!asserts?.length) return "";
   const frags: string[] = [];
   for (const a of asserts) {
     const frag = a instanceof BoundQuery ? inline(a) : a;
     if (frag && !frags.includes(frag)) frags.push(frag);
   }
-  return frags.length ? `ASSERT ${frags.join(" AND ")}` : "";
+  return frags.join(" AND ");
+}
+
+/** The full `ASSERT <expr>` clause for the DDL emitter (or "" when there are no fragments). */
+function renderAsserts(asserts: SurrealMeta["asserts"]): string {
+  const expr = assertExpr(asserts);
+  return expr ? `ASSERT ${expr}` : "";
 }
 
 /** Read a Zod schema's internal def with a loose type for traversal. */
@@ -63,8 +71,10 @@ function surqlLiteral(value: unknown): string {
 /**
  * The SurrealQL type of a field plus any nested fields it expands into:
  * object subfields (`path.key`) and array/record element fields (`path.*`).
+ * Exported (with {@link inferField}) so the Struct-IR lowering walks the SAME child tree the
+ * emitter does — so the two can't disagree on type strings or dotted field paths.
  */
-interface FieldInfo {
+export interface FieldInfo {
   type: string;
   flexible: boolean;
   children: { suffix: string; info: FieldInfo; surreal?: SurrealMeta }[];
@@ -75,8 +85,9 @@ const leaf = (type: string): FieldInfo => ({
   children: [],
 });
 
-/** Infer a field's SurrealQL type + nested structure from a Zod schema. */
-function inferField(
+/** Infer a field's SurrealQL type + nested structure from a Zod schema. Exported so the Struct-IR
+ *  lowering (`fromTableDef`) and the emitter share one source of truth for type strings + paths. */
+export function inferField(
   schema: z.ZodType,
   seen: Set<z.ZodType> = new Set(),
 ): FieldInfo {
@@ -386,13 +397,15 @@ export function fieldType(field: SField): string {
   return inferField(field.schema).type;
 }
 
-/** Inline a single event clause (`when`/one `then`): a `BoundQuery` is inlined, a string passes through. */
-function eventClause(e: Expr): string {
+/** Inline a single event clause (`when`/one `then`): a `BoundQuery` is inlined, a string passes
+ *  through. Exported so the Struct-IR lowering renders event/permission exprs identically. */
+export function eventClause(e: Expr): string {
   return e instanceof BoundQuery ? inline(e) : e;
 }
 
-/** A `{ … }` block body — wraps a bare statement list in braces; a `surql\`{ … }\`` passes through. */
-function braceBody(e: Expr): string {
+/** A `{ … }` block body — wraps a bare statement list in braces; a `surql\`{ … }\`` passes through.
+ *  Exported so the Struct-IR lowering renders function/access blocks to match INFO's `{ … }` form. */
+export function braceBody(e: Expr): string {
   const s = eventClause(e).trim();
   return s.startsWith("{") ? s : `{ ${s} }`;
 }

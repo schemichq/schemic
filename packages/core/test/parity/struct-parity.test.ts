@@ -1,0 +1,160 @@
+/**
+ * The Struct-IR keystone proof: `normalize(fromTableDef(schema))` must deep-equal
+ * `normalize(fromInfo(schema applied to a real DB))` — i.e. the offline lowering and the live
+ * INFO lowering converge on one normal form. Applies a broad corpus to a scratch SurrealDB and
+ * compares the two per object. Skips when no DB is reachable.
+ */
+import { afterAll, describe, expect, test } from "bun:test";
+import { Surreal, surql } from "surrealdb";
+import { z } from "zod";
+import { fromStandalone, fromTableDef } from "../../src/cli/lower";
+import {
+  deepEqual,
+  normalizeAccess,
+  normalizeFunction,
+  normalizeTable,
+} from "../../src/cli/struct";
+import { introspectStructured } from "../../src/cli/structure";
+import { emitDefStatement, emitStatements } from "../../src/ddl";
+import {
+  defineFunction,
+  defineRelation,
+  defineTable,
+  sz,
+} from "../../src/pure";
+
+const NS = "__sz_structparity";
+const DB = "sp";
+
+async function connectScratch(): Promise<Surreal | null> {
+  const db = new Surreal();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      (async () => {
+        await db.connect(process.env.SURREAL_URL ?? "ws://127.0.0.1:8000/rpc");
+        await db.signin({
+          username: process.env.SURREAL_USER ?? "root",
+          password: process.env.SURREAL_PASS ?? "root",
+        });
+        await db.query(`DEFINE NAMESPACE IF NOT EXISTS ${NS};`);
+        await db.use({ namespace: NS, database: DB });
+        await db.query(
+          `REMOVE DATABASE IF EXISTS ${DB}; DEFINE DATABASE ${DB};`,
+        );
+        await db.use({ namespace: NS, database: DB });
+      })(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("connect timeout")), 2000);
+      }),
+    ]);
+    return db;
+  } catch {
+    await db.close().catch(() => {});
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const db = await connectScratch();
+const live = describe.skipIf(!db);
+if (!db) console.warn("[struct-parity] SurrealDB unreachable — skipping");
+
+// A broad corpus exercising the clause space (types, perms, defaults, asserts, index, nested
+// objects, arrays, records, literal unions, relation, function).
+const Big = defineTable("sp_big", {
+  id: z.string(),
+  s: sz.string(),
+  i: sz.int(),
+  dt: sz.datetime(),
+  uid: sz.uuid(),
+  rec: sz.recordId("sp_big"),
+  arr: sz.array(sz.string()),
+  arrn: sz.array(sz.string(), { max: 3 }),
+  setf: sz.set(sz.string()),
+  opt: sz.string().optional(),
+  role: sz.enum(["admin", "user"]),
+  obj: sz.object({ a: sz.string(), b: sz.number().optional() }),
+  def: sz.string().$default("pending"),
+  defa: sz.datetime().$defaultAlways(surql`time::now()`),
+  val: sz.string().$value(surql`string::lowercase($value)`),
+  asrt: sz.number().$assert(surql`$value > 0`),
+  ro: sz.string().$readonly(),
+  cmt: sz.string().$comment("a field"),
+  perm: sz.string().$permissions({ select: true, update: false }),
+  uniq: sz.string().unique(),
+}).permissions({ select: true, create: surql`$auth.id != NONE` });
+const Less = defineTable("sp_less", { id: z.string() })
+  .schemaless()
+  .comment("c");
+const Rel = defineRelation("sp_likes", { id: z.string() }).from(Big).to(Big);
+const Fn = defineFunction("sp_add", { a: sz.int(), b: sz.int() })
+  .returns(sz.int())
+  .body(surql`RETURN $a + $b;`);
+
+const TABLES = [Big, Less, Rel];
+const DEFS = [Fn];
+const asTable = (t: unknown) => t as Parameters<typeof fromTableDef>[0];
+const asDef = (d: unknown) => d as Parameters<typeof fromStandalone>[0];
+
+live("struct-parity", () => {
+  afterAll(async () => {
+    await db?.close().catch(() => {});
+  });
+
+  test("fromTableDef converges with fromInfo across the corpus", async () => {
+    if (!db) return;
+    for (const t of TABLES)
+      for (const s of emitStatements(asTable(t))) await db.query(s.ddl);
+    for (const d of DEFS) await db.query(emitDefStatement(asDef(d)).ddl);
+
+    const info = await introspectStructured(db, new Set());
+    const liveTable = new Map(info.tables.map((x) => [x.name, x]));
+    const liveFn = new Map(info.functions.map((x) => [x.name, x]));
+    const liveAccess = new Map(info.accesses.map((x) => [x.name, x]));
+
+    const diverged: string[] = [];
+    const report = (name: string, a: unknown, b: unknown) => {
+      diverged.push(name);
+      console.error(`\n=== DIVERGE ${name} ===`);
+      console.error("fromTableDef:", JSON.stringify(a, null, 1));
+      console.error("fromInfo:    ", JSON.stringify(b, null, 1));
+    };
+
+    for (const t of TABLES) {
+      const name = asTable(t).name;
+      const a = normalizeTable(fromTableDef(asTable(t)));
+      const liveStruct = liveTable.get(name);
+      if (!liveStruct) {
+        report(`table ${name}`, a, "MISSING");
+        continue;
+      }
+      const b = normalizeTable(liveStruct);
+      if (!deepEqual(a, b)) report(`table ${name}`, a, b);
+    }
+    for (const d of DEFS) {
+      const lowered = fromStandalone(asDef(d));
+      const name = lowered.name;
+      const fn = liveFn.get(name);
+      const ac = liveAccess.get(name);
+      if (fn) {
+        const a = normalizeFunction(
+          lowered as Parameters<typeof normalizeFunction>[0],
+        );
+        if (!deepEqual(a, normalizeFunction(fn)))
+          report(`function ${name}`, a, normalizeFunction(fn));
+      } else if (ac) {
+        const a = normalizeAccess(
+          lowered as Parameters<typeof normalizeAccess>[0],
+        );
+        if (!deepEqual(a, normalizeAccess(ac)))
+          report(`access ${name}`, a, normalizeAccess(ac));
+      } else {
+        report(`def ${name}`, lowered, "MISSING");
+      }
+    }
+
+    expect(diverged).toEqual([]);
+  });
+});
