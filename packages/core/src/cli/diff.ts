@@ -335,70 +335,58 @@ function renderItem(it: DiffItem, inline = false): string {
   return `${style.red(`  - ${it.before}`)}\n${style.green(`  + ${it.after}`)}`;
 }
 
-/** A group's header: the object label + the source file(s) it lives in (dim), e.g.
- *  `Table: user  database/schema/tables/user.ts`. */
-function groupHeader(items: DiffItem[]): string {
-  const label = groupLabel(items[0].kind, items[0].table);
-  const files = [
-    ...new Set(items.map((i) => i.file).filter((f): f is string => !!f)),
-  ];
-  return files.length
-    ? `${style.bold(label)}  ${style.dim(files.join(", "))}`
-    : style.bold(label);
+/**
+ * Group diff items by their source file (git-style), so the display reads like a file diff. Items
+ * with no file (an older snapshot, or the live DB) fall back to a per-object group headed by the
+ * object's bare name. Returns groups in first-seen order, each with its header.
+ */
+function groupByFile(
+  items: DiffItem[],
+): { header: string; items: DiffItem[] }[] {
+  const order: string[] = [];
+  const byKey = new Map<string, DiffItem[]>();
+  for (const it of items) {
+    const key = it.file ?? `\0${it.table}`; // \0 can't collide with a real path
+    let group = byKey.get(key);
+    if (!group) {
+      group = [];
+      byKey.set(key, group);
+      order.push(key);
+    }
+    group.push(it);
+  }
+  return order.map((key) => {
+    const group = byKey.get(key) ?? [];
+    return {
+      header: group.find((i) => i.file)?.file ?? group[0].table,
+      items: group,
+    };
+  });
 }
 
-/** Render display items grouped by object, each under a `<label>  <file>` header. */
+/** Render display items as a git-style file diff: each group headed by its source file path. */
 export function formatItems(items: DiffItem[], inline = false): string {
-  const groups: DiffItem[][] = [];
-  let prev: string | undefined;
-  for (const it of items) {
-    if (it.table !== prev) groups.push([]);
-    groups[groups.length - 1].push(it);
-    prev = it.table;
-  }
-  return groups
+  return groupByFile(items)
     .map((g) =>
-      [groupHeader(g), ...g.map((it) => renderItem(it, inline))].join("\n"),
+      [
+        style.bold(g.header),
+        ...g.items.map((it) => renderItem(it, inline)),
+      ].join("\n"),
     )
     .join("\n\n");
 }
 
 /**
- * The diff-header label for a group, by the owner kind: table-scoped objects (table/field/index/
- * event) → `Table: <name>`; db-level objects → `Function: …` / `Access: …` / etc. (capitalized
- * kind). New object kinds slot in automatically.
- */
-function groupLabel(kind: string, name: string): string {
-  const owner =
-    kind === "field" || kind === "index" || kind === "table" || kind === "event"
-      ? "Table"
-      : kind.charAt(0).toUpperCase() + kind.slice(1);
-  return `${owner}: ${name}`;
-}
-
-/**
- * A standard **unified diff** of the change, grouped one section per object owner (a table, or a
- * db-level function/access/…). Sections are labelled `Table: <name>` etc. — for piping through a
- * diff viewer (git's pager / delta). Each object is a single-line DDL statement, so hunks are
+ * A standard **unified diff** of the change, grouped one section per source file (git-style) — for
+ * piping through a diff viewer (git's pager / delta). Objects with no file fall back to a section
+ * headed by the object's bare name. Each object is a single-line DDL statement, so hunks are
  * line-for-line.
  */
 export function formatPatch(diff: Diff): string {
   const items = diff.items ?? [];
   if (!items.length) return "";
-  const order: string[] = [];
-  const byTable = new Map<string, DiffItem[]>();
-  for (const it of items) {
-    let group = byTable.get(it.table);
-    if (!group) {
-      group = [];
-      byTable.set(it.table, group);
-      order.push(it.table);
-    }
-    group.push(it);
-  }
   const out: string[] = [];
-  for (const table of order) {
-    const group = byTable.get(table) ?? [];
+  for (const { header, items: group } of groupByFile(items)) {
     const lines: string[] = [];
     let dels = 0;
     let adds = 0;
@@ -415,11 +403,10 @@ export function formatPatch(diff: Diff): string {
         adds++;
       }
     }
-    const label = groupLabel(group[0].kind, table);
     out.push(
-      `diff --git a/${label} b/${label}`,
-      `--- a/${label}`,
-      `+++ b/${label}`,
+      `diff --git a/${header} b/${header}`,
+      `--- a/${header}`,
+      `+++ b/${header}`,
       `@@ -${dels ? 1 : 0},${dels} +${adds ? 1 : 0},${adds} @@`,
       ...lines,
     );

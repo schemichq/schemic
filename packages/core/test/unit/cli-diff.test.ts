@@ -243,9 +243,10 @@ describe("formatPatch (unified diff)", () => {
     const patch = formatPatch(
       diffSnapshots(buildSnapshot([before]), buildSnapshot([after])),
     );
-    expect(patch).toContain("diff --git a/Table: user b/Table: user");
-    expect(patch).toContain("--- a/Table: user");
-    expect(patch).toContain("+++ b/Table: user");
+    // No source file in this fixture → the section falls back to the bare object name.
+    expect(patch).toContain("diff --git a/user b/user");
+    expect(patch).toContain("--- a/user");
+    expect(patch).toContain("+++ b/user");
     expect(patch).toContain("-DEFINE FIELD name ON TABLE user TYPE string;");
     expect(patch).toContain(
       "+DEFINE FIELD name ON TABLE user TYPE option<string>;",
