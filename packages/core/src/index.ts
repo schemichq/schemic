@@ -7,15 +7,21 @@
 
 /** Re-exported from the SDK: author SurrealQL expressions (event/permission bodies, asserts). */
 export { surql } from "surrealdb";
-export type { DefineOptions, DefineStatement } from "./ddl";
+export type { DefineOptions, DefineStatement, FieldInfo } from "./ddl";
 export {
   alterField,
   alterTable,
+  assertExpr,
+  braceBody,
   emitDefStatement,
   emitField,
   emitFieldStatements,
   emitStatements,
   emitTable,
+  eventClause,
+  fieldType,
+  inferField,
+  inline,
   overwriteStatement,
   removeStatement,
 } from "./ddl";

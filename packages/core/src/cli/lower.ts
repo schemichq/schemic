@@ -8,7 +8,6 @@
 // come straight off `SField.surreal` and `TableConfig`. The output is RAW (unsorted, defaults not
 // stripped, `option<>` not folded, `x.*` elements present) — `normalizeTable` closes those gaps.
 
-import { BoundQuery, escapeIdent } from "surrealdb";
 import {
   assertExpr,
   braceBody,
@@ -17,7 +16,8 @@ import {
   fieldType,
   inferField,
   inline,
-} from "../ddl";
+} from "surreal-zod";
+import { BoundQuery, escapeIdent } from "surrealdb";
 import type {
   AccessDef,
   FieldPermissions,

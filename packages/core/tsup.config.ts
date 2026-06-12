@@ -22,7 +22,7 @@ export default defineConfig([
     dts: false,
     clean: false,
     sourcemap: false,
-    external: ["surreal-zod"],
+    external: ["surreal-zod", /^surreal-zod\//],
     banner: { js: "#!/usr/bin/env node" },
   },
 ]);
