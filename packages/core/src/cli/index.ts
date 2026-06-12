@@ -1,5 +1,5 @@
 import { watch as fsWatch } from "node:fs";
-import { relative } from "node:path";
+import { join, relative } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { Command, Help, Option } from "commander";
 import type { Surreal } from "surrealdb";
@@ -35,7 +35,7 @@ import {
   applyStatements,
   diffAgainstDb,
   syncPlan,
-  tsViewsAgainstDb,
+  tsStructsAgainstDb,
   verifyMigrations,
 } from "./introspect";
 import { schemaStruct } from "./lower";
@@ -64,9 +64,16 @@ import {
   type PullFilePlan,
   type PullPlan,
   planPull,
+  renderPerFile,
   renderSchemaToTS,
 } from "./pull";
-import { duplicateTables, loadDefs, loadSchemas } from "./schema";
+import {
+  duplicateTables,
+  existingTables,
+  loadDefs,
+  loadSchemas,
+} from "./schema";
+import type { DbStructured } from "./structure";
 import { fail, ok, plural, style } from "./style";
 
 interface CommonOpts extends ConnectionOverrides {
@@ -384,40 +391,87 @@ kindFlags(
         const persistent =
           opts.watch && opts.live ? await connect(config, opts) : undefined;
         const once = async () => {
-          // TypeScript view: render both sides as canonical TS and diff them.
+          // TypeScript view: render both sides PER FILE (matching `pull`'s layout) and diff each.
           if (opts.ts) {
+            // Map each object to its source file (where it lives in the schema, else its kind folder).
+            const loc = await existingTables(config.schemaPath);
+            const folderOf = {
+              table: "tables",
+              function: "functions",
+              access: "access",
+            } as const;
+            const fileFor = (
+              kind: "table" | "function" | "access",
+              name: string,
+            ): string => {
+              const abs = kind === "table" ? loc.get(name) : undefined;
+              return abs
+                ? relative(config.root, abs)
+                : relative(
+                    config.root,
+                    join(config.schemaPath, folderOf[kind], `${name}.ts`),
+                  );
+            };
+            // Single-file layout → one combined module; directory layout → one module per object.
+            const renderFiles = (db: DbStructured): Map<string, string> =>
+              config.schemaIsFile
+                ? new Map([[config.schema ?? "schema", renderSchemaToTS(db)]])
+                : renderPerFile(db, fileFor);
+
             // current = the baseline (live DB or snapshot), desired = the declared schema.
-            const renderTsDiff = async (
-              current: string,
-              desired: string,
+            const showTsDiff = async (
+              current: DbStructured,
+              desired: DbStructured,
               matchMsg: string,
             ) => {
+              const cur = renderFiles(current);
+              const des = renderFiles(desired);
               if (opts.json) {
-                console.log(JSON.stringify({ current, desired }));
-              } else if (current === desired) {
+                console.log(
+                  JSON.stringify({
+                    current: Object.fromEntries(cur),
+                    desired: Object.fromEntries(des),
+                  }),
+                );
+                return;
+              }
+              const files = [...new Set([...cur.keys(), ...des.keys()])].sort();
+              const changed = files.filter(
+                (f) => (cur.get(f) ?? "") !== (des.get(f) ?? ""),
+              );
+              if (!changed.length) {
                 console.log(ok(matchMsg));
               } else if (pager || opts.patch) {
-                // Git-style unified patch (the schema renders as one module → one section).
-                const patch = unifiedDiff(
-                  current,
-                  desired,
-                  config.schema ?? "schema",
-                );
+                // A git-style unified patch, one section per changed file.
+                const patch = changed
+                  .map((f) =>
+                    unifiedDiff(cur.get(f) ?? "", des.get(f) ?? "", f),
+                  )
+                  .join("");
                 if (pager) await pipeThroughPager(pager, patch);
                 else process.stdout.write(patch);
               } else {
-                console.log(lineDiff(current, desired));
+                // Colored, one git-style section per changed file (path header + line diff).
+                console.log(
+                  changed
+                    .map(
+                      (f) =>
+                        `${style.bold(f)}\n${lineDiff(cur.get(f) ?? "", des.get(f) ?? "")}`,
+                    )
+                    .join("\n\n"),
+                );
               }
             };
+
             if (opts.live) {
               const db = persistent ?? (await connect(config, opts));
               try {
-                const { current, desired } = await tsViewsAgainstDb(
+                const { current, desired } = await tsStructsAgainstDb(
                   db,
                   config,
                   filter,
                 );
-                await renderTsDiff(
+                await showTsDiff(
                   current,
                   desired,
                   "Schema matches the live database.",
@@ -426,29 +480,21 @@ kindFlags(
                 if (!persistent) await db.close();
               }
             } else {
-              // Offline: the snapshot's recorded Struct vs the current schema's Struct, both as TS.
+              // Offline: the snapshot's recorded Struct vs the current schema's Struct.
               const prev = readSnapshot(config.metaDir);
               if (!prev.struct)
                 throw new Error(
                   "offline diff --ts needs a Struct snapshot — run `sz gen` (or `sz pull --write`) to record one, or pass --live.",
                 );
               const { tables, defs } = await loadDefs(config.schemaPath);
-              const current = renderSchemaToTS(
+              const desired = schemaStruct(
+                // Bridge the lib/src TableDef duality (see buildSnapshot).
+                tables as unknown as Parameters<typeof schemaStruct>[0],
+                defs as unknown as Parameters<typeof schemaStruct>[1],
+              );
+              await showTsDiff(
                 filterStructured(prev.struct, filter),
-              );
-              const desired = renderSchemaToTS(
-                filterStructured(
-                  // Bridge the lib/src TableDef duality (see buildSnapshot).
-                  schemaStruct(
-                    tables as unknown as Parameters<typeof schemaStruct>[0],
-                    defs as unknown as Parameters<typeof schemaStruct>[1],
-                  ),
-                  filter,
-                ),
-              );
-              await renderTsDiff(
-                current,
-                desired,
+                filterStructured(desired, filter),
                 "Schema matches the snapshot.",
               );
             }

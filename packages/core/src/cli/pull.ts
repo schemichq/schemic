@@ -785,6 +785,69 @@ export function renderSchemaToTS(db: DbStructured): string {
   return assembleCombined(db, ctxFactory(db.tables));
 }
 
+/** Merge several units' import lines into a deduped block (union of specifiers per source). */
+function mergeImports(units: RenderedUnit[]): string[] {
+  const bySource = new Map<string, Set<string>>();
+  const order: string[] = [];
+  for (const u of units)
+    for (const line of u.imports) {
+      const m = /import\s*\{([^}]*)\}\s*from\s*["']([^"']+)["']/.exec(line);
+      if (!m) continue;
+      let set = bySource.get(m[2]);
+      if (!set) {
+        set = new Set();
+        bySource.set(m[2], set);
+        order.push(m[2]);
+      }
+      for (const s of m[1]
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean))
+        set.add(s);
+    }
+  // surreal-zod first, then the relative cross-file imports (sorted).
+  order.sort((a, b) =>
+    a === "surreal-zod" ? -1 : b === "surreal-zod" ? 1 : a.localeCompare(b),
+  );
+  return order.map(
+    (src) =>
+      `import { ${[...(bySource.get(src) ?? [])].join(", ")} } from "${src}";`,
+  );
+}
+
+/**
+ * Render a structured schema to per-file TypeScript modules keyed by file path — exactly the
+ * layout `pull` writes (one file per object, with cross-file imports). `fileFor` maps an object to
+ * its file. Used by `diff --ts` so its output matches the user's actual files.
+ */
+export function renderPerFile(
+  db: DbStructured,
+  fileFor: (kind: RenderedUnit["kind"], name: string) => string,
+): Map<string, string> {
+  const makeCtx = ctxFactory(db.tables);
+  const byFile = new Map<string, RenderedUnit[]>();
+  const add = (file: string, u: RenderedUnit) => {
+    const arr = byFile.get(file);
+    if (arr) arr.push(u);
+    else byFile.set(file, [u]);
+  };
+  for (const t of db.tables)
+    add(fileFor("table", t.name), tableUnit(t, makeCtx(t)));
+  for (const fn of db.functions)
+    add(fileFor("function", fn.name), functionUnit(fn));
+  for (const a of db.accesses) add(fileFor("access", a.name), accessUnit(a));
+
+  const out = new Map<string, string>();
+  for (const [file, units] of byFile)
+    out.set(
+      file,
+      units.length === 1
+        ? unitModule(units[0])
+        : `${mergeImports(units).join("\n")}\n\n${units.map((u) => u.code).join("\n\n")}\n`,
+    );
+  return out;
+}
+
 /** Assemble the single-file combined module (tables ordered so same-file refs resolve). */
 function assembleCombined(
   { tables, functions, accesses }: DbStructured,

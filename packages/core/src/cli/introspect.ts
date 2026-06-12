@@ -11,7 +11,6 @@ import {
   parseFilter,
 } from "./filter";
 import { listMigrations, type Snapshot } from "./meta";
-import { renderSchemaToTS } from "./pull";
 import { loadDefs } from "./schema";
 import { normalizeDb } from "./struct";
 import {
@@ -95,16 +94,15 @@ export async function shadowStructured(
 }
 
 /**
- * The two sides of `diff --ts --live` rendered as canonical TypeScript: the live database
- * (`current`) and the declared schema (`desired`). Both are introspected to the Struct-IR
- * (the schema via a shadow apply), normalized, then rendered with the pull renderer — so an
- * unchanged schema yields identical TS and the diff is empty.
+ * The two sides of `diff --ts --live` as normalized Struct-IR: the live database (`current`) and
+ * the declared schema (`desired`, normalized THROUGH SurrealDB via a shadow apply). Both go through
+ * the same normalize, so an unchanged schema yields deep-equal structs. The caller renders them.
  */
-export async function tsViewsAgainstDb(
+export async function tsStructsAgainstDb(
   db: Surreal,
   config: ResolvedConfig,
   filter: Filter = parseFilter({}),
-): Promise<{ current: string; desired: string }> {
+): Promise<{ current: DbStructured; desired: DbStructured }> {
   const exclude = new Set([
     config.migrationsTable,
     `${config.migrationsTable}_lock`,
@@ -116,9 +114,8 @@ export async function tsViewsAgainstDb(
     .map((s) => s.ddl)
     .join("\n");
   const desired = await shadowStructured(db, config, ddl);
-  const render = (d: DbStructured) =>
-    renderSchemaToTS(normalizeDb(filterStructured(d, filter)));
-  return { current: render(target), desired: render(desired) };
+  const norm = (d: DbStructured) => normalizeDb(filterStructured(d, filter));
+  return { current: norm(target), desired: norm(desired) };
 }
 
 /**
