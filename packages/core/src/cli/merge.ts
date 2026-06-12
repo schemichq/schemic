@@ -224,25 +224,19 @@ function ensureTrailingNewline(s: string): string {
   return s.endsWith("\n") ? s : `${s}\n`;
 }
 
-// --- Preview (unified line diff) -------------------------------------------------------------
+// --- Line diff (colored preview + git-style patch) -------------------------------------------
 
-/**
- * A compact unified line diff for the pull preview. New files render as all-green additions; edits
- * render removed (red `-`) / added (green `+`) lines with a little surrounding context.
- */
-export function lineDiff(before: string, after: string): string {
-  if (before === "") {
-    return after
-      .replace(/\n$/, "")
-      .split("\n")
-      .map((l) => style.green(`+ ${l}`))
-      .join("\n");
-  }
-  const a = before.replace(/\n$/, "").split("\n");
-  const b = after.replace(/\n$/, "").split("\n");
+type LineOp = { tag: " " | "-" | "+"; line: string };
+
+const splitLines = (s: string): string[] =>
+  s === "" ? [] : s.replace(/\n$/, "").split("\n");
+
+/** LCS line-level ops between two texts (a trailing newline is ignored). */
+function lineOps(before: string, after: string): LineOp[] {
+  const a = splitLines(before);
+  const b = splitLines(after);
   const m = a.length;
   const n = b.length;
-  // LCS table over lines.
   const dp: number[][] = Array.from({ length: m + 1 }, () =>
     new Array(n + 1).fill(0),
   );
@@ -252,9 +246,7 @@ export function lineDiff(before: string, after: string): string {
         a[i] === b[j]
           ? dp[i + 1][j + 1] + 1
           : Math.max(dp[i + 1][j], dp[i][j + 1]);
-
-  type Op = { tag: " " | "-" | "+"; line: string };
-  const ops: Op[] = [];
+  const ops: LineOp[] = [];
   let i = 0;
   let j = 0;
   while (i < m && j < n) {
@@ -270,7 +262,16 @@ export function lineDiff(before: string, after: string): string {
   }
   while (i < m) ops.push({ tag: "-", line: a[i++] });
   while (j < n) ops.push({ tag: "+", line: b[j++] });
+  return ops;
+}
 
+/**
+ * A compact colored line diff for previews. A new file renders as all-green additions; an edit
+ * renders removed (red `-`) / added (green `+`) lines with a little surrounding context (long
+ * unchanged runs collapse to `…`).
+ */
+export function lineDiff(before: string, after: string): string {
+  const ops = lineOps(before, after);
   // Keep changed lines plus up to 2 lines of context around each; collapse long unchanged runs.
   const CONTEXT = 2;
   const keep = new Array(ops.length).fill(false);
@@ -297,6 +298,31 @@ export function lineDiff(before: string, after: string): string {
     else out.push(style.green(`+ ${op.line}`));
   });
   return out.join("\n");
+}
+
+/**
+ * A git-style unified diff between two texts, headed by `label` as the file path — for piping to a
+ * diff viewer (delta / git's pager). Returns "" when there's no change.
+ */
+export function unifiedDiff(
+  before: string,
+  after: string,
+  label: string,
+): string {
+  const ops = lineOps(before, after);
+  if (!ops.some((o) => o.tag !== " ")) return "";
+  const oldLen = ops.filter((o) => o.tag !== "+").length;
+  const newLen = ops.filter((o) => o.tag !== "-").length;
+  const body = ops.map((o) =>
+    o.tag === " " ? ` ${o.line}` : `${o.tag}${o.line}`,
+  );
+  return `${[
+    `diff --git a/${label} b/${label}`,
+    `--- a/${label}`,
+    `+++ b/${label}`,
+    `@@ -1,${oldLen} +1,${newLen} @@`,
+    ...body,
+  ].join("\n")}\n`;
 }
 
 /** Colored verb for a pull action (`new` / `update` / `unchanged`). */

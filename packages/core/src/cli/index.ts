@@ -33,7 +33,7 @@ import {
   tsViewsAgainstDb,
   verifyMigrations,
 } from "./introspect";
-import { actionLabel, lineDiff } from "./merge";
+import { actionLabel, lineDiff, unifiedDiff } from "./merge";
 import { EMPTY_SNAPSHOT, listMigrations, writeSnapshot } from "./meta";
 import {
   baseline,
@@ -387,6 +387,15 @@ kindFlags(
                 console.log(JSON.stringify({ current, desired }));
               } else if (current === desired) {
                 console.log(ok("Schema matches the live database."));
+              } else if (pager || opts.patch) {
+                // Git-style unified patch (the whole schema renders as one module → one section).
+                const patch = unifiedDiff(
+                  current,
+                  desired,
+                  config.schema ?? "schema",
+                );
+                if (pager) await pipeThroughPager(pager, patch);
+                else process.stdout.write(patch);
               } else {
                 console.log(lineDiff(current, desired));
               }

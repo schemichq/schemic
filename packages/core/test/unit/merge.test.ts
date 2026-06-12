@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mergeUnits, type RenderedUnit } from "../../src/cli/merge";
+import { mergeUnits, type RenderedUnit, unifiedDiff } from "../../src/cli/merge";
 
 const tableUnit = (
   exportName: string,
@@ -172,5 +172,22 @@ export const greet = defineFunction("greet", { name: sz.string() })
     expect(content).toContain(`RETURN "hello"`);
     expect(content).toContain(".returns(sz.string())");
     expect(content).not.toContain(`RETURN "hi"`);
+  });
+});
+
+describe("unifiedDiff", () => {
+  test("emits a git-style patch with file header and @@ hunk", () => {
+    const out = unifiedDiff("a\nb\nc\n", "a\nx\nc\n", "schema.ts");
+    expect(out).toContain("diff --git a/schema.ts b/schema.ts");
+    expect(out).toContain("--- a/schema.ts");
+    expect(out).toContain("+++ b/schema.ts");
+    expect(out).toMatch(/@@ -\d+,\d+ \+\d+,\d+ @@/);
+    expect(out).toContain("-b");
+    expect(out).toContain("+x");
+    expect(out).toContain(" a");
+  });
+
+  test("returns empty string when unchanged", () => {
+    expect(unifiedDiff("a\nb\n", "a\nb\n", "x")).toBe("");
   });
 });
