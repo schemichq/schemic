@@ -8,13 +8,18 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { Surreal, surql } from "surrealdb";
 import { z } from "zod";
 import { fromStandalone, fromTableDef } from "../../src/cli/lower";
+import { renderSchemaToTS } from "../../src/cli/pull";
 import {
   deepEqual,
   normalizeAccess,
+  normalizeDb,
   normalizeFunction,
   normalizeTable,
 } from "../../src/cli/struct";
-import { introspectStructured } from "../../src/cli/structure";
+import {
+  type DbStructured,
+  introspectStructured,
+} from "../../src/cli/structure";
 import { emitDefStatement, emitStatements } from "../../src/ddl";
 import {
   defineFunction,
@@ -156,5 +161,30 @@ live("struct-parity", () => {
     }
 
     expect(diverged).toEqual([]);
+  });
+
+  test("diff --ts: rendering both sides to TS converges (no spurious change)", async () => {
+    if (!db) return;
+    // Both sides already applied in the test above; re-introspect the live (current) side.
+    const live = await introspectStructured(db, new Set());
+    const schema: DbStructured = {
+      tables: TABLES.map((t) => fromTableDef(asTable(t))),
+      functions: DEFS.map((d) => fromStandalone(asDef(d))).filter(
+        (x): x is Parameters<typeof normalizeFunction>[0] => "block" in x,
+      ),
+      accesses: [],
+    };
+    // Restrict the live side to the corpus objects (the scratch DB holds only these).
+    const names = new Set(schema.tables.map((t) => t.name));
+    const liveCorpus: DbStructured = {
+      tables: live.tables.filter((t) => names.has(t.name)),
+      functions: live.functions.filter((f) =>
+        schema.functions.some((s) => s.name === f.name),
+      ),
+      accesses: [],
+    };
+    expect(renderSchemaToTS(normalizeDb(schema))).toBe(
+      renderSchemaToTS(normalizeDb(liveCorpus)),
+    );
   });
 });

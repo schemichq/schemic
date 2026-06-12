@@ -641,20 +641,7 @@ export async function planPull(
     opts.filter ?? parseFilter({}),
   );
 
-  // Reference graph (record<…> targets + relation endpoints) → cycle-aware imports / ordering.
-  const pulled = new Set(tables.map((t) => t.name));
-  const graph = new Map(tables.map((t) => [t.name, tableRefs(t, pulled)]));
-  const resolve = makeResolver(graph, pulled);
-  const constOf = (n: string) => pascal(n) || n;
-  const makeCtx = (t: StructTable): RenderCtx => ({
-    table: t.name,
-    imports: new Set(),
-    usesSelf: false,
-    allowSelf: t.kind.kind !== "RELATION", // only defineTable takes the `self` callback
-    constOf,
-    resolve: (target) => resolve(t.name, target),
-  });
-
+  const makeCtx = ctxFactory(tables);
   const keepLocal = opts.keepLocal ?? false;
 
   // Single-file layout: one combined module.
@@ -774,6 +761,28 @@ function accessUnit(a: StructAccess): RenderedUnit {
     code: renderAccessConst(a),
     imports: [`import { defineAccess, surql } from "surreal-zod";`],
   };
+}
+
+/** Build the per-table {@link RenderCtx} factory: cycle-aware ref resolution + import accumulation. */
+function ctxFactory(tables: StructTable[]): (t: StructTable) => RenderCtx {
+  // Reference graph (record<…> targets + relation endpoints) → cycle-aware imports / ordering.
+  const pulled = new Set(tables.map((t) => t.name));
+  const graph = new Map(tables.map((t) => [t.name, tableRefs(t, pulled)]));
+  const resolve = makeResolver(graph, pulled);
+  const constOf = (n: string) => pascal(n) || n;
+  return (t) => ({
+    table: t.name,
+    imports: new Set(),
+    usesSelf: false,
+    allowSelf: t.kind.kind !== "RELATION", // only defineTable takes the `self` callback
+    constOf,
+    resolve: (target) => resolve(t.name, target),
+  });
+}
+
+/** Render a whole structured schema to one canonical TypeScript module (the source of `diff --ts`). */
+export function renderSchemaToTS(db: DbStructured): string {
+  return assembleCombined(db, ctxFactory(db.tables));
 }
 
 /** Assemble the single-file combined module (tables ordered so same-file refs resolve). */

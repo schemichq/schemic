@@ -4,10 +4,21 @@ import { type DefineStatement, overwriteStatement } from "surreal-zod";
 import { escapeIdent, type Surreal } from "surrealdb";
 import type { ResolvedConfig } from "./config";
 import { buildSnapshot, type Diff, diffSnapshots } from "./diff";
-import { type Filter, filterSnapshot, parseFilter } from "./filter";
+import {
+  type Filter,
+  filterSnapshot,
+  filterStructured,
+  parseFilter,
+} from "./filter";
 import { listMigrations, type Snapshot } from "./meta";
+import { renderSchemaToTS } from "./pull";
 import { loadDefs } from "./schema";
-import { introspectStructured, structuredSnapshot } from "./structure";
+import { normalizeDb } from "./struct";
+import {
+  type DbStructured,
+  introspectStructured,
+  structuredSnapshot,
+} from "./structure";
 
 const SHADOW_DB = "__surreal_zod_shadow";
 const SHADOW_MIG_DB = "__surreal_zod_shadow_mig";
@@ -58,6 +69,56 @@ async function applyToShadow(
     await db.use({ namespace, database });
     await db.query(`REMOVE DATABASE IF EXISTS ${escapeIdent(shadowDb)};`);
   }
+}
+
+/**
+ * Apply `ddl` to a fresh scratch database and return its STRUCTURED introspection (the Struct-IR
+ * form, not the canonical-DDL snapshot), then drop it. Backs `diff --ts`'s desired (schema) side —
+ * normalizing the schema THROUGH SurrealDB so it lands in the same form INFO returns for the live DB.
+ */
+export async function shadowStructured(
+  db: Surreal,
+  config: ResolvedConfig,
+  ddl: string,
+): Promise<DbStructured> {
+  const { namespace, database } = config.db;
+  await db.query(`REMOVE DATABASE IF EXISTS ${escapeIdent(SHADOW_DB)};`);
+  await db.query(`DEFINE DATABASE ${escapeIdent(SHADOW_DB)};`);
+  try {
+    await db.use({ namespace, database: SHADOW_DB });
+    if (ddl) await db.query(`BEGIN;\n${ddl}\nCOMMIT;`);
+    return await introspectStructured(db);
+  } finally {
+    await db.use({ namespace, database });
+    await db.query(`REMOVE DATABASE IF EXISTS ${escapeIdent(SHADOW_DB)};`);
+  }
+}
+
+/**
+ * The two sides of `diff --ts --live` rendered as canonical TypeScript: the live database
+ * (`current`) and the declared schema (`desired`). Both are introspected to the Struct-IR
+ * (the schema via a shadow apply), normalized, then rendered with the pull renderer — so an
+ * unchanged schema yields identical TS and the diff is empty.
+ */
+export async function tsViewsAgainstDb(
+  db: Surreal,
+  config: ResolvedConfig,
+  filter: Filter = parseFilter({}),
+): Promise<{ current: string; desired: string }> {
+  const exclude = new Set([
+    config.migrationsTable,
+    `${config.migrationsTable}_lock`,
+  ]);
+  const target = await introspectStructured(db, exclude);
+  const { tables, defs } = await loadDefs(config.schemaPath);
+  const ddl = Object.values(buildSnapshot(tables, defs).statements)
+    .sort(byCreate)
+    .map((s) => s.ddl)
+    .join("\n");
+  const desired = await shadowStructured(db, config, ddl);
+  const render = (d: DbStructured) =>
+    renderSchemaToTS(normalizeDb(filterStructured(d, filter)));
+  return { current: render(target), desired: render(desired) };
 }
 
 /**

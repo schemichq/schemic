@@ -30,6 +30,7 @@ import {
   applyStatements,
   diffAgainstDb,
   syncPlan,
+  tsViewsAgainstDb,
   verifyMigrations,
 } from "./introspect";
 import { actionLabel, lineDiff } from "./merge";
@@ -303,6 +304,10 @@ kindFlags(
 )
   .option("--down", "also show the rollback (down) statements")
   .option("--live", "diff against the live database instead of the snapshot")
+  .option(
+    "--ts",
+    "show the change as TypeScript schema instead of SurrealQL (with --live)",
+  )
   .option("--watch", "re-run on schema changes")
   .option("--full", "show the full schema SQL, not just the changed parts")
   .option(
@@ -324,6 +329,7 @@ kindFlags(
         FilterOpts & {
           down?: boolean;
           live?: boolean;
+          ts?: boolean;
           watch?: boolean;
           full?: boolean;
           patch?: boolean;
@@ -364,6 +370,31 @@ kindFlags(
         const persistent =
           opts.watch && opts.live ? await connect(config, opts) : undefined;
         const once = async () => {
+          // TypeScript view: render both sides as canonical TS and line-diff them.
+          if (opts.ts) {
+            if (!opts.live)
+              throw new Error(
+                "diff --ts currently requires --live (offline --ts needs the Struct snapshot — coming next).",
+              );
+            const db = persistent ?? (await connect(config, opts));
+            try {
+              const { current, desired } = await tsViewsAgainstDb(
+                db,
+                config,
+                filter,
+              );
+              if (opts.json) {
+                console.log(JSON.stringify({ current, desired }));
+              } else if (current === desired) {
+                console.log(ok("Schema matches the live database."));
+              } else {
+                console.log(lineDiff(current, desired));
+              }
+            } finally {
+              if (!persistent) await db.close();
+            }
+            return;
+          }
           if (opts.live) {
             const db = persistent ?? (await connect(config, opts));
             try {
