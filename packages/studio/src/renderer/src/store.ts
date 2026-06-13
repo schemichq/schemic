@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { mutative } from "zustand-mutative";
+import type { Span, SpanLink } from "./adapters/Codegen";
 import type { QueryOutcome } from "./adapters/QueryEngine";
 import { getFileSystem, getQueryEngine } from "./runtime";
 import "./settings/defs"; // register built-in setting definitions (side effect)
@@ -91,21 +92,21 @@ interface StudioState {
   openFileDialog: () => Promise<void>;
   openFilePath: (path: string) => Promise<void>;
   saveActive: () => Promise<void>;
-  // Cursor sync: the codegen source map (source line <-> generated line per table/field),
-  // plus the currently-linked pair and which editor drove it — so the OTHER editor reveals
-  // + highlights its paired line without an editor highlighting its own cursor line.
-  codegenMap: { sourceLine: number; genLine: number }[];
-  setCodegenMap: (map: { sourceLine: number; genLine: number }[]) => void;
+  // Cursor sync: the codegen span map (per-clause source span <-> generated span), plus the
+  // currently-linked pair and which editor drove it — so the OTHER editor reveals + highlights
+  // its paired span without an editor highlighting its own cursor.
+  codegenMap: SpanLink[];
+  setCodegenMap: (map: SpanLink[]) => void;
   linked: {
-    sourceLine: number;
-    genLine: number;
-    source: "editor" | "preview";
+    source: Span;
+    gen: Span;
+    from: "editor" | "preview";
   } | null;
   setLinked: (
     linked: {
-      sourceLine: number;
-      genLine: number;
-      source: "editor" | "preview";
+      source: Span;
+      gen: Span;
+      from: "editor" | "preview";
     } | null,
   ) => void;
   // Query / results.

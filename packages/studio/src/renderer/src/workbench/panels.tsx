@@ -2,38 +2,67 @@ import Editor, { type Monaco } from "@monaco-editor/react";
 import { FileCode, Play, X } from "lucide-react";
 import type { editor as MonacoEditor } from "monaco-editor";
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { Span, SpanLink } from "../adapters/Codegen";
 import { runCommand } from "../commands/registry";
 import { installSurqlTemplateHighlight } from "../monaco/surqlTemplate";
 import { getCodegen } from "../runtime";
 import { activeDoc, type Doc, useStudio } from "../store";
 import { PaneHeader, type PaneType } from "./PaneHeader";
 
-// Apply (or clear) the linked-line decoration + reveal on an editor.
-function applyLinkedLine(
+// Apply (or clear) the linked-span decoration + reveal on an editor.
+function applyLinkedSpan(
   ed: MonacoEditor.IStandaloneCodeEditor,
   collection: MonacoEditor.IEditorDecorationsCollection,
-  line: number | null,
+  span: Span | null,
 ): void {
-  if (!line) {
+  if (!span) {
     collection.clear();
     return;
   }
+  const range = {
+    startLineNumber: span.startLine,
+    startColumn: span.startCol,
+    endLineNumber: span.endLine,
+    endColumn: span.endCol,
+  };
   collection.set([
     {
-      range: {
-        startLineNumber: line,
-        startColumn: 1,
-        endLineNumber: line,
-        endColumn: 1,
-      },
+      range,
       options: {
-        isWholeLine: true,
-        className: "linked-line",
+        className: "linked-range",
         linesDecorationsClassName: "linked-glyph",
       },
     },
   ]);
-  ed.revealLineInCenterIfOutsideViewport(line);
+  ed.revealRangeInCenterIfOutsideViewport(range);
+}
+
+const spanContains = (s: Span, line: number, col: number): boolean => {
+  if (line < s.startLine || line > s.endLine) return false;
+  if (line === s.startLine && col < s.startCol) return false;
+  if (line === s.endLine && col > s.endCol) return false;
+  return true;
+};
+
+const spanArea = (s: Span): number =>
+  (s.endLine - s.startLine) * 100000 + (s.endCol - s.startCol);
+
+// The smallest span (on `side`) containing the position — so a clause link beats the FULL link.
+function findLink(
+  map: SpanLink[],
+  line: number,
+  col: number,
+  side: "source" | "gen",
+): SpanLink | null {
+  let best: SpanLink | null = null;
+  for (const l of map) {
+    if (
+      spanContains(l[side], line, col) &&
+      (!best || spanArea(l[side]) < spanArea(best[side]))
+    )
+      best = l;
+  }
+  return best;
 }
 
 export function EditorPanel() {
@@ -51,16 +80,16 @@ export function EditorPanel() {
   );
   const [ready, setReady] = useState(false);
 
-  // Cursor sync (reverse): when the preview drove, mark the linked source line here.
+  // Cursor sync (reverse): when the preview drove, mark the linked source span here.
   // biome-ignore lint/correctness/useExhaustiveDependencies: ready triggers after the editor mounts.
   useEffect(() => {
     const ed = editorRef.current;
     if (!ed) return;
     if (!decoRef.current) decoRef.current = ed.createDecorationsCollection();
-    applyLinkedLine(
+    applyLinkedSpan(
       ed,
       decoRef.current,
-      linked && linked.source === "preview" ? linked.sourceLine : null,
+      linked && linked.from === "preview" ? linked.source : null,
     );
   }, [linked, ready]);
 
@@ -158,14 +187,21 @@ export function EditorPanel() {
                 void runCommand("command.palette");
               },
             );
-            // Cursor sync (forward): map the cursor's source line to the generated line
-            // so the preview reveals + marks it.
+            // Cursor sync (forward): map the cursor's source span to the generated span
+            // so the preview reveals + marks the matching clause.
             editor.onDidChangeCursorPosition((e) => {
               const st = useStudio.getState();
-              const hit = st.codegenMap.find(
-                (m) => m.sourceLine === e.position.lineNumber,
+              const hit = findLink(
+                st.codegenMap,
+                e.position.lineNumber,
+                e.position.column,
+                "source",
               );
-              st.setLinked(hit ? { ...hit, source: "editor" } : null);
+              st.setLinked(
+                hit
+                  ? { source: hit.source, gen: hit.gen, from: "editor" }
+                  : null,
+              );
             });
             // SurrealQL highlighting inside surql`...` tagged templates.
             installSurqlTemplateHighlight(editor, monaco);
@@ -340,16 +376,16 @@ function SurrealqlPreview({
   );
   const [ready, setReady] = useState(false);
 
-  // Cursor sync (forward): when the editor drove, reveal + mark the linked generated line.
+  // Cursor sync (forward): when the editor drove, reveal + mark the linked generated span.
   // biome-ignore lint/correctness/useExhaustiveDependencies: ready triggers after the editor mounts.
   useEffect(() => {
     const ed = editorRef.current;
     if (!ed) return;
     if (!decoRef.current) decoRef.current = ed.createDecorationsCollection();
-    applyLinkedLine(
+    applyLinkedSpan(
       ed,
       decoRef.current,
-      linked && linked.source === "editor" ? linked.genLine : null,
+      linked && linked.from === "editor" ? linked.gen : null,
     );
   }, [linked, ready]);
 
@@ -395,14 +431,21 @@ function SurrealqlPreview({
         onMount={(ed: MonacoEditor.IStandaloneCodeEditor, _m: Monaco) => {
           editorRef.current = ed;
           setReady(true);
-          // Cursor sync (reverse): map the cursor's generated line to the source line so
-          // the editor reveals + marks the declaration.
+          // Cursor sync (reverse): map the cursor's generated span to the source span so
+          // the editor reveals + marks the matching clause.
           ed.onDidChangeCursorPosition((e) => {
             const st = useStudio.getState();
-            const hit = st.codegenMap.find(
-              (m) => m.genLine === e.position.lineNumber,
+            const hit = findLink(
+              st.codegenMap,
+              e.position.lineNumber,
+              e.position.column,
+              "gen",
             );
-            st.setLinked(hit ? { ...hit, source: "preview" } : null);
+            st.setLinked(
+              hit
+                ? { source: hit.source, gen: hit.gen, from: "preview" }
+                : null,
+            );
           });
         }}
         options={{

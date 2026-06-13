@@ -1251,9 +1251,11 @@ button {
   font-style: italic;
 }
 
-/* Linked highlighting: the generated DEFINE line matching the editor cursor's field. */
-.linked-line {
-  background: #221a30;
+/* Linked highlighting: the generated clause span matching the editor cursor (and back). */
+.linked-range {
+  background: #2a2040;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px var(--accent-purple) inset;
 }
 .linked-glyph {
   background: var(--accent-purple);

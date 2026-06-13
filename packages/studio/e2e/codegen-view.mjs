@@ -69,13 +69,53 @@ const mapLen = await win.evaluate(
 );
 console.log("source map entries:", mapLen);
 
-// Forward: move the editor cursor to a mapped source line -> preview marks the gen line.
+// Clause-level links present (TYPE / ASSERT / DEFAULT spans, not just FULL).
+const clauses = await win.evaluate(() => [
+  ...new Set(window.__studio.getState().codegenMap.map((l) => l.clause)),
+]);
+console.log("clauses mapped:", clauses.sort().join(","));
+
+// surql`` drill-in (Phase 2): the template body maps to the inlined expr, sans clause keyword.
+const drill = await win.evaluate(() => {
+  const m = window.__studio
+    .getState()
+    .codegenMap.find((l) => l.clause.endsWith(":expr"));
+  if (!m) return null;
+  const eds = window.__monaco.editor.getEditors();
+  const get = (uriTs, s) => {
+    const ed = eds.find((e) =>
+      uriTs
+        ? e.getModel()?.uri.path.endsWith(".ts")
+        : !e.getModel()?.uri.path.endsWith(".ts"),
+    );
+    return ed.getModel().getValueInRange({
+      startLineNumber: s.startLine,
+      startColumn: s.startCol,
+      endLineNumber: s.endLine,
+      endColumn: s.endCol,
+    });
+  };
+  return { clause: m.clause, src: get(true, m.source), gen: get(false, m.gen) };
+});
+console.log(
+  "drill-in:",
+  drill
+    ? `${drill.clause} src=${JSON.stringify(drill.src)} gen=${JSON.stringify(drill.gen)} match=${drill.src === drill.gen}`
+    : "(none)",
+);
+
+// Forward: put the editor cursor inside a clause source span -> preview marks the gen span.
 const fwd = await win.evaluate(() => {
-  const m = window.__studio.getState().codegenMap.find((e) => e.sourceLine > 0);
+  const m = window.__studio
+    .getState()
+    .codegenMap.find((l) => l.clause !== "FULL");
   if (!m) return false;
   const eds = window.__monaco.editor.getEditors();
   const src = eds.find((e) => e.getModel()?.uri.path.endsWith(".ts"));
-  src.setPosition({ lineNumber: m.sourceLine, column: 1 });
+  src.setPosition({
+    lineNumber: m.source.startLine,
+    column: m.source.startCol,
+  });
   src.focus();
   return true;
 });
@@ -83,25 +123,27 @@ await win.waitForTimeout(300);
 console.log(
   "forward (editor->preview) highlight:",
   await win.evaluate(
-    () => !!document.querySelector(".output-panel .linked-line"),
+    () => !!document.querySelector(".output-panel .linked-range"),
   ),
   "| triggered:",
   fwd,
 );
 
-// Reverse: move the preview cursor to a mapped gen line -> editor marks the source line.
+// Reverse: put the preview cursor inside a clause gen span -> editor marks the source span.
 await win.evaluate(() => {
-  const m = window.__studio.getState().codegenMap.find((e) => e.genLine > 1);
+  const m = window.__studio
+    .getState()
+    .codegenMap.find((l) => l.clause !== "FULL");
   const eds = window.__monaco.editor.getEditors();
   const prev = eds.find((e) => !e.getModel()?.uri.path.endsWith(".ts"));
-  prev.setPosition({ lineNumber: m.genLine, column: 1 });
+  prev.setPosition({ lineNumber: m.gen.startLine, column: m.gen.startCol });
   prev.focus();
 });
 await win.waitForTimeout(300);
 console.log(
   "reverse (preview->editor) highlight:",
   await win.evaluate(
-    () => !!document.querySelector(".editor-host .linked-line"),
+    () => !!document.querySelector(".editor-host .linked-range"),
   ),
 );
 

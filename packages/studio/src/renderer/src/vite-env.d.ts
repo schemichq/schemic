@@ -30,10 +30,21 @@ interface StudioBridge {
       surql?: string;
       error?: string;
       map?: Array<{
+        clause: string;
         kind: string;
-        name: string;
-        sourceLine: number;
-        genLine: number;
+        key: string;
+        source: {
+          startLine: number;
+          startCol: number;
+          endLine: number;
+          endCol: number;
+        };
+        gen: {
+          startLine: number;
+          startCol: number;
+          endLine: number;
+          endCol: number;
+        };
       }>;
     }>;
   };
