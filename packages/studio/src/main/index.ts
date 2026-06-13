@@ -3,6 +3,7 @@ import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { generateSurql } from "./codegen";
+import { setTsEventSink, stopTsServer, tsNotify, tsRequest } from "./lsp";
 
 // WSL/headless friendliness: avoid GPU + sandbox issues when running under WSLg.
 app.disableHardwareAcceleration();
@@ -85,6 +86,20 @@ ipcMain.handle("codegen:fromFile", (_e, p: string, content?: string) =>
   generateSurql(assertAllowed(p), content),
 );
 
+// Real TypeScript language service (tsserver). The renderer opens/edits docs via notify
+// and asks for completions/hover/etc via request; tsserver events (diagnostics) are
+// pushed back on `lsp:event`. tsserver reads the project from disk (node_modules/tsconfig).
+setTsEventSink((msg) => {
+  for (const w of BrowserWindow.getAllWindows())
+    w.webContents.send("lsp:event", msg);
+});
+ipcMain.on("lsp:notify", (_e, command: string, args: unknown) =>
+  tsNotify(command, args),
+);
+ipcMain.handle("lsp:request", (_e, command: string, args: unknown) =>
+  tsRequest(command, args),
+);
+
 ipcMain.handle("dialog:openDirectory", async () => {
   const r = await dialog.showOpenDialog({ properties: ["openDirectory"] });
   const dir = r.canceled ? null : (r.filePaths[0] ?? null);
@@ -139,5 +154,6 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
+  stopTsServer();
   app.quit();
 });

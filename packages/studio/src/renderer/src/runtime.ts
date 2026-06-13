@@ -3,6 +3,9 @@ import { IpcCodegen } from "./adapters/codegen/IpcCodegen";
 import { WasmQueryEngine } from "./adapters/engines/WasmQueryEngine";
 import type { FileSystem } from "./adapters/FileSystem";
 import { LocalFS } from "./adapters/fs/LocalFS";
+import type { LanguageService } from "./adapters/LanguageService";
+import { BundledTypesLanguageService } from "./adapters/lsp/BundledTypesLanguageService";
+import { TsServerLanguageService } from "./adapters/lsp/TsServerLanguageService";
 import type { QueryEngine } from "./adapters/QueryEngine";
 
 // Runtime profile: binds capability adapters for the active mode. For now there is
@@ -27,4 +30,17 @@ let codegen: Codegen | null = null;
 export function getCodegen(): Codegen {
   if (!codegen) codegen = new IpcCodegen();
   return codegen;
+}
+
+let languageService: LanguageService | null = null;
+
+export function getLanguageService(): LanguageService {
+  if (!languageService) {
+    // Desktop has a real tsserver over IPC; the web/embedded build falls back to
+    // Monaco's built-in worker + bundled ambient types.
+    languageService = window.studio?.lsp
+      ? new TsServerLanguageService(window.studio.lsp)
+      : new BundledTypesLanguageService();
+  }
+  return languageService;
 }

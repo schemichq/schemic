@@ -37,4 +37,15 @@ contextBridge.exposeInMainWorld("studio", {
     ): Promise<{ ok: boolean; surql?: string; error?: string }> =>
       ipcRenderer.invoke("codegen:fromFile", path, content),
   },
+  lsp: {
+    notify: (command: string, args: unknown) =>
+      ipcRenderer.send("lsp:notify", command, args),
+    request: (command: string, args: unknown): Promise<unknown> =>
+      ipcRenderer.invoke("lsp:request", command, args),
+    onEvent: (cb: (msg: unknown) => void) => {
+      const handler = (_e: unknown, msg: unknown) => cb(msg);
+      ipcRenderer.on("lsp:event", handler);
+      return () => ipcRenderer.removeListener("lsp:event", handler);
+    },
+  },
 });

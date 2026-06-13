@@ -77,10 +77,12 @@ export function EditorPanel() {
       </div>
       <div className="editor-host">
         <Editor
-          key={activePath ?? "empty"}
+          // `path` keys the model by the real file path so tsserver + the language
+          // providers see the actual file (and switching tabs preserves per-file undo).
+          path={active.path}
           height="100%"
-          defaultLanguage={active?.language ?? "surrealql"}
-          defaultValue={active?.content ?? ""}
+          defaultLanguage={active.language}
+          defaultValue={active.content}
           theme="reverie-dark"
           onChange={(v) => {
             if (activePath) setContent(activePath, v ?? "");

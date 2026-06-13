@@ -27,6 +27,11 @@ interface StudioBridge {
       content?: string,
     ) => Promise<{ ok: boolean; surql?: string; error?: string }>;
   };
+  lsp: {
+    notify: (command: string, args: unknown) => void;
+    request: (command: string, args: unknown) => Promise<unknown>;
+    onEvent: (cb: (msg: unknown) => void) => () => void;
+  };
 }
 
 interface Window {

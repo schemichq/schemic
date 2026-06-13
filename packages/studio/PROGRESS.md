@@ -36,7 +36,7 @@
 - [x] **Run loop** — Run button + Cmd/Ctrl+Enter → real query results (WASM sandbox engine)
 - [x] **Live codegen (Slice 2)** — `.ts`/`.js` → generated SurrealQL via the **main-process engine bridge** (jiti loads the schema + surreal-zod's `emitTable`/`emitDefStatement`); read-only Monaco preview; **live from the editor buffer** (debounced) — the buffer is written to a hidden sibling temp file and loaded from there, so unsaved edits reflect AND imports resolve; refresh button forces a re-run. Emit + schema share ONE jiti instance so native field codecs (datetime/uuid/recordId) aren't misread as `sz.custom` (same class of bug as CLI `18e66b6`). Path-scoped IPC like `fs:*`
 - [x] **Linked highlighting (Slice 2)** — editor cursor on a field/table identifier marks the matching `DEFINE` line in the preview (name-based; emit has no source positions yet)
-- [ ] **Real `sz.*` autocomplete** — Monaco currently has ambient module decls (no false errors, but imports are `any`). Full autocomplete needs the surreal-zod → surrealdb → zod `.d.ts` graph loaded into Monaco (or a bundled self-contained `.d.ts` from core)
+- [x] **Real `sz.*` autocomplete + diagnostics (true LSP)** — a real **tsserver** child process (`fork --useNodeIpc`, the same engine VSCode uses) reads the opened project's `node_modules` + `tsconfig` from disk. Monaco's built-in TS worker is disabled; completion / hover / diagnostics + doc sync (open / incremental change / close) flow to tsserver over IPC. Verified: `sz.` → 74 real members with type signatures, suggest widget renders, imports resolve (0 false "Cannot find module"). Web/embedded falls back to bundled ambient types
 - [ ] **Full dock** (Slice 3) — N-pane subtabs + `+`, vertical split, detach-to-tab, collapse-to-strip
 - [ ] Terminal — real xterm + `sz` output stream (a **static placeholder** pane is currently rendered; Terminal is also a selectable output type)
 
@@ -63,6 +63,7 @@
 - [x] **Adapter / runtime pattern established** — `QueryEngine` interface + `runtime` registry + one impl
 - [x] **`WasmQueryEngine`** (`@surrealdb/wasm`, renderer, seeded `mem://`) — powers the Run loop (playground profile)
 - [x] **`Codegen` adapter (`IpcCodegen`) + main-process bridge** — first capability to reach `packages/core` (`surreal-zod` + `jiti` deps); generates SurrealQL from schema files. Web has no codegen (returns a clear message)
+- [x] **`LanguageService` adapter + main-process LSP host** — `TsServerLanguageService` (real tsserver over IPC) on desktop, `BundledTypesLanguageService` (ambient) for embedded/web; runtime picks by `window.studio.lsp` availability. `typescript` is a runtime dep
 - [ ] Other capability adapters (`Terminal` / `SecretStore`) — not yet created
 - [x] **File Explorer** (Code-module secondary sidebar) — canonical `design/app.pen`: 264px, resizable + collapsible, project header (name + collapse), `TreeRow` (chevron / per-type icons / indent / hover+active / modified amber dot), lazy `readDir` per expand (ignores `.git`/`node_modules`), click a file → opens a tab. Empty state = Open Folder
 - [x] **Monaco project types (LSP)** — ambient module declarations for `surreal-zod`/`surrealdb`/`zod` + TS compiler options, so schema files no longer show false `Cannot find module` (ts2792). Real `.d.ts` graph for `sz.*` autocomplete is a follow-up

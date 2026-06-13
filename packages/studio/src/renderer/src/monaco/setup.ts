@@ -8,6 +8,7 @@ import cssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker";
 import htmlWorker from "monaco-editor/esm/vs/language/html/html.worker?worker";
 import jsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
 import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
+import { getLanguageService } from "../runtime";
 
 self.MonacoEnvironment = {
   getWorker(_workerId, label) {
@@ -137,37 +138,11 @@ monaco.editor.defineTheme("reverie-dark", {
   },
 });
 
-// TypeScript worker config for schema files. The worker runs in the browser with no
-// filesystem, so bare specifiers (`surreal-zod`, `surrealdb`, `zod`) can't be resolved —
-// without help every schema file shows a false "Cannot find module" (ts2792). Ambient
-// module declarations make those imports resolve (typed as any for now). Loading the
-// real .d.ts graph for proper sz.* autocomplete is a follow-up.
-//
-// `monaco.languages.typescript` is typed as deprecated in the ESM build (the full
-// namespace lives in the global d.ts), so reach it via a minimal cast + numeric enums.
-const tsDefaults = (
-  monaco.languages as unknown as {
-    typescript: {
-      typescriptDefaults: {
-        setCompilerOptions(o: Record<string, unknown>): void;
-        addExtraLib(content: string, filePath: string): void;
-      };
-    };
-  }
-).typescript.typescriptDefaults;
-tsDefaults.setCompilerOptions({
-  target: 99, // ESNext
-  module: 99, // ESNext
-  moduleResolution: 2, // NodeJs
-  allowNonTsExtensions: true,
-  esModuleInterop: true,
-  skipLibCheck: true,
-  noEmit: true,
-  strict: false,
-});
-tsDefaults.addExtraLib(
-  'declare module "surreal-zod";\ndeclare module "surrealdb";\ndeclare module "zod";\n',
-  "file:///reverie/ambient-modules.d.ts",
-);
+// Install the language service for TS/JS schema files: a real tsserver on desktop, or the
+// bundled-types fallback in the web/embedded build. (See adapters/LanguageService.)
+getLanguageService().install(monaco);
 
 loader.config({ monaco });
+
+// Dev/e2e seam: expose monaco for inspection + automation.
+(window as unknown as { __monaco?: typeof monaco }).__monaco = monaco;
