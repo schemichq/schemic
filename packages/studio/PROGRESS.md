@@ -27,15 +27,16 @@
 - [ ] Action surfaces — not implemented; placement *decided* (design-expert): Run in Query toolbar + Cmd/Enter · Pull/Push via drift chip → diff panel + Migrations bar · Search = Cmd/K palette
 
 ## Code Editor view (canonical `design/app.pen` "output treatments")
+- [x] **Starts empty** — no sample/scratch query; the editor shows a "No file open" state until a file is opened from the Explorer. Run button shows only for `.surql` docs
 - [x] **Editor pane = file tabs** — multi-doc tab strip (file-code icon, active = canvas bg + 2px accent underline, dirty dot, close); Monaco bound to the active doc
 - [x] **Contextual output pane** — `.surql` active file → Result; `.ts`/`.js` → SurrealQL preview (read-only). Default type derived from the active file's language
 - [x] **Reusable `PaneHeader`** (matches `ooDTM`) — type icon + accent-underlined title + **type-switcher dropdown** (SurrealQL / Result / Terminal / Problems, switch in place); lock shown when read-only
 - [x] dockview group tab bar hidden — each pane carries its own canonical header (rearrange/detach is Slice 3)
 - [x] Result body — **live** results: dynamic table / JSON toggle, row+timing meta, error display
 - [x] **Run loop** — Run button + Cmd/Ctrl+Enter → real query results (WASM sandbox engine)
-- [x] **Live codegen (Slice 2)** — `.ts`/`.js` → generated SurrealQL via the **main-process engine bridge** (jiti loads the schema + surreal-zod's `emitTable`/`emitDefStatement`); read-only Monaco preview; regenerates on open / save / refresh. Emit + schema share ONE jiti instance so native field codecs (datetime/uuid/recordId) aren't misread as `sz.custom` (same class of bug as CLI `18e66b6`). Path-scoped IPC like `fs:*`
+- [x] **Live codegen (Slice 2)** — `.ts`/`.js` → generated SurrealQL via the **main-process engine bridge** (jiti loads the schema + surreal-zod's `emitTable`/`emitDefStatement`); read-only Monaco preview; **live from the editor buffer** (debounced) — the buffer is written to a hidden sibling temp file and loaded from there, so unsaved edits reflect AND imports resolve; refresh button forces a re-run. Emit + schema share ONE jiti instance so native field codecs (datetime/uuid/recordId) aren't misread as `sz.custom` (same class of bug as CLI `18e66b6`). Path-scoped IPC like `fs:*`
 - [x] **Linked highlighting (Slice 2)** — editor cursor on a field/table identifier marks the matching `DEFINE` line in the preview (name-based; emit has no source positions yet)
-- [ ] **Codegen — true per-keystroke live** — currently regenerates from the saved file (jiti `evalModule` on the in-memory buffer resolves a 2nd surreal-zod instance → false `sz.custom`); revisit with an in-memory loader or core helper
+- [ ] **Real `sz.*` autocomplete** — Monaco currently has ambient module decls (no false errors, but imports are `any`). Full autocomplete needs the surreal-zod → surrealdb → zod `.d.ts` graph loaded into Monaco (or a bundled self-contained `.d.ts` from core)
 - [ ] **Full dock** (Slice 3) — N-pane subtabs + `+`, vertical split, detach-to-tab, collapse-to-strip
 - [ ] Terminal — real xterm + `sz` output stream (a **static placeholder** pane is currently rendered; Terminal is also a selectable output type)
 

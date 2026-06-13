@@ -81,8 +81,8 @@ ipcMain.handle("fs:exists", async (_e, p: string) => {
 });
 // Generate SurrealQL from a schema file (path-scoped like fs:*). The codegen runs the
 // user's TS via jiti in the main process. (Engine bridge, Slice 2.)
-ipcMain.handle("codegen:fromFile", (_e, p: string) =>
-  generateSurql(assertAllowed(p)),
+ipcMain.handle("codegen:fromFile", (_e, p: string, content?: string) =>
+  generateSurql(assertAllowed(p), content),
 );
 
 ipcMain.handle("dialog:openDirectory", async () => {

@@ -24,6 +24,7 @@ interface StudioBridge {
   codegen: {
     fromFile: (
       path: string,
+      content?: string,
     ) => Promise<{ ok: boolean; surql?: string; error?: string }>;
   };
 }

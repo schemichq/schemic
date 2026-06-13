@@ -1049,6 +1049,27 @@ button {
   min-height: 0;
   position: relative;
 }
+.editor-empty {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  text-align: center;
+  padding: 32px;
+}
+.editor-empty-title {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+}
+.editor-empty-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
 .result-empty {
   padding: 16px;
   color: var(--text-muted);

@@ -21,8 +21,5 @@ createRoot(document.getElementById("root") as HTMLElement).render(
   </StrictMode>,
 );
 
-// Run the default query once on load so the result pane isn't empty at start.
-useStudio.getState().run();
-
 // Dev/e2e seam: expose the store for inspection + automation.
 (window as unknown as { __studio?: typeof useStudio }).__studio = useStudio;

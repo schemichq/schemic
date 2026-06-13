@@ -34,7 +34,9 @@ const IGNORED_ENTRIES = new Set([".git", "node_modules"]);
 async function readTree(dir: string): Promise<TreeNode[]> {
   const entries = await getFileSystem().readDir(dir);
   return entries
-    .filter((e) => !IGNORED_ENTRIES.has(e.name))
+    .filter(
+      (e) => !IGNORED_ENTRIES.has(e.name) && !e.name.includes(".reverie-tmp."),
+    )
     .map((e) => ({
       name: e.name,
       path: joinPath(dir, e.name),
@@ -67,25 +69,6 @@ function langFromPath(name: string): string {
   return "plaintext";
 }
 
-const DEFAULT_QUERY = `-- edit and Run (Cmd/Ctrl+Enter)
-SELECT id, name, email, age
-FROM user
-WHERE age >= 18
-ORDER BY age DESC;`;
-
-const SCRATCH_PATH = "scratch://query.surql";
-
-function scratchDoc(): Doc {
-  return {
-    path: SCRATCH_PATH,
-    name: "query.surql",
-    language: "surrealql",
-    content: DEFAULT_QUERY,
-    dirty: false,
-    scratch: true,
-  };
-}
-
 interface StudioState {
   // Settings (user scope) — overrides on top of registered defaults.
   userSettings: Record<string, unknown>;
@@ -108,8 +91,6 @@ interface StudioState {
   openFileDialog: () => Promise<void>;
   openFilePath: (path: string) => Promise<void>;
   saveActive: () => Promise<void>;
-  /** Bumps when a file is written to disk — codegen reads disk, so it re-runs on save. */
-  fileEpoch: number;
   // Linked highlighting: the field/table identifier under the editor cursor, matched
   // against generated DEFINE lines in the SurrealQL preview.
   linkedName: string | null;
@@ -173,8 +154,8 @@ export const useStudio = create<StudioState>()(
         s.expanded[path] = !s.expanded[path];
       });
     },
-    docs: [scratchDoc()],
-    activePath: SCRATCH_PATH,
+    docs: [],
+    activePath: null,
     setActivePath: (path) =>
       set((s) => {
         if (s.docs.some((d) => d.path === path)) s.activePath = path;
@@ -229,10 +210,8 @@ export const useStudio = create<StudioState>()(
       set((s) => {
         const d = s.docs.find((x) => x.path === doc.path);
         if (d) d.dirty = false;
-        s.fileEpoch++;
       });
     },
-    fileEpoch: 0,
     linkedName: null,
     setLinkedName: (name) =>
       set((s) => {

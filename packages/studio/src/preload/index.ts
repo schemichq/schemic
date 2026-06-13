@@ -33,7 +33,8 @@ contextBridge.exposeInMainWorld("studio", {
   codegen: {
     fromFile: (
       path: string,
+      content?: string,
     ): Promise<{ ok: boolean; surql?: string; error?: string }> =>
-      ipcRenderer.invoke("codegen:fromFile", path),
+      ipcRenderer.invoke("codegen:fromFile", path, content),
   },
 });

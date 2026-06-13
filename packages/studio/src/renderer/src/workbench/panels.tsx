@@ -16,6 +16,19 @@ export function EditorPanel() {
   const running = useStudio((s) => s.running);
   const active = useStudio(activeDoc);
 
+  if (!active) {
+    return (
+      <div className="panel editor-panel">
+        <div className="editor-empty">
+          <p className="editor-empty-title">No file open</p>
+          <p className="editor-empty-hint">
+            Open a file from the Explorer to start editing.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="panel editor-panel">
       <div className="editor-tabs">
@@ -49,16 +62,18 @@ export function EditorPanel() {
             </div>
           ))}
         </div>
-        <button
-          type="button"
-          className="run-btn editor-run"
-          onClick={() => runCommand("query.run")}
-          disabled={running}
-        >
-          <Play size={13} />
-          {running ? "Running…" : "Run"}
-          <kbd className="run-kbd">⌘↵</kbd>
-        </button>
+        {active.language === "surrealql" && (
+          <button
+            type="button"
+            className="run-btn editor-run"
+            onClick={() => runCommand("query.run")}
+            disabled={running}
+          >
+            <Play size={13} />
+            {running ? "Running…" : "Run"}
+            <kbd className="run-kbd">⌘↵</kbd>
+          </button>
+        )}
       </div>
       <div className="editor-host">
         <Editor
@@ -210,9 +225,9 @@ function ResultBody() {
 
 type CodegenState = { loading: boolean; surql: string; error: string | null };
 
-// Codegen for the active schema file via the main-process engine bridge. Reads the file
-// from disk, so it (re)generates when the file is opened, saved (fileEpoch bumps), or the
-// user hits refresh — not on every keystroke (the saved file is the source of truth).
+// Live codegen for the active schema file via the main-process engine bridge. Regenerates
+// (debounced) from the in-memory editor buffer, so the preview tracks unsaved edits; the
+// refresh button forces a re-run.
 function useCodegen(doc: Doc | null, enabled: boolean) {
   const [state, setState] = useState<CodegenState>({
     loading: false,
@@ -221,29 +236,33 @@ function useCodegen(doc: Doc | null, enabled: boolean) {
   });
   const [nonce, setNonce] = useState(0);
   const refresh = useCallback(() => setNonce((n) => n + 1), []);
-  const fileEpoch = useStudio((s) => s.fileEpoch);
   const path = doc?.path;
+  const content = doc?.content;
   const codegenable = !!doc && !doc.scratch;
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: fileEpoch (save) and nonce (refresh) are intentional re-run triggers — codegen reads from disk, not from these values.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: nonce is an intentional manual re-run trigger (refresh button), not read in the body.
   useEffect(() => {
-    if (!enabled || !codegenable || path === undefined) return;
+    if (!enabled || !codegenable || path === undefined || content === undefined)
+      return;
     let cancelled = false;
     setState((s) => ({ ...s, loading: true }));
-    getCodegen()
-      .fromFile(path)
-      .then((r) => {
-        if (cancelled) return;
-        setState({
-          loading: false,
-          surql: r.surql ?? "",
-          error: r.ok ? null : (r.error ?? "codegen failed"),
+    const t = setTimeout(() => {
+      getCodegen()
+        .fromFile(path, content)
+        .then((r) => {
+          if (cancelled) return;
+          setState({
+            loading: false,
+            surql: r.surql ?? "",
+            error: r.ok ? null : (r.error ?? "codegen failed"),
+          });
         });
-      });
+    }, 300);
     return () => {
       cancelled = true;
+      clearTimeout(t);
     };
-  }, [enabled, codegenable, path, fileEpoch, nonce]);
+  }, [enabled, codegenable, path, content, nonce]);
 
   return { ...state, refresh };
 }

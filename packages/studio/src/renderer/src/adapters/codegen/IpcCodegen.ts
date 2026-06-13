@@ -5,13 +5,13 @@ import type { Codegen, CodegenResult } from "../Codegen";
 export class IpcCodegen implements Codegen {
   readonly id = "ipc";
 
-  async fromFile(path: string): Promise<CodegenResult> {
+  async fromFile(path: string, content?: string): Promise<CodegenResult> {
     if (!window.studio?.codegen) {
       return {
         ok: false,
         error: "Codegen is only available in the desktop app.",
       };
     }
-    return window.studio.codegen.fromFile(path);
+    return window.studio.codegen.fromFile(path, content);
   }
 }

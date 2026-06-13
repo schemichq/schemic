@@ -28,16 +28,20 @@ await win.evaluate((d) => window.__studio.getState().openProject(d), dir);
 await win.evaluate((f) => window.__studio.getState().openFilePath(f), file);
 await win.waitForTimeout(300);
 const read = await win.evaluate(() => ({
-  tab: document.querySelector(".editor-file")?.textContent,
-  buffer: window.__studio.getState().query,
+  tab: document.querySelector(".file-tab.active .file-tab-name")?.textContent,
+  buffer: (() => {
+    const s = window.__studio.getState();
+    return s.docs.find((d) => d.path === s.activePath)?.content;
+  })(),
 }));
 console.log("READ  tab:", read.tab, "| buffer:", JSON.stringify(read.buffer));
 
 // Edit + save (WRITE path).
-await win.evaluate(() =>
-  window.__studio.getState().setQuery("SELECT * FROM edited;\n"),
-);
-await win.evaluate(() => window.__studio.getState().saveOpenFile());
+await win.evaluate(() => {
+  const s = window.__studio.getState();
+  s.setContent(s.activePath, "SELECT * FROM edited;\n");
+});
+await win.evaluate(() => window.__studio.getState().saveActive());
 await win.waitForTimeout(300);
 console.log("SAVE  on disk:", JSON.stringify(readFileSync(file, "utf8")));
 

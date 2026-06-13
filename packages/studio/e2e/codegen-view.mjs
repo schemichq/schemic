@@ -23,7 +23,7 @@ const app = await electron.launch({
 const win = await app.firstWindow();
 win.on("pageerror", (e) => console.log("[pageerror]", e.message));
 
-await win.waitForSelector(".file-tab.active");
+await win.waitForSelector(".editor-empty-title");
 
 // Open the schema file through the store (same path as Cmd+O).
 await win.evaluate(
@@ -33,6 +33,7 @@ await win.evaluate(
   },
   [schemaDir, schemaFile],
 );
+await win.waitForSelector(".file-tab.active");
 
 const tab = await win.evaluate(
   () => document.querySelector(".file-tab.active .file-tab-name")?.textContent,

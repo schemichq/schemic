@@ -10,6 +10,6 @@ export interface CodegenResult {
 
 export interface Codegen {
   readonly id: string;
-  /** Generate SurrealQL from the schema file on disk (regenerate after saving). */
-  fromFile(path: string): Promise<CodegenResult>;
+  /** Generate SurrealQL; pass the in-memory `content` to preview unsaved edits live. */
+  fromFile(path: string, content?: string): Promise<CodegenResult>;
 }

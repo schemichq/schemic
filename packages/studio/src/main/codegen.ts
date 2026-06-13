@@ -1,3 +1,5 @@
+import { unlink, writeFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 // Generate SurrealQL DDL from a `.ts`/`.js` schema file by loading it with jiti and
@@ -44,33 +46,47 @@ function isStandaloneDef(v: unknown): v is AnyDef {
   );
 }
 
+let tmpCounter = 0;
+
 /**
- * Generate SurrealQL for a schema file. When `content` is given, the in-memory editor
- * buffer is evaluated (with the real path as resolution context, so sibling/`surreal-zod`
- * imports still resolve) — live preview without saving. Otherwise the on-disk file is read.
+ * Generate SurrealQL for a schema file. When `content` is given (the unsaved editor
+ * buffer), it's written to a sibling temp file and loaded from there — so live edits are
+ * reflected AND sibling/`surreal-zod` imports still resolve from the project. Otherwise the
+ * on-disk file is read. (jiti.evalModule on the buffer resolves a SECOND surreal-zod
+ * instance — false sz.custom — so we go through a real file either way.)
  */
-export async function generateSurql(file: string): Promise<CodegenResult> {
+export async function generateSurql(
+  file: string,
+  content?: string,
+): Promise<CodegenResult> {
+  let tmp: string | null = null;
   try {
     const { createJiti } = await import("jiti");
-    // Base jiti at the schema file so `surreal-zod` + sibling imports resolve from the
-    // opened project. fsCache off so every call re-reads from disk (regenerates on save).
-    // moduleCache ON so, within THIS call, surreal-zod is evaluated once and shared
-    // between the emit import below and the schema's own `import "surreal-zod"` — one
-    // codec registry, so native fields aren't misread as sz.custom(). A fresh jiti per
-    // call keeps it current. (jiti.evalModule on the in-memory buffer would resolve a
-    // SECOND surreal-zod instance — false sz.custom — so we read the saved file.)
-    const jiti = createJiti(pathToFileURL(file).href, {
+    let target = file;
+    if (content !== undefined) {
+      // Hidden sibling so relative imports resolve and the tree filter hides it.
+      tmpCounter += 1;
+      tmp = join(
+        dirname(file),
+        `.${basename(file)}.${tmpCounter}.reverie-tmp.ts`,
+      );
+      await writeFile(tmp, content, "utf8");
+      target = tmp;
+    }
+    // Base jiti at the target file so `surreal-zod` + sibling imports resolve from the
+    // opened project. moduleCache ON so, within THIS call, surreal-zod is evaluated once
+    // and shared between the emit import below and the schema's own `import "surreal-zod"`
+    // — one codec registry, so native fields aren't misread as sz.custom().
+    const jiti = createJiti(pathToFileURL(target).href, {
       interopDefault: true,
       fsCache: false,
       moduleCache: true,
     });
-    // Load emit through the SAME jiti instance the schema uses, so both share one
-    // surreal-zod module — and one codec registry.
     const sz = (await jiti.import("surreal-zod")) as {
       emitTable: (t: unknown) => string;
       emitDefStatement: (d: unknown) => { ddl: string };
     };
-    const mod = (await jiti.import(file)) as Record<string, unknown>;
+    const mod = (await jiti.import(target)) as Record<string, unknown>;
 
     const tables: AnyTable[] = [];
     const defs: AnyDef[] = [];
@@ -91,5 +107,7 @@ export async function generateSurql(file: string): Promise<CodegenResult> {
     return { ok: true, surql: parts.join("\n\n") };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  } finally {
+    if (tmp) await unlink(tmp).catch(() => {});
   }
 }
