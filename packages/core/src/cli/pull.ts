@@ -376,7 +376,12 @@ function renderField(node: FieldNode, indent: string, ctx?: RenderCtx): string {
 
   if (p) {
     if (p.default !== undefined) {
-      expr += `.${p.defaultAlways ? "$defaultAlways" : "$default"}(surql\`${p.default}\`)`;
+      // A bare literal (false/42/"x") round-trips as a plain JS value the `sz` API accepts directly;
+      // only non-literal expressions (time::now(), …) need the `surql` tag. Wrapping literals in
+      // `surql` would churn hand-authored `.$default(false)` into `.$default(surql\`false\`)`.
+      const method = p.defaultAlways ? "$defaultAlways" : "$default";
+      const lit = parseLiteral(p.default);
+      expr += `.${method}(${lit ? JSON.stringify(lit.value) : `surql\`${p.default}\``})`;
     }
     if (p.value !== undefined) expr += `.$value(surql\`${p.value}\`)`;
     if (p.computed !== undefined) expr += `.$computed(surql\`${p.computed}\`)`;
@@ -501,12 +506,15 @@ function unitModule(u: RenderedUnit): string {
 /** The rendered unit (const statement + the imports it needs) for one table/relation. */
 function tableUnit(t: StructTable, ctx: RenderCtx): RenderedUnit {
   const { code, factory } = renderTableConst(t, ctx);
-  const names = ["sz", ...(code.includes("surql`") ? ["surql"] : []), factory];
-  const imports = [`import { ${names.join(", ")} } from "surreal-zod";`];
+  const imports = [`import { sz, ${factory} } from "surreal-zod";`];
   // Cross-table value imports (one per referenced table, sorted, self excluded).
   for (const dep of [...ctx.imports].filter((d) => d !== t.name).sort()) {
     imports.push(`import { ${ctx.constOf(dep)} } from "./${dep}";`);
   }
+  // `surql` lives in surrealdb (where hand-authored files import it from) — a separate line, never
+  // folded into the surreal-zod import (which would reprint/reorder that import on every pull).
+  if (code.includes("surql`"))
+    imports.push(`import { surql } from "surrealdb";`);
   return {
     kind: "table",
     name: t.name,
@@ -743,23 +751,33 @@ export function applyPull(plan: PullPlan): string[] {
 
 /** The rendered unit for one db-level function. */
 function functionUnit(fn: StructFunction): RenderedUnit {
+  const code = renderFunctionConst(fn);
+  const names = ["defineFunction", ...(code.includes("sz.") ? ["sz"] : [])];
+  const imports = [`import { ${names.join(", ")} } from "surreal-zod";`];
+  // `surql` from surrealdb on its own line (see tableUnit) — a function body is always a surql expr.
+  if (code.includes("surql`"))
+    imports.push(`import { surql } from "surrealdb";`);
   return {
     kind: "function",
     name: fn.name,
     exportName: fnConst(fn.name),
-    code: renderFunctionConst(fn),
-    imports: [`import { defineFunction, sz, surql } from "surreal-zod";`],
+    code,
+    imports,
   };
 }
 
 /** The rendered unit for one db-level access def. */
 function accessUnit(a: StructAccess): RenderedUnit {
+  const code = renderAccessConst(a);
+  const imports = [`import { defineAccess } from "surreal-zod";`];
+  if (code.includes("surql`"))
+    imports.push(`import { surql } from "surrealdb";`);
   return {
     kind: "access",
     name: a.name,
     exportName: fnConst(a.name),
-    code: renderAccessConst(a),
-    imports: [`import { defineAccess, surql } from "surreal-zod";`],
+    code,
+    imports,
   };
 }
 
@@ -877,8 +895,10 @@ function assembleCombined(
     functions.length > 0 ||
     accesses.length > 0 ||
     ordered.some((r) => r.usesSurql);
-  const names = ["sz", ...(usesSurql ? ["surql"] : []), ...factories];
+  const names = ["sz", ...factories];
   const imports = [`import { ${names.join(", ")} } from "surreal-zod";`];
+  // `surql` from surrealdb on its own line (see tableUnit), kept out of the surreal-zod import.
+  if (usesSurql) imports.push(`import { surql } from "surrealdb";`);
   const body = [...ordered.map((r) => r.code), ...fnCode, ...accessCode].join(
     "\n\n",
   );

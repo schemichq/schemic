@@ -53,4 +53,49 @@ describe("renderPerFile", () => {
     expect(user).toContain("export const User = defineTable(");
     expect(user).not.toContain("import { User }");
   });
+
+  test("literal defaults render bare; expressions stay surql (with surql from surrealdb)", () => {
+    const withDefaults: DbStructured = {
+      tables: [
+        {
+          name: "thing",
+          kind: { kind: "NORMAL" },
+          schemafull: true,
+          indexes: [],
+          events: [],
+          fields: [
+            { name: "id", kind: "string", table: "thing" },
+            // a bare literal — must round-trip as a plain JS value, not wrapped in surql
+            {
+              name: "archived",
+              kind: "bool",
+              default: "false",
+              table: "thing",
+            },
+            { name: "count", kind: "int", default: "0", table: "thing" },
+            // an expression — must stay tagged surql, and pull surql in from surrealdb
+            {
+              name: "createdAt",
+              kind: "datetime",
+              default: "time::now()",
+              table: "thing",
+            },
+          ],
+        },
+      ],
+      functions: [],
+      accesses: [],
+    };
+    const out = renderPerFile(withDefaults, (_k, n) => `${n}.ts`).get(
+      "thing.ts",
+    );
+    if (!out) throw new Error("no thing.ts");
+    expect(out).toContain(".$default(false)");
+    expect(out).toContain(".$default(0)");
+    expect(out).toContain(".$default(surql`time::now()`)");
+    expect(out).not.toContain(".$default(surql`false`)");
+    // surql is imported from surrealdb, NOT folded into the surreal-zod import.
+    expect(out).toContain(`import { surql } from "surrealdb";`);
+    expect(out).toMatch(/import \{ sz, defineTable \} from "surreal-zod";/);
+  });
 });
