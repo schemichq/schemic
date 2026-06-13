@@ -9,6 +9,7 @@ import htmlWorker from "monaco-editor/esm/vs/language/html/html.worker?worker";
 import jsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
 import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
 import { SurqlLanguageService } from "../adapters/lsp/SurqlLanguageService";
+import { SurqlTemplateLanguageService } from "../adapters/lsp/SurqlTemplateLanguageService";
 import { getLanguageService } from "../runtime";
 
 self.MonacoEnvironment = {
@@ -143,12 +144,15 @@ monaco.editor.defineTheme("reverie-dark", {
 // bundled-types fallback in the web/embedded build. (See adapters/LanguageService.)
 getLanguageService().install(monaco);
 
-// SurrealQL intelligence for .surql files via the surrealql-language-server, when the
-// binary is present (desktop only). Highlighting stays Monarch regardless.
+// SurrealQL intelligence via the surrealql-language-server, when the binary is present
+// (desktop only): completion / hover / diagnostics for .surql files AND inside surql`...`
+// templates in TS/JS schema files (via masked virtual docs). Highlighting stays Monarch.
 const surql = window.studio?.surql;
 if (surql) {
   surql.available().then((ok) => {
-    if (ok) new SurqlLanguageService(surql).install(monaco);
+    if (!ok) return;
+    new SurqlLanguageService(surql).install(monaco);
+    new SurqlTemplateLanguageService(surql).install(monaco);
   });
 }
 
