@@ -33,7 +33,9 @@
 - [x] dockview group tab bar hidden — each pane carries its own canonical header (rearrange/detach is Slice 3)
 - [x] Result body — **live** results: dynamic table / JSON toggle, row+timing meta, error display
 - [x] **Run loop** — Run button + Cmd/Ctrl+Enter → real query results (WASM sandbox engine)
-- [ ] **Live codegen** — `.ts` → generated SurrealQL is a read-only placeholder until the main-process engine bridge lands (Slice 2); then linked cursor↔DEFINE highlighting
+- [x] **Live codegen (Slice 2)** — `.ts`/`.js` → generated SurrealQL via the **main-process engine bridge** (jiti loads the schema + surreal-zod's `emitTable`/`emitDefStatement`); read-only Monaco preview; regenerates on open / save / refresh. Emit + schema share ONE jiti instance so native field codecs (datetime/uuid/recordId) aren't misread as `sz.custom` (same class of bug as CLI `18e66b6`). Path-scoped IPC like `fs:*`
+- [x] **Linked highlighting (Slice 2)** — editor cursor on a field/table identifier marks the matching `DEFINE` line in the preview (name-based; emit has no source positions yet)
+- [ ] **Codegen — true per-keystroke live** — currently regenerates from the saved file (jiti `evalModule` on the in-memory buffer resolves a 2nd surreal-zod instance → false `sz.custom`); revisit with an in-memory loader or core helper
 - [ ] **Full dock** (Slice 3) — N-pane subtabs + `+`, vertical split, detach-to-tab, collapse-to-strip
 - [ ] Terminal — real xterm + `sz` output stream (a **static placeholder** pane is currently rendered; Terminal is also a selectable output type)
 
@@ -59,6 +61,7 @@
 - [ ] MCP server (external agents) + Sidekick (TanStack AI) over the registries (D37)
 - [x] **Adapter / runtime pattern established** — `QueryEngine` interface + `runtime` registry + one impl
 - [x] **`WasmQueryEngine`** (`@surrealdb/wasm`, renderer, seeded `mem://`) — powers the Run loop (playground profile)
+- [x] **`Codegen` adapter (`IpcCodegen`) + main-process bridge** — first capability to reach `packages/core` (`surreal-zod` + `jiti` deps); generates SurrealQL from schema files. Web has no codegen (returns a clear message)
 - [ ] Other capability adapters (`Terminal` / `SecretStore`) — not yet created
 - [ ] FS: file-tree / project explorer UI, file watching, dirty-state indicator, VirtualFS (web)
 - [ ] Connection subsystem (D28): registry + main-process manager + IPC + Remote ws connect/test + switchers

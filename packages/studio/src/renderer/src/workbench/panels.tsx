@@ -1,7 +1,9 @@
-import Editor from "@monaco-editor/react";
+import Editor, { type Monaco } from "@monaco-editor/react";
 import { FileCode, Play, X } from "lucide-react";
-import { useState } from "react";
+import type { editor as MonacoEditor } from "monaco-editor";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { runCommand } from "../commands/registry";
+import { getCodegen } from "../runtime";
 import { activeDoc, type Doc, useStudio } from "../store";
 import { PaneHeader, type PaneType } from "./PaneHeader";
 
@@ -89,6 +91,12 @@ export function EditorPanel() {
                 void runCommand("command.palette");
               },
             );
+            // Linked highlighting: publish the identifier under the cursor so the
+            // SurrealQL preview can mark the matching DEFINE line.
+            editor.onDidChangeCursorPosition((e) => {
+              const word = editor.getModel()?.getWordAtPosition(e.position);
+              useStudio.getState().setLinkedName(word?.word ?? null);
+            });
           }}
           options={{
             fontFamily: "'JetBrains Mono', monospace",
@@ -200,19 +208,166 @@ function ResultBody() {
   );
 }
 
-// Generated-SurrealQL preview for a schema file. Live codegen lands with the
-// main-process engine bridge (Slice 2); for now the pane is honest about that.
-function SurrealqlPreview({ doc }: { doc: Doc | null }) {
+type CodegenState = { loading: boolean; surql: string; error: string | null };
+
+// Codegen for the active schema file via the main-process engine bridge. Reads the file
+// from disk, so it (re)generates when the file is opened, saved (fileEpoch bumps), or the
+// user hits refresh — not on every keystroke (the saved file is the source of truth).
+function useCodegen(doc: Doc | null, enabled: boolean) {
+  const [state, setState] = useState<CodegenState>({
+    loading: false,
+    surql: "",
+    error: null,
+  });
+  const [nonce, setNonce] = useState(0);
+  const refresh = useCallback(() => setNonce((n) => n + 1), []);
+  const fileEpoch = useStudio((s) => s.fileEpoch);
+  const path = doc?.path;
+  const codegenable = !!doc && !doc.scratch;
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fileEpoch (save) and nonce (refresh) are intentional re-run triggers — codegen reads from disk, not from these values.
+  useEffect(() => {
+    if (!enabled || !codegenable || path === undefined) return;
+    let cancelled = false;
+    setState((s) => ({ ...s, loading: true }));
+    getCodegen()
+      .fromFile(path)
+      .then((r) => {
+        if (cancelled) return;
+        setState({
+          loading: false,
+          surql: r.surql ?? "",
+          error: r.ok ? null : (r.error ?? "codegen failed"),
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, codegenable, path, fileEpoch, nonce]);
+
+  return { ...state, refresh };
+}
+
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Read-only SurrealQL preview body (the editor is rendered by OutputPane's codegen state).
+function SurrealqlPreview({
+  doc,
+  state,
+}: {
+  doc: Doc | null;
+  state: CodegenState;
+}) {
+  const linkedName = useStudio((s) => s.linkedName);
+  const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null);
+  const decoRef = useRef<MonacoEditor.IEditorDecorationsCollection | null>(
+    null,
+  );
+  const [ready, setReady] = useState(false);
+
+  // Linked highlighting: mark the DEFINE line matching the identifier under the
+  // editor cursor (name-based — source positions aren't tracked by emit yet).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: state.surql (DDL changed) and ready (editor mounted) are intentional re-decorate triggers read via refs.
+  useEffect(() => {
+    const ed = editorRef.current;
+    const model = ed?.getModel();
+    if (!ed || !model) return;
+    if (!decoRef.current) decoRef.current = ed.createDecorationsCollection();
+    if (!linkedName) {
+      decoRef.current.clear();
+      return;
+    }
+    const re = new RegExp(`^DEFINE (?:FIELD|TABLE) ${escapeRe(linkedName)}\\b`);
+    let target = 0;
+    for (let i = 1; i <= model.getLineCount(); i++) {
+      if (re.test(model.getLineContent(i).trim())) {
+        target = i;
+        break;
+      }
+    }
+    if (!target) {
+      decoRef.current.clear();
+      return;
+    }
+    decoRef.current.set([
+      {
+        range: {
+          startLineNumber: target,
+          startColumn: 1,
+          endLineNumber: target,
+          endColumn: 1,
+        },
+        options: {
+          isWholeLine: true,
+          className: "linked-line",
+          linesDecorationsClassName: "linked-glyph",
+        },
+      },
+    ]);
+    ed.revealLineInCenterIfOutsideViewport(target);
+  }, [linkedName, state.surql, ready]);
+
+  if (!doc || doc.scratch) {
+    return (
+      <div className="preview-body">
+        <div className="preview-pending">
+          <p className="preview-pending-title">Generated SurrealQL</p>
+          <p className="preview-pending-sub">
+            Open a <code>.ts</code> schema file to see its generated DDL.
+          </p>
+        </div>
+      </div>
+    );
+  }
+  if (state.error) {
+    return (
+      <div className="preview-body">
+        <div className="result-error">{state.error}</div>
+      </div>
+    );
+  }
+  if (!state.surql && !state.loading) {
+    return (
+      <div className="preview-body">
+        <div className="preview-pending">
+          <p className="preview-pending-title">No schema definitions</p>
+          <p className="preview-pending-sub">
+            <code>{doc.name}</code> doesn't export any <code>sz.*</code> tables
+            or defs.
+          </p>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="preview-body">
-      <div className="preview-pending">
-        <p className="preview-pending-title">Generated SurrealQL</p>
-        <p className="preview-pending-sub">
-          Live DDL for <code>{doc?.name ?? "this file"}</code> is generated by
-          the surreal-zod engine. Wiring lands with the main-process engine
-          bridge.
-        </p>
-      </div>
+      <Editor
+        height="100%"
+        language="surrealql"
+        value={state.surql}
+        theme="reverie-dark"
+        onMount={(ed: MonacoEditor.IStandaloneCodeEditor, _m: Monaco) => {
+          editorRef.current = ed;
+          setReady(true);
+        }}
+        options={{
+          readOnly: true,
+          domReadOnly: true,
+          fontFamily: "'JetBrains Mono', monospace",
+          fontSize: 13,
+          lineHeight: 21,
+          minimap: { enabled: false },
+          scrollBeyondLastLine: false,
+          automaticLayout: true,
+          padding: { top: 12 },
+          renderLineHighlight: "none",
+          overviewRulerLanes: 0,
+          fontLigatures: true,
+          scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
+        }}
+      />
     </div>
   );
 }
@@ -263,15 +418,27 @@ export function OutputPane() {
     setType(wanted);
   }
 
+  const codegen = useCodegen(active, type === "surrealql");
+  const canCopy = type === "surrealql" && !!codegen.surql;
+
   return (
     <div className="panel output-panel">
       <PaneHeader
         type={type}
         onSwitchType={setType}
         readOnly={type === "surrealql"}
+        loading={type === "surrealql" && codegen.loading}
+        onRefresh={type === "surrealql" ? codegen.refresh : undefined}
+        onCopy={
+          canCopy
+            ? () => void navigator.clipboard.writeText(codegen.surql)
+            : undefined
+        }
       />
       {type === "result" && <ResultBody />}
-      {type === "surrealql" && <SurrealqlPreview doc={active} />}
+      {type === "surrealql" && (
+        <SurrealqlPreview doc={active} state={codegen} />
+      )}
       {type === "terminal" && <TerminalBody />}
       {type === "problems" && <ProblemsBody />}
     </div>

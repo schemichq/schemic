@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { generateSurql } from "./codegen";
 
 // WSL/headless friendliness: avoid GPU + sandbox issues when running under WSLg.
 app.disableHardwareAcceleration();
@@ -78,6 +79,12 @@ ipcMain.handle("fs:exists", async (_e, p: string) => {
     return false;
   }
 });
+// Generate SurrealQL from a schema file (path-scoped like fs:*). The codegen runs the
+// user's TS via jiti in the main process. (Engine bridge, Slice 2.)
+ipcMain.handle("codegen:fromFile", (_e, p: string) =>
+  generateSurql(assertAllowed(p)),
+);
+
 ipcMain.handle("dialog:openDirectory", async () => {
   const r = await dialog.showOpenDialog({ properties: ["openDirectory"] });
   const dir = r.canceled ? null : (r.filePaths[0] ?? null);

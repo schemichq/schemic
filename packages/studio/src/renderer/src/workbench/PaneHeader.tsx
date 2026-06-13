@@ -4,8 +4,10 @@ import {
   ChevronDown,
   Copy,
   Database,
+  Loader2,
   Lock,
   type LucideIcon,
+  RefreshCw,
   SquareTerminal,
   Table2,
 } from "lucide-react";
@@ -42,11 +44,15 @@ export function PaneHeader({
   onSwitchType,
   readOnly,
   onCopy,
+  onRefresh,
+  loading,
 }: {
   type: PaneType;
   onSwitchType: (t: PaneType) => void;
   readOnly?: boolean;
   onCopy?: () => void;
+  onRefresh?: () => void;
+  loading?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -102,7 +108,18 @@ export function PaneHeader({
         )}
       </div>
       <div className="pane-spacer" />
+      {loading && <Loader2 size={13} className="pane-icon pane-spin" />}
       {readOnly && <Lock size={12} className="pane-icon" />}
+      {onRefresh && (
+        <button
+          type="button"
+          className="pane-action"
+          title="Regenerate"
+          onClick={onRefresh}
+        >
+          <RefreshCw size={13} />
+        </button>
+      )}
       {onCopy && (
         <button
           type="button"

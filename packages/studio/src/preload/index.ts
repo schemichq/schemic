@@ -30,4 +30,10 @@ contextBridge.exposeInMainWorld("studio", {
     openFileDialog: (): Promise<string | null> =>
       ipcRenderer.invoke("dialog:openFile"),
   },
+  codegen: {
+    fromFile: (
+      path: string,
+    ): Promise<{ ok: boolean; surql?: string; error?: string }> =>
+      ipcRenderer.invoke("codegen:fromFile", path),
+  },
 });

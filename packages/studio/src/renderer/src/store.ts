@@ -62,6 +62,12 @@ interface StudioState {
   openFileDialog: () => Promise<void>;
   openFilePath: (path: string) => Promise<void>;
   saveActive: () => Promise<void>;
+  /** Bumps when a file is written to disk — codegen reads disk, so it re-runs on save. */
+  fileEpoch: number;
+  // Linked highlighting: the field/table identifier under the editor cursor, matched
+  // against generated DEFINE lines in the SurrealQL preview.
+  linkedName: string | null;
+  setLinkedName: (name: string | null) => void;
   // Query / results.
   outcome: QueryOutcome | null;
   running: boolean;
@@ -155,8 +161,15 @@ export const useStudio = create<StudioState>()(
       set((s) => {
         const d = s.docs.find((x) => x.path === doc.path);
         if (d) d.dirty = false;
+        s.fileEpoch++;
       });
     },
+    fileEpoch: 0,
+    linkedName: null,
+    setLinkedName: (name) =>
+      set((s) => {
+        if (s.linkedName !== name) s.linkedName = name;
+      }),
     outcome: null,
     running: false,
     run: async () => {

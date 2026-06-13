@@ -21,6 +21,11 @@ interface StudioBridge {
     openDirectoryDialog: () => Promise<string | null>;
     openFileDialog: () => Promise<string | null>;
   };
+  codegen: {
+    fromFile: (
+      path: string,
+    ) => Promise<{ ok: boolean; surql?: string; error?: string }>;
+  };
 }
 
 interface Window {
