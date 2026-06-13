@@ -24,8 +24,8 @@
   --code-comment: #5d5670;
   --code-plain: #d8d3e4;
   --grad: linear-gradient(120deg, var(--accent-purple), var(--accent-hot));
-  --font-ui: 'Geist Variable', system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', 'SFMono-Regular', ui-monospace, monospace;
+  --font-ui: "Geist Variable", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", ui-monospace, monospace;
 
   /* dockview theme overrides (abyss base) → canonical shell A */
   --dv-background-color: var(--canvas);
@@ -57,6 +57,15 @@ body {
   font-family: var(--font-ui);
   -webkit-font-smoothing: antialiased;
   user-select: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
 }
 
 .app {
@@ -346,6 +355,11 @@ body {
 }
 .sz-dockview .dv-tab.dv-active-tab {
   box-shadow: inset 0 2px 0 var(--accent-purple);
+}
+/* Each pane carries its own canonical header (file tabs / Pane Header), so the
+   dockview group tab bar is hidden. Rearrange/detach lands in Slice 3. */
+.sz-dockview .dv-tabs-and-actions-container {
+  display: none;
 }
 
 /* Panels */
@@ -801,27 +815,81 @@ body {
   background: var(--border);
 }
 
-/* ===== Query Run loop (placeholder toolbar until Query module is designed) ===== */
+/* ===== Code Editor view (canonical design/app.pen 'output treatments') ===== */
 .editor-panel {
   display: flex;
   flex-direction: column;
 }
-.editor-toolbar {
+/* Editor pane = file tabs + Run, then Monaco. */
+.editor-tabs {
   height: 38px;
   flex: 0 0 auto;
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: space-between;
-  padding: 0 12px;
+  padding: 0 8px 0 0;
   background: var(--surface);
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border);
 }
-.editor-file {
+.tab-strip {
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.file-tab {
+  display: flex;
+  align-items: center;
+  padding: 0 4px 0 12px;
+  border-right: 1px solid var(--border-subtle);
+  box-shadow: inset 0 -2px 0 transparent;
   color: var(--text-muted);
+  white-space: nowrap;
+}
+.file-tab.active {
+  background: var(--canvas);
+  box-shadow: inset 0 -2px 0 var(--accent-purple);
+  color: var(--text-primary);
+}
+.file-tab-main {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 2px;
   font-family: var(--font-mono);
   font-size: 12px;
+  color: inherit;
+  cursor: pointer;
+}
+.file-tab-icon {
+  color: var(--code-fn);
+  flex: 0 0 auto;
+}
+.file-tab.active .file-tab-icon {
+  color: var(--code-fn);
+}
+.file-tab:not(.active) .file-tab-icon {
+  color: var(--text-muted);
+}
+.file-tab-close {
+  display: flex;
+  align-items: center;
+  padding: 3px;
+  margin-left: 4px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  opacity: 0;
+  cursor: pointer;
+}
+.file-tab:hover .file-tab-close {
+  opacity: 1;
+}
+.file-tab-close:hover {
+  background: var(--surface-2);
+  color: var(--text-primary);
 }
 .editor-run {
+  align-self: center;
   padding: 5px 11px;
   font-size: 12.5px;
 }
@@ -866,6 +934,131 @@ body {
   font-size: 12px;
   line-height: 18px;
   color: var(--code-plain);
+}
+
+/* Output pane = Pane Header + contextual body. */
+.output-panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--canvas);
+}
+.pane-header {
+  height: 34px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.pane-switch {
+  position: relative;
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+}
+.pane-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 2px;
+  box-shadow: inset 0 -2px 0 var(--accent-purple);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.pane-chevron {
+  color: var(--text-muted);
+}
+.pane-menu {
+  position: absolute;
+  top: 34px;
+  left: 0;
+  min-width: 180px;
+  z-index: 50;
+  padding: 5px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  box-shadow: 0 12px 30px #00000066;
+}
+.pane-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.pane-menu-item:hover {
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+.pane-menu-check {
+  margin-left: auto;
+  color: var(--accent-soft);
+}
+.pane-spacer {
+  flex: 1 1 auto;
+}
+.pane-icon {
+  color: var(--text-muted);
+}
+.pane-action {
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  border-radius: 5px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.pane-action:hover {
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+.result-body,
+.preview-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.result-subbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.preview-pending {
+  margin: auto;
+  max-width: 320px;
+  padding: 24px;
+  text-align: center;
+}
+.preview-pending-title {
+  margin: 0 0 6px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+}
+.preview-pending-sub {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.preview-pending code {
+  font-family: var(--font-mono);
+  color: var(--code-type);
 }
 
 /* ===== Command palette (cmdk, Cmd/K) ===== */
@@ -922,7 +1115,7 @@ body {
   font-family: var(--font-ui);
   font-size: 13px;
 }
-[cmdk-item][data-selected='true'] {
+[cmdk-item][data-selected="true"] {
   background: var(--surface-2);
   color: var(--text-primary);
 }

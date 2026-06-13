@@ -2,28 +2,28 @@ import {
   DockviewReact,
   type DockviewReadyEvent,
   type IDockviewPanelProps,
-} from 'dockview'
-import { EditorPanel, ResultPanel } from './panels'
-import { TerminalPane } from './TerminalPane'
+} from "dockview";
+import { EditorPanel, OutputPane } from "./panels";
+import { TerminalPane } from "./TerminalPane";
 
 const components = {
   editor: (_props: IDockviewPanelProps) => <EditorPanel />,
-  result: (_props: IDockviewPanelProps) => <ResultPanel />,
-}
+  output: (_props: IDockviewPanelProps) => <OutputPane />,
+};
 
 function onReady(event: DockviewReadyEvent) {
   const editor = event.api.addPanel({
-    id: 'editor',
-    component: 'editor',
-    title: 'query.surql',
-  })
+    id: "editor",
+    component: "editor",
+    title: "Editor",
+  });
   event.api.addPanel({
-    id: 'result',
-    component: 'result',
-    title: 'Result',
-    position: { referencePanel: 'editor', direction: 'right' },
-  })
-  editor.api.setActive()
+    id: "output",
+    component: "output",
+    title: "Output",
+    position: { referencePanel: "editor", direction: "right" },
+  });
+  editor.api.setActive();
 }
 
 export function Workbench() {
@@ -38,5 +38,5 @@ export function Workbench() {
       </div>
       <TerminalPane />
     </div>
-  )
+  );
 }

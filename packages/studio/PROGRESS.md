@@ -26,11 +26,16 @@
 - [ ] Result "Tree" view mode (only Table/JSON exist)
 - [ ] Action surfaces — not implemented; placement *decided* (design-expert): Run in Query toolbar + Cmd/Enter · Pull/Push via drift chip → diff panel + Migrations bar · Search = Cmd/K palette
 
-## Panels (v1)
-- [x] Query editor panel (Monaco / SurrealQL) — editable, bound to the store
-- [x] Result panel — **live** results: dynamic table / JSON toggle, row+timing meta, error display
+## Code Editor view (canonical `design/app.pen` "output treatments")
+- [x] **Editor pane = file tabs** — multi-doc tab strip (file-code icon, active = canvas bg + 2px accent underline, dirty dot, close); Monaco bound to the active doc
+- [x] **Contextual output pane** — `.surql` active file → Result; `.ts`/`.js` → SurrealQL preview (read-only). Default type derived from the active file's language
+- [x] **Reusable `PaneHeader`** (matches `ooDTM`) — type icon + accent-underlined title + **type-switcher dropdown** (SurrealQL / Result / Terminal / Problems, switch in place); lock shown when read-only
+- [x] dockview group tab bar hidden — each pane carries its own canonical header (rearrange/detach is Slice 3)
+- [x] Result body — **live** results: dynamic table / JSON toggle, row+timing meta, error display
 - [x] **Run loop** — Run button + Cmd/Ctrl+Enter → real query results (WASM sandbox engine)
-- [ ] Terminal — real xterm + `sz` output stream (a **static placeholder** pane is currently rendered)
+- [ ] **Live codegen** — `.ts` → generated SurrealQL is a read-only placeholder until the main-process engine bridge lands (Slice 2); then linked cursor↔DEFINE highlighting
+- [ ] **Full dock** (Slice 3) — N-pane subtabs + `+`, vertical split, detach-to-tab, collapse-to-strip
+- [ ] Terminal — real xterm + `sz` output stream (a **static placeholder** pane is currently rendered; Terminal is also a selectable output type)
 
 ## Modules (each adds a rail item when implemented)
 - [ ] Schema (`sz.*` TS editor → generated SurrealQL)
@@ -43,7 +48,7 @@
 - [ ] Connections (manager: Personal / org, auth-level form)
 
 ## Subsystems
-- [x] **State store** — Zustand + `mutative` middleware (D35); holds settings + query/result
+- [x] **State store** — Zustand + `mutative` middleware (D35); holds settings + open docs (tabs) + query/result. Docs model: `docs[]` + `activePath`, per-doc content/dirty, scratch buffer
 - [x] **Settings system (D36) — core** — registry (`defineSetting`) + user-scope persistence (`userData/settings.json` via main IPC, sync read = no-flash). First real setting: **`titlebar.variant`** (reactive + persisted; verified)
 - [ ] Settings — project scope (`.reverie/settings.json`), and the settings **page UI** (awaits design-expert)
 - [x] **Command registry + command palette (cmdk)** (D36/D37) — commands: `query.run`, `titlebar.switchStyle`, `command.palette`, `project.open`, `file.open`, `file.save`; editor Run/Cmd-Enter routed through it
