@@ -4,6 +4,13 @@ import { dirname, join, resolve, sep } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { generateSurql } from "./codegen";
 import { setTsEventSink, stopTsServer, tsNotify, tsRequest } from "./lsp";
+import {
+  setSurqlEventSink,
+  stopSurqlLsp,
+  surqlLspAvailable,
+  surqlNotify,
+  surqlRequest,
+} from "./surqlLsp";
 
 // WSL/headless friendliness: avoid GPU + sandbox issues when running under WSLg.
 app.disableHardwareAcceleration();
@@ -100,6 +107,24 @@ ipcMain.handle("lsp:request", (_e, command: string, args: unknown) =>
   tsRequest(command, args),
 );
 
+// SurrealQL language server (standalone stdio LSP) for .surql intelligence. Optional —
+// only wired if the binary is found (env SURREALQL_LSP / PATH / ~/.cargo/bin).
+setSurqlEventSink((msg) => {
+  for (const w of BrowserWindow.getAllWindows())
+    w.webContents.send("surql:event", msg);
+});
+ipcMain.handle("surql:available", () => surqlLspAvailable());
+ipcMain.on(
+  "surql:notify",
+  (_e, method: string, params: unknown, rootUri: string | null) =>
+    void surqlNotify(method, params, rootUri),
+);
+ipcMain.handle(
+  "surql:request",
+  (_e, method: string, params: unknown, rootUri: string | null) =>
+    surqlRequest(method, params, rootUri),
+);
+
 ipcMain.handle("dialog:openDirectory", async () => {
   const r = await dialog.showOpenDialog({ properties: ["openDirectory"] });
   const dir = r.canceled ? null : (r.filePaths[0] ?? null);
@@ -155,5 +180,6 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", () => {
   stopTsServer();
+  stopSurqlLsp();
   app.quit();
 });

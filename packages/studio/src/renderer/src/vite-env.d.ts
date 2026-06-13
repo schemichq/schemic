@@ -32,6 +32,16 @@ interface StudioBridge {
     request: (command: string, args: unknown) => Promise<unknown>;
     onEvent: (cb: (msg: unknown) => void) => () => void;
   };
+  surql: {
+    available: () => Promise<boolean>;
+    notify: (method: string, params: unknown, rootUri: string | null) => void;
+    request: (
+      method: string,
+      params: unknown,
+      rootUri: string | null,
+    ) => Promise<unknown>;
+    onEvent: (cb: (msg: unknown) => void) => () => void;
+  };
 }
 
 interface Window {

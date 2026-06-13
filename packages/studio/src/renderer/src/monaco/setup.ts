@@ -8,6 +8,7 @@ import cssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker";
 import htmlWorker from "monaco-editor/esm/vs/language/html/html.worker?worker";
 import jsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
 import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
+import { SurqlLanguageService } from "../adapters/lsp/SurqlLanguageService";
 import { getLanguageService } from "../runtime";
 
 self.MonacoEnvironment = {
@@ -141,6 +142,15 @@ monaco.editor.defineTheme("reverie-dark", {
 // Install the language service for TS/JS schema files: a real tsserver on desktop, or the
 // bundled-types fallback in the web/embedded build. (See adapters/LanguageService.)
 getLanguageService().install(monaco);
+
+// SurrealQL intelligence for .surql files via the surrealql-language-server, when the
+// binary is present (desktop only). Highlighting stays Monarch regardless.
+const surql = window.studio?.surql;
+if (surql) {
+  surql.available().then((ok) => {
+    if (ok) new SurqlLanguageService(surql).install(monaco);
+  });
+}
 
 loader.config({ monaco });
 
