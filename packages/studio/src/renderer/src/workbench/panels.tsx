@@ -8,14 +8,70 @@ import { getCodegen } from "../runtime";
 import { activeDoc, type Doc, useStudio } from "../store";
 import { PaneHeader, type PaneType } from "./PaneHeader";
 
+// Find the source line declaring a table/field by name (cursor sync from the preview).
+function findSourceLine(model: MonacoEditor.ITextModel, name: string): number {
+  const field = new RegExp(`(^|[^.\\w])${escapeRe(name)}\\s*:`);
+  const table = new RegExp(
+    `define(?:Table|Relation)\\s*\\(\\s*["']${escapeRe(name)}["']`,
+    "i",
+  );
+  for (let i = 1; i <= model.getLineCount(); i++) {
+    const t = model.getLineContent(i);
+    if (table.test(t) || field.test(t)) return i;
+  }
+  return 0;
+}
+
 export function EditorPanel() {
   const docs = useStudio((s) => s.docs);
   const activePath = useStudio((s) => s.activePath);
   const setActivePath = useStudio((s) => s.setActivePath);
-  const closeDoc = useStudio((s) => s.closeDoc);
   const setContent = useStudio((s) => s.setContent);
+  const closeDoc = useStudio((s) => s.closeDoc);
   const running = useStudio((s) => s.running);
   const active = useStudio(activeDoc);
+  const linkedName = useStudio((s) => s.linkedName);
+  const linkedSource = useStudio((s) => s.linkedSource);
+  const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null);
+  const decoRef = useRef<MonacoEditor.IEditorDecorationsCollection | null>(
+    null,
+  );
+  const [ready, setReady] = useState(false);
+
+  // Cursor sync (reverse): when the preview cursor lands on a DEFINE line, mark the
+  // matching source declaration here.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: ready triggers after the editor mounts; active.path re-resolves on tab switch.
+  useEffect(() => {
+    const ed = editorRef.current;
+    const model = ed?.getModel();
+    if (!ed || !model) return;
+    if (!decoRef.current) decoRef.current = ed.createDecorationsCollection();
+    if (linkedSource !== "preview" || !linkedName) {
+      decoRef.current.clear();
+      return;
+    }
+    const target = findSourceLine(model, linkedName);
+    if (!target) {
+      decoRef.current.clear();
+      return;
+    }
+    decoRef.current.set([
+      {
+        range: {
+          startLineNumber: target,
+          startColumn: 1,
+          endLineNumber: target,
+          endColumn: 1,
+        },
+        options: {
+          isWholeLine: true,
+          className: "linked-line",
+          linesDecorationsClassName: "linked-glyph",
+        },
+      },
+    ]);
+    ed.revealLineInCenterIfOutsideViewport(target);
+  }, [linkedName, linkedSource, ready, active?.path]);
 
   if (!active) {
     return (
@@ -89,6 +145,8 @@ export function EditorPanel() {
             if (activePath) setContent(activePath, v ?? "");
           }}
           onMount={(editor, monaco) => {
+            editorRef.current = editor;
+            setReady(true);
             editor.addCommand(
               monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
               () => {
@@ -109,11 +167,11 @@ export function EditorPanel() {
                 void runCommand("command.palette");
               },
             );
-            // Linked highlighting: publish the identifier under the cursor so the
+            // Cursor sync (forward): publish the identifier under the cursor so the
             // SurrealQL preview can mark the matching DEFINE line.
             editor.onDidChangeCursorPosition((e) => {
               const word = editor.getModel()?.getWordAtPosition(e.position);
-              useStudio.getState().setLinkedName(word?.word ?? null);
+              useStudio.getState().setLinkedName(word?.word ?? null, "editor");
             });
             // SurrealQL highlighting inside surql`...` tagged templates.
             installSurqlTemplateHighlight(editor, monaco);
@@ -285,21 +343,23 @@ function SurrealqlPreview({
   state: CodegenState;
 }) {
   const linkedName = useStudio((s) => s.linkedName);
+  const linkedSource = useStudio((s) => s.linkedSource);
   const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null);
   const decoRef = useRef<MonacoEditor.IEditorDecorationsCollection | null>(
     null,
   );
   const [ready, setReady] = useState(false);
 
-  // Linked highlighting: mark the DEFINE line matching the identifier under the
-  // editor cursor (name-based — source positions aren't tracked by emit yet).
+  // Cursor sync (forward): mark the DEFINE line matching the field/table under the
+  // editor cursor (name-based — emit has no source positions). Only when the editor
+  // drove, so the preview doesn't fight its own cursor.
   // biome-ignore lint/correctness/useExhaustiveDependencies: state.surql (DDL changed) and ready (editor mounted) are intentional re-decorate triggers read via refs.
   useEffect(() => {
     const ed = editorRef.current;
     const model = ed?.getModel();
     if (!ed || !model) return;
     if (!decoRef.current) decoRef.current = ed.createDecorationsCollection();
-    if (!linkedName) {
+    if (linkedSource !== "editor" || !linkedName) {
       decoRef.current.clear();
       return;
     }
@@ -331,7 +391,7 @@ function SurrealqlPreview({
       },
     ]);
     ed.revealLineInCenterIfOutsideViewport(target);
-  }, [linkedName, state.surql, ready]);
+  }, [linkedName, linkedSource, state.surql, ready]);
 
   if (!doc || doc.scratch) {
     return (
@@ -375,6 +435,15 @@ function SurrealqlPreview({
         onMount={(ed: MonacoEditor.IStandaloneCodeEditor, _m: Monaco) => {
           editorRef.current = ed;
           setReady(true);
+          // Cursor sync (reverse): publish the table/field of the DEFINE line under the
+          // preview cursor so the source editor marks its declaration.
+          ed.onDidChangeCursorPosition((e) => {
+            const line =
+              ed.getModel()?.getLineContent(e.position.lineNumber) ?? "";
+            const m = /^\s*DEFINE\s+(?:FIELD|TABLE)\s+(\S+)/i.exec(line);
+            const name = m?.[1]?.split(".").pop() ?? null;
+            useStudio.getState().setLinkedName(name, "preview");
+          });
         }}
         options={{
           readOnly: true,

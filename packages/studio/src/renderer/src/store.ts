@@ -91,10 +91,12 @@ interface StudioState {
   openFileDialog: () => Promise<void>;
   openFilePath: (path: string) => Promise<void>;
   saveActive: () => Promise<void>;
-  // Linked highlighting: the field/table identifier under the editor cursor, matched
-  // against generated DEFINE lines in the SurrealQL preview.
+  // Linked highlighting / cursor sync: the field/table identifier under the cursor, and
+  // which editor it came from — so the OTHER editor highlights the matching line (editor
+  // field <-> generated DEFINE line) without an editor highlighting its own cursor line.
   linkedName: string | null;
-  setLinkedName: (name: string | null) => void;
+  linkedSource: "editor" | "preview" | null;
+  setLinkedName: (name: string | null, source: "editor" | "preview") => void;
   // Query / results.
   outcome: QueryOutcome | null;
   running: boolean;
@@ -213,9 +215,13 @@ export const useStudio = create<StudioState>()(
       });
     },
     linkedName: null,
-    setLinkedName: (name) =>
+    linkedSource: null,
+    setLinkedName: (name, source) =>
       set((s) => {
-        if (s.linkedName !== name) s.linkedName = name;
+        if (s.linkedName !== name || s.linkedSource !== source) {
+          s.linkedName = name;
+          s.linkedSource = source;
+        }
       }),
     outcome: null,
     running: false,

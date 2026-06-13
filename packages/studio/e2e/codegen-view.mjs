@@ -63,13 +63,25 @@ console.log(
 );
 console.log("email field:", norm.includes("email"));
 
-// Linked highlighting: simulate the editor cursor landing on the `email` field.
-await win.evaluate(() => window.__studio.getState().setLinkedName("email"));
+// Cursor sync forward: editor cursor on `email` -> preview marks the DEFINE line.
+await win.evaluate(() =>
+  window.__studio.getState().setLinkedName("email", "editor"),
+);
 await win.waitForTimeout(300);
-const linked = await win.evaluate(
+const fwd = await win.evaluate(
   () => !!document.querySelector(".output-panel .linked-line"),
 );
-console.log("linked-highlight on email:", linked);
+console.log("forward (editor->preview) highlight:", fwd);
+
+// Cursor sync reverse: preview cursor on a DEFINE line -> source editor marks the field.
+await win.evaluate(() =>
+  window.__studio.getState().setLinkedName("email", "preview"),
+);
+await win.waitForTimeout(300);
+const rev = await win.evaluate(
+  () => !!document.querySelector(".editor-host .linked-line"),
+);
+console.log("reverse (preview->editor) highlight:", rev);
 
 await win.screenshot({ path: "/tmp/sz-codegen.png" });
 await app.close();
