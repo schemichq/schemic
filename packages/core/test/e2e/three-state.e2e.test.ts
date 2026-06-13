@@ -216,4 +216,34 @@ e2e("3-state divergence matrix", () => {
     },
     T,
   );
+
+  test(
+    "push applies a flexible array-of-object field (implicit .* wildcard)",
+    async () => {
+      // Regression: `sz.object({}).loose().array()` emits an implicit `<field>.*` element that the
+      // parent's definition auto-creates, so the apply MUST mark it OVERWRITE. Without that, push
+      // failed with "the field '….*' already exists" → "failed transaction".
+      const { root, run } = await setup();
+      H.write(
+        root,
+        "database/schema/tables/doc.ts",
+        `import { sz, defineTable } from "surreal-zod";
+
+export const Doc = defineTable("doc", {
+  id: sz.string(),
+  tags: sz.object({}).loose().array(),
+});
+`,
+      );
+      const push = await run(["push"]);
+      expect(push.code).toBe(0);
+      expect(push.out).toMatch(/synced/);
+      expect(push.out).not.toContain("failed transaction");
+
+      // Idempotent: the schema is fully applied.
+      const again = await run(["diff", "--live"]);
+      expect(again.out).toContain("No changes.");
+    },
+    T,
+  );
 });

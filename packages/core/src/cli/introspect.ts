@@ -197,7 +197,8 @@ export async function diffAgainstDb(
   );
 
   const { tables, defs } = await loadDefs(config.schemaPath);
-  const ddl = Object.values(buildSnapshot(tables, defs).statements)
+  const schema = buildSnapshot(tables, defs);
+  const ddl = Object.values(schema.statements)
     .sort(byCreate)
     .map((s) => s.ddl)
     .join("\n");
@@ -214,7 +215,7 @@ export async function diffAgainstDb(
   // sides, so no false diff), but that form can't be APPLIED — the redacted KEY is gone. Swap in
   // the schema's emit DDL (which carries the key) for any DEFINE ACCESS in the apply plan.
   const accessEmit = new Map<string, string>();
-  for (const s of Object.values(buildSnapshot(tables, defs).statements))
+  for (const s of Object.values(schema.statements))
     if (s.kind === "access") accessEmit.set(s.name, s.ddl);
   if (accessEmit.size) {
     const swap = (stmt: string): string => {
@@ -223,6 +224,31 @@ export async function diffAgainstDb(
       return emit ? (m[1] ? overwriteStatement(emit) : emit) : stmt;
     };
     diff.up = diff.up.map(swap);
+  }
+
+  // Implicit-wildcard fields (the `.*` element of an `array<object>`/`set<object>`, etc.) are
+  // auto-created when their parent field is defined, so the emitter marks them `DEFINE FIELD
+  // OVERWRITE`. The INFO-canonical diff form drops that OVERWRITE, so applying it to the live DB
+  // fails "already exists" and aborts the whole `push`/`sync` transaction. Re-mark exactly those
+  // fields OVERWRITE in the apply plan — the comparison form above is untouched.
+  const untick = (s: string) => s.replace(/`/g, "");
+  const overwriteFields = new Set<string>();
+  for (const s of Object.values(schema.statements))
+    if (
+      s.kind === "field" &&
+      s.table &&
+      /^DEFINE FIELD OVERWRITE\b/.test(s.ddl)
+    )
+      overwriteFields.add(`${s.table} ${untick(s.name)}`);
+  if (overwriteFields.size) {
+    const fieldRef =
+      /^DEFINE FIELD (?:OVERWRITE |IF NOT EXISTS )?(`[^`]+`|\S+) ON TABLE (`[^`]+`|\S+)/;
+    diff.up = diff.up.map((stmt) => {
+      const m = fieldRef.exec(stmt);
+      return m && overwriteFields.has(`${untick(m[2])} ${untick(m[1])}`)
+        ? overwriteStatement(stmt)
+        : stmt;
+    });
   }
   return diff;
 }
