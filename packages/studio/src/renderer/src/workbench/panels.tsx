@@ -8,18 +8,32 @@ import { getCodegen } from "../runtime";
 import { activeDoc, type Doc, useStudio } from "../store";
 import { PaneHeader, type PaneType } from "./PaneHeader";
 
-// Find the source line declaring a table/field by name (cursor sync from the preview).
-function findSourceLine(model: MonacoEditor.ITextModel, name: string): number {
-  const field = new RegExp(`(^|[^.\\w])${escapeRe(name)}\\s*:`);
-  const table = new RegExp(
-    `define(?:Table|Relation)\\s*\\(\\s*["']${escapeRe(name)}["']`,
-    "i",
-  );
-  for (let i = 1; i <= model.getLineCount(); i++) {
-    const t = model.getLineContent(i);
-    if (table.test(t) || field.test(t)) return i;
+// Apply (or clear) the linked-line decoration + reveal on an editor.
+function applyLinkedLine(
+  ed: MonacoEditor.IStandaloneCodeEditor,
+  collection: MonacoEditor.IEditorDecorationsCollection,
+  line: number | null,
+): void {
+  if (!line) {
+    collection.clear();
+    return;
   }
-  return 0;
+  collection.set([
+    {
+      range: {
+        startLineNumber: line,
+        startColumn: 1,
+        endLineNumber: line,
+        endColumn: 1,
+      },
+      options: {
+        isWholeLine: true,
+        className: "linked-line",
+        linesDecorationsClassName: "linked-glyph",
+      },
+    },
+  ]);
+  ed.revealLineInCenterIfOutsideViewport(line);
 }
 
 export function EditorPanel() {
@@ -30,48 +44,25 @@ export function EditorPanel() {
   const closeDoc = useStudio((s) => s.closeDoc);
   const running = useStudio((s) => s.running);
   const active = useStudio(activeDoc);
-  const linkedName = useStudio((s) => s.linkedName);
-  const linkedSource = useStudio((s) => s.linkedSource);
+  const linked = useStudio((s) => s.linked);
   const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null);
   const decoRef = useRef<MonacoEditor.IEditorDecorationsCollection | null>(
     null,
   );
   const [ready, setReady] = useState(false);
 
-  // Cursor sync (reverse): when the preview cursor lands on a DEFINE line, mark the
-  // matching source declaration here.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: ready triggers after the editor mounts; active.path re-resolves on tab switch.
+  // Cursor sync (reverse): when the preview drove, mark the linked source line here.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: ready triggers after the editor mounts.
   useEffect(() => {
     const ed = editorRef.current;
-    const model = ed?.getModel();
-    if (!ed || !model) return;
+    if (!ed) return;
     if (!decoRef.current) decoRef.current = ed.createDecorationsCollection();
-    if (linkedSource !== "preview" || !linkedName) {
-      decoRef.current.clear();
-      return;
-    }
-    const target = findSourceLine(model, linkedName);
-    if (!target) {
-      decoRef.current.clear();
-      return;
-    }
-    decoRef.current.set([
-      {
-        range: {
-          startLineNumber: target,
-          startColumn: 1,
-          endLineNumber: target,
-          endColumn: 1,
-        },
-        options: {
-          isWholeLine: true,
-          className: "linked-line",
-          linesDecorationsClassName: "linked-glyph",
-        },
-      },
-    ]);
-    ed.revealLineInCenterIfOutsideViewport(target);
-  }, [linkedName, linkedSource, ready, active?.path]);
+    applyLinkedLine(
+      ed,
+      decoRef.current,
+      linked && linked.source === "preview" ? linked.sourceLine : null,
+    );
+  }, [linked, ready]);
 
   if (!active) {
     return (
@@ -167,11 +158,14 @@ export function EditorPanel() {
                 void runCommand("command.palette");
               },
             );
-            // Cursor sync (forward): publish the identifier under the cursor so the
-            // SurrealQL preview can mark the matching DEFINE line.
+            // Cursor sync (forward): map the cursor's source line to the generated line
+            // so the preview reveals + marks it.
             editor.onDidChangeCursorPosition((e) => {
-              const word = editor.getModel()?.getWordAtPosition(e.position);
-              useStudio.getState().setLinkedName(word?.word ?? null, "editor");
+              const st = useStudio.getState();
+              const hit = st.codegenMap.find(
+                (m) => m.sourceLine === e.position.lineNumber,
+              );
+              st.setLinked(hit ? { ...hit, source: "editor" } : null);
             });
             // SurrealQL highlighting inside surql`...` tagged templates.
             installSurqlTemplateHighlight(editor, monaco);
@@ -319,6 +313,7 @@ function useCodegen(doc: Doc | null, enabled: boolean) {
             surql: r.surql ?? "",
             error: r.ok ? null : (r.error ?? "codegen failed"),
           });
+          useStudio.getState().setCodegenMap(r.map ?? []);
         });
     }, 300);
     return () => {
@@ -330,10 +325,6 @@ function useCodegen(doc: Doc | null, enabled: boolean) {
   return { ...state, refresh };
 }
 
-function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 // Read-only SurrealQL preview body (the editor is rendered by OutputPane's codegen state).
 function SurrealqlPreview({
   doc,
@@ -342,56 +333,25 @@ function SurrealqlPreview({
   doc: Doc | null;
   state: CodegenState;
 }) {
-  const linkedName = useStudio((s) => s.linkedName);
-  const linkedSource = useStudio((s) => s.linkedSource);
+  const linked = useStudio((s) => s.linked);
   const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null);
   const decoRef = useRef<MonacoEditor.IEditorDecorationsCollection | null>(
     null,
   );
   const [ready, setReady] = useState(false);
 
-  // Cursor sync (forward): mark the DEFINE line matching the field/table under the
-  // editor cursor (name-based — emit has no source positions). Only when the editor
-  // drove, so the preview doesn't fight its own cursor.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: state.surql (DDL changed) and ready (editor mounted) are intentional re-decorate triggers read via refs.
+  // Cursor sync (forward): when the editor drove, reveal + mark the linked generated line.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: ready triggers after the editor mounts.
   useEffect(() => {
     const ed = editorRef.current;
-    const model = ed?.getModel();
-    if (!ed || !model) return;
+    if (!ed) return;
     if (!decoRef.current) decoRef.current = ed.createDecorationsCollection();
-    if (linkedSource !== "editor" || !linkedName) {
-      decoRef.current.clear();
-      return;
-    }
-    const re = new RegExp(`^DEFINE (?:FIELD|TABLE) ${escapeRe(linkedName)}\\b`);
-    let target = 0;
-    for (let i = 1; i <= model.getLineCount(); i++) {
-      if (re.test(model.getLineContent(i).trim())) {
-        target = i;
-        break;
-      }
-    }
-    if (!target) {
-      decoRef.current.clear();
-      return;
-    }
-    decoRef.current.set([
-      {
-        range: {
-          startLineNumber: target,
-          startColumn: 1,
-          endLineNumber: target,
-          endColumn: 1,
-        },
-        options: {
-          isWholeLine: true,
-          className: "linked-line",
-          linesDecorationsClassName: "linked-glyph",
-        },
-      },
-    ]);
-    ed.revealLineInCenterIfOutsideViewport(target);
-  }, [linkedName, linkedSource, state.surql, ready]);
+    applyLinkedLine(
+      ed,
+      decoRef.current,
+      linked && linked.source === "editor" ? linked.genLine : null,
+    );
+  }, [linked, ready]);
 
   if (!doc || doc.scratch) {
     return (
@@ -435,14 +395,14 @@ function SurrealqlPreview({
         onMount={(ed: MonacoEditor.IStandaloneCodeEditor, _m: Monaco) => {
           editorRef.current = ed;
           setReady(true);
-          // Cursor sync (reverse): publish the table/field of the DEFINE line under the
-          // preview cursor so the source editor marks its declaration.
+          // Cursor sync (reverse): map the cursor's generated line to the source line so
+          // the editor reveals + marks the declaration.
           ed.onDidChangeCursorPosition((e) => {
-            const line =
-              ed.getModel()?.getLineContent(e.position.lineNumber) ?? "";
-            const m = /^\s*DEFINE\s+(?:FIELD|TABLE)\s+(\S+)/i.exec(line);
-            const name = m?.[1]?.split(".").pop() ?? null;
-            useStudio.getState().setLinkedName(name, "preview");
+            const st = useStudio.getState();
+            const hit = st.codegenMap.find(
+              (m) => m.genLine === e.position.lineNumber,
+            );
+            st.setLinked(hit ? { ...hit, source: "preview" } : null);
           });
         }}
         options={{

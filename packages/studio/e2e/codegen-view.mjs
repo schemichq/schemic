@@ -63,25 +63,47 @@ console.log(
 );
 console.log("email field:", norm.includes("email"));
 
-// Cursor sync forward: editor cursor on `email` -> preview marks the DEFINE line.
-await win.evaluate(() =>
-  window.__studio.getState().setLinkedName("email", "editor"),
+// Source map drives cursor sync (true position mapping).
+const mapLen = await win.evaluate(
+  () => window.__studio.getState().codegenMap.length,
 );
-await win.waitForTimeout(300);
-const fwd = await win.evaluate(
-  () => !!document.querySelector(".output-panel .linked-line"),
-);
-console.log("forward (editor->preview) highlight:", fwd);
+console.log("source map entries:", mapLen);
 
-// Cursor sync reverse: preview cursor on a DEFINE line -> source editor marks the field.
-await win.evaluate(() =>
-  window.__studio.getState().setLinkedName("email", "preview"),
-);
+// Forward: move the editor cursor to a mapped source line -> preview marks the gen line.
+const fwd = await win.evaluate(() => {
+  const m = window.__studio.getState().codegenMap.find((e) => e.sourceLine > 0);
+  if (!m) return false;
+  const eds = window.__monaco.editor.getEditors();
+  const src = eds.find((e) => e.getModel()?.uri.path.endsWith(".ts"));
+  src.setPosition({ lineNumber: m.sourceLine, column: 1 });
+  src.focus();
+  return true;
+});
 await win.waitForTimeout(300);
-const rev = await win.evaluate(
-  () => !!document.querySelector(".editor-host .linked-line"),
+console.log(
+  "forward (editor->preview) highlight:",
+  await win.evaluate(
+    () => !!document.querySelector(".output-panel .linked-line"),
+  ),
+  "| triggered:",
+  fwd,
 );
-console.log("reverse (preview->editor) highlight:", rev);
+
+// Reverse: move the preview cursor to a mapped gen line -> editor marks the source line.
+await win.evaluate(() => {
+  const m = window.__studio.getState().codegenMap.find((e) => e.genLine > 1);
+  const eds = window.__monaco.editor.getEditors();
+  const prev = eds.find((e) => !e.getModel()?.uri.path.endsWith(".ts"));
+  prev.setPosition({ lineNumber: m.genLine, column: 1 });
+  prev.focus();
+});
+await win.waitForTimeout(300);
+console.log(
+  "reverse (preview->editor) highlight:",
+  await win.evaluate(
+    () => !!document.querySelector(".editor-host .linked-line"),
+  ),
+);
 
 await win.screenshot({ path: "/tmp/sz-codegen.png" });
 await app.close();

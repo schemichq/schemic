@@ -91,12 +91,23 @@ interface StudioState {
   openFileDialog: () => Promise<void>;
   openFilePath: (path: string) => Promise<void>;
   saveActive: () => Promise<void>;
-  // Linked highlighting / cursor sync: the field/table identifier under the cursor, and
-  // which editor it came from — so the OTHER editor highlights the matching line (editor
-  // field <-> generated DEFINE line) without an editor highlighting its own cursor line.
-  linkedName: string | null;
-  linkedSource: "editor" | "preview" | null;
-  setLinkedName: (name: string | null, source: "editor" | "preview") => void;
+  // Cursor sync: the codegen source map (source line <-> generated line per table/field),
+  // plus the currently-linked pair and which editor drove it — so the OTHER editor reveals
+  // + highlights its paired line without an editor highlighting its own cursor line.
+  codegenMap: { sourceLine: number; genLine: number }[];
+  setCodegenMap: (map: { sourceLine: number; genLine: number }[]) => void;
+  linked: {
+    sourceLine: number;
+    genLine: number;
+    source: "editor" | "preview";
+  } | null;
+  setLinked: (
+    linked: {
+      sourceLine: number;
+      genLine: number;
+      source: "editor" | "preview";
+    } | null,
+  ) => void;
   // Query / results.
   outcome: QueryOutcome | null;
   running: boolean;
@@ -214,14 +225,15 @@ export const useStudio = create<StudioState>()(
         if (d) d.dirty = false;
       });
     },
-    linkedName: null,
-    linkedSource: null,
-    setLinkedName: (name, source) =>
+    codegenMap: [],
+    setCodegenMap: (map) =>
       set((s) => {
-        if (s.linkedName !== name || s.linkedSource !== source) {
-          s.linkedName = name;
-          s.linkedSource = source;
-        }
+        s.codegenMap = map;
+      }),
+    linked: null,
+    setLinked: (linked) =>
+      set((s) => {
+        s.linked = linked;
       }),
     outcome: null,
     running: false,

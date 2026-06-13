@@ -25,7 +25,17 @@ interface StudioBridge {
     fromFile: (
       path: string,
       content?: string,
-    ) => Promise<{ ok: boolean; surql?: string; error?: string }>;
+    ) => Promise<{
+      ok: boolean;
+      surql?: string;
+      error?: string;
+      map?: Array<{
+        kind: string;
+        name: string;
+        sourceLine: number;
+        genLine: number;
+      }>;
+    }>;
   };
   lsp: {
     notify: (command: string, args: unknown) => void;
