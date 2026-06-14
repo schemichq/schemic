@@ -5,6 +5,7 @@ import type {
   StructField,
   StructTable,
 } from "../../src/cli/structure";
+import { formatForAssert } from "../../src/pure";
 
 const f = (name: string, kind: string, table: string): StructField => ({
   name,
@@ -97,5 +98,73 @@ describe("renderPerFile", () => {
     // surql is imported from surrealdb, NOT folded into the surreal-zod import.
     expect(out).toContain(`import { surql } from "surrealdb";`);
     expect(out).toMatch(/import \{ sz, defineTable \} from "surreal-zod";/);
+  });
+});
+
+describe("formatForAssert", () => {
+  test("recovers a format name from an exact baked assert; rejects anything else", () => {
+    expect(formatForAssert("string::is_email($value)")).toBe("email");
+    expect(formatForAssert("string::is_url( $value )")).toBe("url"); // spacing-tolerant
+    expect(formatForAssert("string::is_ipv4($value)")).toBe("ipv4");
+    expect(formatForAssert("string::len($value) < 5")).toBeUndefined(); // not a format
+    expect(
+      formatForAssert("string::is_email($value) AND $value != NONE"),
+    ).toBeUndefined(); // combined → not swallowed
+    expect(formatForAssert("string::is_madeup($value)")).toBeUndefined();
+  });
+});
+
+describe("pull reverses native codecs / string formats", () => {
+  const sf = (name: string, kind: string, extra: Partial<StructField> = {}) =>
+    ({ name, kind, table: "t", ...extra }) as StructField;
+  const render = (fields: StructField[]): string => {
+    const db: DbStructured = {
+      tables: [
+        {
+          name: "t",
+          kind: { kind: "NORMAL" },
+          schemafull: true,
+          fields,
+          indexes: [],
+          events: [],
+        },
+      ],
+      functions: [],
+      accesses: [],
+    };
+    return renderPerFile(db, (_k, n) => `${n}.ts`).get("t.ts") ?? "";
+  };
+
+  test("string-format asserts reverse to the builder; the $assert is dropped", () => {
+    const out = render([
+      sf("id", "string"),
+      sf("email", "string", { assert: "string::is_email($value)" }),
+      sf("site", "option<string>", { assert: "string::is_url($value)" }),
+      sf("handle", "string", { assert: "string::is_alpha($value)" }),
+    ]);
+    expect(out).toContain("email: sz.email()");
+    expect(out).toContain("site: sz.url().optional()");
+    expect(out).toContain("handle: sz.alpha()");
+    expect(out).not.toContain("string::is_email");
+  });
+
+  test("a non-format assert stays string + $assert (never swallowed)", () => {
+    const out = render([
+      sf("id", "string"),
+      sf("notes", "string", { assert: "string::len($value) < 5" }),
+    ]);
+    expect(out).toContain(
+      "notes: sz.string().$assert(surql`string::len($value) < 5`)",
+    );
+  });
+
+  test("file and geometry native types reverse from the type name", () => {
+    const out = render([
+      sf("id", "string"),
+      sf("doc", "file"),
+      sf("loc", "geometry<point>"),
+    ]);
+    expect(out).toContain("doc: sz.file()");
+    expect(out).toContain('loc: sz.geometry("point")');
   });
 });

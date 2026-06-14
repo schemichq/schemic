@@ -47,6 +47,7 @@ export {
   defineTable,
   EventDef,
   FunctionDef,
+  formatForAssert,
   objectFieldsRegistry,
   RecordIdField,
   RelationDef,

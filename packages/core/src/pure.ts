@@ -147,6 +147,17 @@ function formatAssert(format: string): string | undefined {
     : undefined;
 }
 
+/**
+ * Reverse of {@link formatAssert}: recover a format name from a baked `string::is_<fmt>($value)`
+ * assert. Used by `pull` to restore `sz.<format>()` instead of `sz.string().$assert(...)`. Returns
+ * undefined for any other assert — including one that combines a format with extra text — so only an
+ * exact, single-format assert reverses (a user's own assert is never swallowed).
+ */
+export function formatForAssert(assert: string): string | undefined {
+  const m = /^string::is_([a-z0-9]+)\(\s*\$value\s*\)$/.exec(assert.trim());
+  return m && STRING_IS_FORMATS.has(m[1]) ? m[1] : undefined;
+}
+
 /** Build an SField for a Zod string-format schema, baking `string::is_<fmt>($value)`
  * when SurrealDB has that validator (else no assert). */
 function formatField<S extends z.ZodType>(

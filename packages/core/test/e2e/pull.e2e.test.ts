@@ -168,11 +168,10 @@ export const Flag = defineTable("flag", {
   );
 
   test(
-    "documents the sz.email() codec asymmetry: it pulls back as string + ASSERT",
+    "string-format builders reverse from their baked assert (sz.email(), not string + ASSERT)",
     async () => {
-      // The sample `user.ts` uses sz.email(); the db stores it as `string` + an is_email ASSERT.
-      // pull can't know it was an email codec, so it round-trips as sz.string().$assert(...). This
-      // test pins that KNOWN asymmetry so a future codec-reversal change updates it deliberately.
+      // The sample `user.ts` uses sz.email(); the db stores it as `string ASSERT string::is_email`.
+      // pull recovers the builder from that exact assert (and drops the now-redundant $assert).
       const root = H.scaffold();
       const db = H.freshDb();
       const run = (args: string[]) => H.run(args, { cwd: root, db });
@@ -181,10 +180,11 @@ export const Flag = defineTable("flag", {
 
       await run(["pull", "--write"]);
       const user = H.read(root, "database/schema/tables/user.ts");
-      expect(user).toContain("string::is_email");
-      expect(user).toContain("$assert");
+      expect(user).toContain("email: sz.email()");
+      expect(user).not.toContain("string::is_email"); // the assert was reversed, not re-emitted
+      expect(user).not.toMatch(/email:.*\$assert/);
 
-      // Still idempotent on the second pull (the asymmetry is a one-time normalization).
+      // Idempotent on the second pull.
       const again = await run(["pull"]);
       expect(again.out).toContain("Schema files already match the database.");
     },

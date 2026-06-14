@@ -6,6 +6,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, relative } from "node:path";
+import { formatForAssert } from "surreal-zod";
 import type { Surreal } from "surrealdb";
 import type { ResolvedConfig } from "./config";
 import { type Filter, filterStructured, parseFilter } from "./filter";
@@ -259,9 +260,16 @@ function szType(type: string, ctx?: RenderCtx): string {
     return `sz.union([${vals.map((v) => `sz.literal(${JSON.stringify(v)})`).join(", ")}])`;
   }
 
+  // Native types carrying a `<kind>` parameter (e.g. `geometry<point>`).
+  const geo = /^geometry(?:<(\w+)>)?$/.exec(t);
+  if (geo)
+    return geo[1] ? `sz.geometry(${JSON.stringify(geo[1])})` : "sz.geometry()";
+
   switch (t) {
     case "string":
       return "sz.string()";
+    case "file":
+      return "sz.file()";
     case "int":
       return "sz.int()";
     case "float":
@@ -348,6 +356,10 @@ function renderField(node: FieldNode, indent: string, ctx?: RenderCtx): string {
   const objChildren = [...node.children].filter(([k]) => k !== "*");
   const star = node.children.get("*");
   const wrap = p ? unwrapType(p.type) : null;
+  // A `string` field whose ASSERT is exactly a baked `string::is_<fmt>($value)` round-trips back to
+  // the format builder (`sz.email()`, …) — the assert is the only signal, and it's dropped below
+  // since the builder re-bakes it. Combined/extra asserts don't match, so they stay `string` + assert.
+  const fmt = p?.assert !== undefined ? formatForAssert(p.assert) : undefined;
   let expr: string;
   if (p && wrap?.base === "object") {
     // Rebuild sz.object from dotted children (empty if none) — even when wrapped in
@@ -374,6 +386,10 @@ function renderField(node: FieldNode, indent: string, ctx?: RenderCtx): string {
       : `${elem}.array()`;
     if (wrap?.nullable) expr += ".nullable()";
     if (wrap?.optional) expr += ".optional()";
+  } else if (p && wrap?.base === "string" && fmt) {
+    expr = `sz.${fmt}()`;
+    if (wrap.nullable) expr += ".nullable()";
+    if (wrap.optional) expr += ".optional()";
   } else if (!p) {
     expr = "sz.any()";
   } else {
@@ -391,7 +407,9 @@ function renderField(node: FieldNode, indent: string, ctx?: RenderCtx): string {
     }
     if (p.value !== undefined) expr += `.$value(surql\`${p.value}\`)`;
     if (p.computed !== undefined) expr += `.$computed(surql\`${p.computed}\`)`;
-    if (p.assert !== undefined) expr += `.$assert(surql\`${p.assert}\`)`;
+    // The format builder re-bakes its `string::is_<fmt>` assert, so drop it when we reversed one.
+    if (p.assert !== undefined && !fmt)
+      expr += `.$assert(surql\`${p.assert}\`)`;
     if (p.readonly) expr += ".$readonly()";
     if (p.comment) expr += `.$comment(${JSON.stringify(p.comment)})`;
     const perm = renderPerms(
