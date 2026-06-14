@@ -102,6 +102,7 @@ function InlineInput({
       className="tree-row tree-row-input"
       style={{ paddingLeft: 8 + depth * 15 }}
     >
+      <Guides depth={depth} />
       <span className="tree-chevron" />
       <Icon size={14} style={{ color }} className="tree-icon" />
       <input
@@ -116,6 +117,49 @@ function InlineInput({
         }}
         onBlur={() => finish(true)}
       />
+    </div>
+  );
+}
+
+/** Vertical indent guides — one 1px line per ancestor depth. */
+function Guides({ depth }: { depth: number }) {
+  if (depth === 0) return null;
+  return (
+    <>
+      {Array.from({ length: depth }, (_, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: positional guide lines
+        <span key={i} className="tree-guide" style={{ left: 8 + i * 15 + 6 }} />
+      ))}
+    </>
+  );
+}
+
+/** Shimmer placeholder rows shown while a directory's children load. */
+function SkeletonRows({ depth }: { depth: number }) {
+  return (
+    <>
+      {[0, 1, 2].map((i) => (
+        <div
+          // biome-ignore lint/suspicious/noArrayIndexKey: fixed-count placeholders
+          key={i}
+          className="tree-row tree-skeleton"
+          style={{ paddingLeft: 8 + depth * 15 }}
+        >
+          <Guides depth={depth} />
+          <span className="sk-icon" />
+          <span className="sk-bar" style={{ width: 70 + i * 22 }} />
+        </div>
+      ))}
+    </>
+  );
+}
+
+/** Muted placeholder shown when an expanded directory has no children. */
+function EmptyRow({ depth }: { depth: number }) {
+  return (
+    <div className="tree-empty" style={{ paddingLeft: 8 + depth * 15 + 19 }}>
+      <Guides depth={depth} />
+      empty
     </div>
   );
 }
@@ -195,6 +239,7 @@ function TreeRow(props: RowProps) {
           onDoubleClick={() => props.onStartRename(node.path)}
           onContextMenu={(e) => onContext(e, node)}
         >
+          <Guides depth={depth} />
           <span className="tree-chevron">
             {node.isDir &&
               (expanded ? (
@@ -221,14 +266,21 @@ function TreeRow(props: RowProps) {
               onCancel={props.onCreateCancel}
             />
           )}
-          {node.children?.map((child) => (
-            <TreeRow
-              key={child.path}
-              {...props}
-              node={child}
-              depth={depth + 1}
-            />
-          ))}
+          {node.children === null ? (
+            <SkeletonRows depth={depth + 1} />
+          ) : node.children.length === 0 &&
+            creating?.parentDir !== node.path ? (
+            <EmptyRow depth={depth + 1} />
+          ) : (
+            node.children.map((child) => (
+              <TreeRow
+                key={child.path}
+                {...props}
+                node={child}
+                depth={depth + 1}
+              />
+            ))
+          )}
         </>
       )}
     </>

@@ -400,6 +400,7 @@ button {
   padding: 4px 0;
 }
 .tree-row {
+  position: relative;
   width: 100%;
   height: 26px;
   display: flex;
@@ -411,6 +412,15 @@ button {
   font-size: 12.5px;
   white-space: nowrap;
   cursor: pointer;
+}
+/* Indent guides: 1px vertical line per ancestor depth. */
+.tree-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+  pointer-events: none;
 }
 .tree-row:hover {
   background: var(--surface-2);
@@ -448,6 +458,49 @@ button {
   margin-left: auto;
   flex: 0 0 auto;
 }
+/* Empty-folder placeholder + loading skeleton rows. */
+.tree-empty {
+  position: relative;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-style: italic;
+}
+.tree-skeleton {
+  cursor: default;
+  pointer-events: none;
+}
+.sk-icon,
+.sk-bar {
+  height: 8px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  position: relative;
+  overflow: hidden;
+}
+.sk-icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+.sk-icon::after,
+.sk-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, #ffffff10, transparent);
+  animation: sz-shimmer 1.2s infinite;
+}
+@keyframes sz-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
 /* Inline rename / new-entry input (matches a tree row). */
 .tree-row-input {
   cursor: default;

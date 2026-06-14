@@ -180,13 +180,16 @@ export const useStudio = create<StudioState>()(
     toggleDir: async (path) => {
       const node = get().tree ? findNode(get().tree as TreeNode[], path) : null;
       if (!node || !node.isDir) return;
-      // Lazy-load children the first time the directory is expanded.
+      // Lazy-load children the first time. Expand immediately so a loading skeleton
+      // shows while readDir is in flight, then fill the children in.
       if (node.children === null) {
+        set((s) => {
+          s.expanded[path] = true;
+        });
         const children = await readTree(path);
         set((s) => {
           const n = s.tree && findNode(s.tree, path);
           if (n) n.children = children;
-          s.expanded[path] = true;
         });
         return;
       }
