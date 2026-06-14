@@ -420,6 +420,11 @@ button {
   background: #221a30;
   color: var(--text-primary);
 }
+/* Keyboard focus: 1.5px inset accent ring (full-bleed rows), replacing the default outline. */
+.tree-row:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px var(--accent-purple);
+}
 .tree-chevron {
   flex: 0 0 13px;
   width: 13px;
