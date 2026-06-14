@@ -1,11 +1,10 @@
 import { useEffect, useRef } from "react";
+import { type MenuItem, MenuRow } from "./MenuRow";
 
-// Lightweight positioned popup menu (right-click / overflow). Dismisses on outside-click,
-// Esc, or scroll/resize. Items can be a separator ("sep") or an action.
+export type { MenuItem };
 
-export type MenuItem =
-  | "sep"
-  | { label: string; shortcut?: string; danger?: boolean; onClick: () => void };
+// Lightweight positioned popup menu (right-click / titlebar / overflow). Dismisses on
+// outside-click, Esc, or scroll/resize. Rows are rendered by the shared MenuRow component.
 
 export function ContextMenu({
   x,
@@ -40,7 +39,7 @@ export function ContextMenu({
   }, [onClose]);
 
   // Keep the menu on-screen (flip near the right/bottom edges).
-  const W = 200;
+  const W = 248;
   const left = Math.min(x, window.innerWidth - W - 8);
   const top = Math.min(y, window.innerHeight - items.length * 30 - 8);
 
@@ -49,26 +48,14 @@ export function ContextMenu({
       ref={ref}
       className="ctx-menu"
       role="menu"
-      style={{ left, top, width: W }}
+      style={{ left, top, minWidth: W }}
     >
       {items.map((it, i) =>
         it === "sep" ? (
           // biome-ignore lint/suspicious/noArrayIndexKey: separators are positional
           <div key={`sep-${i}`} className="ctx-sep" />
         ) : (
-          <button
-            type="button"
-            key={it.label}
-            role="menuitem"
-            className={`ctx-item${it.danger ? " danger" : ""}`}
-            onClick={() => {
-              it.onClick();
-              onClose();
-            }}
-          >
-            <span>{it.label}</span>
-            {it.shortcut && <span className="ctx-shortcut">{it.shortcut}</span>}
-          </button>
+          <MenuRow key={it.label} item={it} onSelect={onClose} />
         ),
       )}
     </div>

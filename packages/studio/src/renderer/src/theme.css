@@ -518,33 +518,34 @@ button {
   outline: none;
 }
 
-/* Context / overflow menu */
+/* Context / overflow / app menu — rows are the canonical Menu Row (app.pen i0l2op). */
 .ctx-menu {
   position: fixed;
   z-index: 200;
-  background: var(--surface);
+  background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 4px;
+  padding: 6px;
   box-shadow: 0 10px 30px #00000066;
   display: flex;
   flex-direction: column;
+  gap: 4px;
 }
 .ctx-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 6px 8px;
-  border-radius: 5px;
-  color: var(--text-secondary);
+  gap: 24px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  color: var(--text-primary);
   font-family: var(--font-ui);
-  font-size: 12.5px;
+  font-size: 13px;
   text-align: left;
   cursor: pointer;
 }
 .ctx-item:hover {
-  background: var(--surface-2);
+  background: #221a30;
   color: var(--text-primary);
 }
 .ctx-item.danger {
@@ -556,11 +557,23 @@ button {
 }
 .ctx-shortcut {
   color: var(--text-muted);
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.ctx-chevron {
+  color: var(--text-muted);
+}
+.ctx-item:disabled {
+  color: var(--text-muted);
+  opacity: 0.55;
+  cursor: default;
+}
+.ctx-item:disabled:hover {
+  background: transparent;
 }
 .ctx-sep {
   height: 1px;
-  background: var(--border);
+  background: var(--border-subtle);
   margin: 4px 2px;
 }
 .explorer-empty {
@@ -833,6 +846,9 @@ button {
   border-radius: 50%;
   background: var(--success-green);
 }
+.conn-dot2.sandbox {
+  background: var(--accent-soft);
+}
 .ctx-ws {
   color: var(--text-secondary);
   font-size: 13px;
@@ -903,11 +919,67 @@ button {
   padding: 6px 9px;
   color: var(--text-secondary);
   font-family: var(--font-ui);
-  font-size: 12.5px;
+  font-size: 13px;
   cursor: pointer;
 }
 .tb-menu:hover {
   background: var(--surface-2);
+}
+.tb-menu.open {
+  background: var(--surface-2);
+  color: var(--accent-soft);
+}
+/* macOS traffic-light controls (flush left). */
+.tb-traffic {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 0 12px;
+  height: 100%;
+}
+.tl-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.tl-dot.close {
+  background: var(--danger-red);
+}
+.tl-dot.min {
+  background: var(--warning-amber);
+}
+.tl-dot.max {
+  background: var(--success-green);
+}
+.tl-dot:hover {
+  filter: brightness(1.2);
+}
+/* B — collapsed "Menu" trigger. */
+.tb-menu-collapsed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 4px 8px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  cursor: pointer;
+}
+.tb-menu-collapsed:hover {
+  color: var(--text-primary);
+}
+.tb-menu-collapsed.open {
+  color: var(--accent-soft);
+  border-color: var(--border);
+}
+.tb-menu-collapsed.open svg {
+  color: var(--accent-soft);
 }
 .tb-c-tier2 {
   height: 42px;
@@ -943,6 +1015,13 @@ button {
 }
 .drift-chip svg {
   color: var(--success-green);
+}
+.drift-chip.sandbox {
+  color: var(--text-muted);
+  cursor: default;
+}
+.drift-chip.sandbox svg {
+  color: var(--text-muted);
 }
 
 /* Variation B — single tier, switcher-centric */

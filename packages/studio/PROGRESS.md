@@ -15,12 +15,17 @@
 - [x] Brand fonts (Geist Variable + JetBrains Mono, ligatures)
 - [x] Frameless window + custom window controls (min/max/close) wired via IPC; web build = no OS controls
 - [x] Activity rail — canonical **Nav Item** (72px, icon+label, indicator-bar states: default/hover/active/focus). P1 = **Code only**; module items added as they ship, system items (Settings/Help) held until their pages exist (Manuel)
-- [x] Two-tier titlebar from `design/app.pen` (D33), rendered:
+- [x] Two-tier titlebar from `design/specs/titlebar.md` + `design/app.pen` (D33), rendered:
   - [x] Variation **C (default)** — logo · Reverie · menus · window controls / project + connection switchers · drift chip · account
   - [x] Variation **B (flagged)** — switcher-centric single bar; selected via the `titlebar.variant` **setting** (D36)
+  - [x] **App menus** (File · Edit · View · Schema · Connection · Help) with **open dropdowns** built from the reusable **Menu Row** (`MenuRow`, shared with the explorer context menu): hover/open states, separators, mono `Cmd` shortcuts, submenu chevron, disabled (muted) rows. File menu matches the designed contents (New Project · Open Folder · Open Recent ▸ · — · Pull/Push from DB · — · Settings · Quit); unbuilt actions disabled per surface-only-implemented. Wired: Open Folder→`project.open`, Quit→window.close, View/Schema→palette/run, Edit→execCommand
+  - [x] **B collapsed "Menu" dropdown** — top-level menus list (submenu chevrons) that expand in place; open-state styling on the trigger
+  - [x] **Web/Sandbox context variant** — gated on the web/WASM build (`!window.studio`): no window controls, connection reads "Sandbox / mem://" (accent-soft dot), drift chip → "Sandbox" (muted)
+  - [x] **Platform window controls** — macOS traffic-lights flush LEFT (danger/amber/success dots) vs Windows/Linux controls flush RIGHT (`window.studio.platform`)
+  - Built to spec then **design-audited** (review subagent vs `titlebar.md` + Title Bar Kit); divergences reconciled build→design (File menu contents, Menu Row tokens: surface-2 panel, text-primary labels, mono shortcuts, padding/radius/gaps). Verified `e2e/titlebar.mjs`
 - [x] StatusBar component rendered
 - [x] Results header — format dropdown (Table/JSON toggle works)
-- [x] Static titlebar app-menus **removed** (surface only what's implemented; commands live in the Cmd/K palette)
+- [x] Titlebar app-menus **(re)built** as functional dropdowns from the finalized spec (see above) — earlier they were removed as static placeholders
 - [ ] StatusBar shows **static** placeholder data — live wiring pending
 - [ ] Titlebar project/connection switchers + drift chip + account are **static** (interactivity pending — needs D28 + project/org subsystems)
 - [ ] Result "Tree" view mode (only Table/JSON exist)
