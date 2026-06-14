@@ -54,3 +54,10 @@ On first run this PoC reproduced a real divergence the manual audit had found â€
 `[Connection Switcher] borderTopWidth: expected 0, got 1` (design's connection switcher has no
 border; the shared `.ctx-switcher` gave it one). Fixing the build (`.ctx-switcher--plain`)
 turned the audit green.
+
+Then a divergence the audit *missed* showed the flip side: the Title Bar C **frame's** outer
+bottom border (`#2a2438`, on Pencil `BWN3w`) was absent in the build â€” but the manifest only
+anchored the two tiers, not `.tb-c` itself, so it was a blind spot. **Coverage equals anchor
+completeness**: the tool only checks props you anchor. Adding the `.tb-c` anchor surfaced it
+(`borderBottomWidth: expected 1, got 0`); fixing `.tb-c` turned it green. So the manifest should
+aim to anchor every element + the props that matter for each.

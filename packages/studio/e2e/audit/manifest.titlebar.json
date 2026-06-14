@@ -3,6 +3,12 @@
   "note": "Normalized StyleRecords exported from Pencil (colors as token names, sizes in px). Each anchor pairs a Pencil node to a CSS selector; only the listed props are compared.",
   "records": [
     {
+      "anchor": "Title Bar C (frame)",
+      "node": "BWN3w",
+      "selector": ".tb-c",
+      "props": { "borderBottomColor": "border", "borderBottomWidth": 1 }
+    },
+    {
       "anchor": "Tier 1 Chrome",
       "node": "CiMao",
       "selector": ".tb-c-tier1",
