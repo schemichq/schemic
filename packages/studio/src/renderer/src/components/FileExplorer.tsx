@@ -104,7 +104,7 @@ export function FileExplorer({ onCollapse }: { onCollapse: () => void }) {
         </div>
       ) : (
         <div className="explorer-empty">
-          <Folder size={28} className="explorer-empty-icon" />
+          <FolderOpen size={30} className="explorer-empty-icon" />
           <p className="explorer-empty-title">No project open</p>
           <p className="explorer-empty-hint">
             Open a surreal-zod project folder.
@@ -114,6 +114,7 @@ export function FileExplorer({ onCollapse }: { onCollapse: () => void }) {
             className="run-btn explorer-open"
             onClick={() => void openProject()}
           >
+            <FolderOpen size={14} />
             Open Folder
           </button>
         </div>

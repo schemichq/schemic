@@ -470,6 +470,8 @@ button {
 .explorer-open {
   margin-top: 6px;
   padding: 7px 14px;
+  /* Primary action: solid accent (not the brand gradient) per the explorer empty-state spec. */
+  background: var(--accent-purple);
 }
 
 /* Workbench */
