@@ -30,6 +30,24 @@ function joinPath(parent: string, name: string): string {
   return `${parent.replace(/[\\/]$/, "")}${sep}${name}`;
 }
 
+/** The parent directory of a path. */
+function parentOf(path: string): string {
+  return path.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]+$/, "");
+}
+
+/** Is `path` inside directory `dir`? */
+function isUnder(path: string, dir: string): boolean {
+  return path.startsWith(`${dir}/`) || path.startsWith(`${dir}\\`);
+}
+
+/** Split a filename into base + extension (extension includes the dot, empty if none). */
+function splitName(name: string): { base: string; ext: string } {
+  const dot = name.lastIndexOf(".");
+  return dot > 0
+    ? { base: name.slice(0, dot), ext: name.slice(dot) }
+    : { base: name, ext: "" };
+}
+
 const IGNORED_ENTRIES = new Set([".git", "node_modules"]);
 
 async function readTree(dir: string): Promise<TreeNode[]> {
@@ -83,6 +101,14 @@ interface StudioState {
   tree: TreeNode[] | null;
   expanded: Record<string, boolean>;
   toggleDir: (path: string) => Promise<void>;
+  // File mutations (over the FileSystem adapter), each refreshes the affected directory.
+  refreshDir: (dirPath: string) => Promise<void>;
+  newFile: (parentDir: string, name: string) => Promise<void>;
+  newFolder: (parentDir: string, name: string) => Promise<void>;
+  renameNode: (path: string, newName: string) => Promise<void>;
+  duplicateNode: (path: string) => Promise<void>;
+  deleteNode: (path: string) => Promise<void>;
+  revealNode: (path: string) => Promise<void>;
   // Open documents (editor tabs).
   docs: Doc[];
   activePath: string | null;
@@ -167,6 +193,79 @@ export const useStudio = create<StudioState>()(
       set((s) => {
         s.expanded[path] = !s.expanded[path];
       });
+    },
+    refreshDir: async (dirPath) => {
+      const children = await readTree(dirPath);
+      set((s) => {
+        if (dirPath === s.workspaceRoot) {
+          s.tree = children;
+          return;
+        }
+        const n = s.tree && findNode(s.tree, dirPath);
+        if (n) {
+          n.children = children;
+          s.expanded[dirPath] = true;
+        }
+      });
+    },
+    newFile: async (parentDir, name) => {
+      const path = joinPath(parentDir, name);
+      await getFileSystem().create(path);
+      await get().refreshDir(parentDir);
+      await get().openFilePath(path);
+    },
+    newFolder: async (parentDir, name) => {
+      await getFileSystem().mkdir(joinPath(parentDir, name));
+      await get().refreshDir(parentDir);
+    },
+    renameNode: async (path, newName) => {
+      const parent = parentOf(path);
+      const to = joinPath(parent, newName);
+      if (to === path) return;
+      await getFileSystem().rename(path, to);
+      // Re-key any open docs that were the renamed node (or live under a renamed dir).
+      set((s) => {
+        for (const d of s.docs) {
+          if (d.path === path) {
+            d.path = to;
+            d.name = newName;
+            d.language = langFromPath(newName);
+          } else if (isUnder(d.path, path)) {
+            d.path = to + d.path.slice(path.length);
+          }
+        }
+        if (s.activePath === path) s.activePath = to;
+        else if (s.activePath && isUnder(s.activePath, path))
+          s.activePath = to + s.activePath.slice(path.length);
+      });
+      await get().refreshDir(parent);
+    },
+    duplicateNode: async (path) => {
+      const parent = parentOf(path);
+      const name = path.split(/[\\/]/).pop() ?? path;
+      const { base, ext } = splitName(name);
+      const fs = getFileSystem();
+      let dest = joinPath(parent, `${base} copy${ext}`);
+      for (let n = 2; await fs.exists(dest); n++)
+        dest = joinPath(parent, `${base} copy ${n}${ext}`);
+      await fs.copy(path, dest);
+      await get().refreshDir(parent);
+    },
+    deleteNode: async (path) => {
+      await getFileSystem().trash(path);
+      set((s) => {
+        const gone = (p: string) => p === path || isUnder(p, path);
+        const idx = s.docs.findIndex((d) => gone(d.path));
+        s.docs = s.docs.filter((d) => !gone(d.path));
+        if (s.activePath && gone(s.activePath)) {
+          const next = s.docs[idx] ?? s.docs[idx - 1] ?? null;
+          s.activePath = next?.path ?? null;
+        }
+      });
+      await get().refreshDir(parentOf(path));
+    },
+    revealNode: async (path) => {
+      await getFileSystem().reveal(path);
     },
     docs: [],
     activePath: null,

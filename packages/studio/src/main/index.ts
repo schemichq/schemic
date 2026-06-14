@@ -1,7 +1,15 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { readdir, readFile, stat, writeFile } from "node:fs/promises";
+import {
+  cp,
+  mkdir,
+  readdir,
+  readFile,
+  rename,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { generateSurql } from "./codegen";
 import { setTsEventSink, stopTsServer, tsNotify, tsRequest } from "./lsp";
 import {
@@ -93,6 +101,28 @@ ipcMain.handle("fs:exists", async (_e, p: string) => {
   } catch {
     return false;
   }
+});
+// Mutations (path-scoped). create/mkdir fail if the target exists; delete routes through the
+// OS trash (recoverable) rather than a hard rm; reveal opens the OS file manager.
+ipcMain.handle("fs:create", (_e, p: string) =>
+  writeFile(assertAllowed(p), "", { flag: "wx" }),
+);
+ipcMain.handle("fs:mkdir", (_e, p: string) => mkdir(assertAllowed(p)));
+ipcMain.handle("fs:rename", (_e, from: string, to: string) =>
+  rename(assertAllowed(from), assertAllowed(to)),
+);
+ipcMain.handle("fs:copy", (_e, from: string, to: string) =>
+  cp(assertAllowed(from), assertAllowed(to), {
+    recursive: true,
+    errorOnExist: true,
+    force: false,
+  }),
+);
+ipcMain.handle("fs:trash", (_e, p: string) =>
+  shell.trashItem(assertAllowed(p)),
+);
+ipcMain.handle("fs:reveal", (_e, p: string) => {
+  shell.showItemInFolder(assertAllowed(p));
 });
 // Generate SurrealQL from a schema file (path-scoped like fs:*). The codegen runs the
 // user's TS via jiti in the main process. (Engine bridge, Slice 2.)

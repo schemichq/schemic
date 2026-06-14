@@ -17,6 +17,12 @@ interface StudioBridge {
     write: (path: string, content: string) => Promise<void>;
     readdir: (path: string) => Promise<Array<{ name: string; isDir: boolean }>>;
     exists: (path: string) => Promise<boolean>;
+    create: (path: string) => Promise<void>;
+    mkdir: (path: string) => Promise<void>;
+    rename: (from: string, to: string) => Promise<void>;
+    copy: (from: string, to: string) => Promise<void>;
+    trash: (path: string) => Promise<void>;
+    reveal: (path: string) => Promise<void>;
     addRoot: (path: string) => Promise<void>;
     openDirectoryDialog: () => Promise<string | null>;
     openFileDialog: () => Promise<string | null>;

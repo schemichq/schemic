@@ -21,4 +21,22 @@ export class LocalFS implements FileSystem {
   exists(path: string): Promise<boolean> {
     return this.bridge.exists(path);
   }
+  create(path: string): Promise<void> {
+    return this.bridge.create(path);
+  }
+  mkdir(path: string): Promise<void> {
+    return this.bridge.mkdir(path);
+  }
+  rename(from: string, to: string): Promise<void> {
+    return this.bridge.rename(from, to);
+  }
+  copy(from: string, to: string): Promise<void> {
+    return this.bridge.copy(from, to);
+  }
+  trash(path: string): Promise<void> {
+    return this.bridge.trash(path);
+  }
+  reveal(path: string): Promise<void> {
+    return this.bridge.reveal(path);
+  }
 }

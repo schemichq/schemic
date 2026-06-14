@@ -13,4 +13,16 @@ export interface FileSystem {
   writeFile(path: string, content: string): Promise<void>;
   readDir(path: string): Promise<DirEntry[]>;
   exists(path: string): Promise<boolean>;
+  /** Create an empty file (fails if it already exists). */
+  create(path: string): Promise<void>;
+  /** Create a directory (fails if it already exists). */
+  mkdir(path: string): Promise<void>;
+  /** Move/rename a path. */
+  rename(from: string, to: string): Promise<void>;
+  /** Recursively copy a file/dir (fails if the destination exists). */
+  copy(from: string, to: string): Promise<void>;
+  /** Send a path to the OS trash (recoverable). */
+  trash(path: string): Promise<void>;
+  /** Reveal a path in the OS file manager. */
+  reveal(path: string): Promise<void>;
 }

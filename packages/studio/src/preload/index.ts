@@ -23,6 +23,18 @@ contextBridge.exposeInMainWorld("studio", {
     readdir: (path: string) => ipcRenderer.invoke("fs:readdir", path),
     exists: (path: string): Promise<boolean> =>
       ipcRenderer.invoke("fs:exists", path),
+    create: (path: string): Promise<void> =>
+      ipcRenderer.invoke("fs:create", path),
+    mkdir: (path: string): Promise<void> =>
+      ipcRenderer.invoke("fs:mkdir", path),
+    rename: (from: string, to: string): Promise<void> =>
+      ipcRenderer.invoke("fs:rename", from, to),
+    copy: (from: string, to: string): Promise<void> =>
+      ipcRenderer.invoke("fs:copy", from, to),
+    trash: (path: string): Promise<void> =>
+      ipcRenderer.invoke("fs:trash", path),
+    reveal: (path: string): Promise<void> =>
+      ipcRenderer.invoke("fs:reveal", path),
     addRoot: (path: string): Promise<void> =>
       ipcRenderer.invoke("fs:addRoot", path),
     openDirectoryDialog: (): Promise<string | null> =>
