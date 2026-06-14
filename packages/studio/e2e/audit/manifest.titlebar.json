@@ -1,6 +1,6 @@
 {
   "source": "design/app.pen -> Title Bar Kit -> Title Bar C (BWN3w)",
-  "note": "Normalized StyleRecords exported from Pencil (colors as token names, sizes in px). Each anchor pairs a Pencil node to a CSS selector; only the listed props are compared.",
+  "note": "Full composition-level node inventory of Title Bar C. Every styled node is either anchored (selector + props, colors as token names) or explicitly ignored (with a reason). Enumerating all nodes makes coverage visible: a styled design node that's neither anchored nor ignored is a gap. Re-export from Pencil when the design changes.",
   "records": [
     {
       "anchor": "Title Bar C (frame)",
@@ -19,11 +19,13 @@
         "height": 34
       }
     },
+    { "anchor": "Tier 1 Left", "node": "t8tNup", "ignore": "layout container (no fill/stroke)" },
+    { "anchor": "Logo group", "node": "ecP6Q", "ignore": "layout container (gap only)" },
     {
-      "anchor": "Tier 2 Context",
-      "node": "soioF",
-      "selector": ".tb-c-tier2",
-      "props": { "bg": "surface", "height": 42 }
+      "anchor": "Logo mark",
+      "node": "ecP6Q/kLesy",
+      "selector": ".tb-logo",
+      "props": { "bg": "accent-purple", "radius": 7, "width": 18, "height": 18 }
     },
     {
       "anchor": "Wordmark",
@@ -37,6 +39,7 @@
         "text": "Reverie"
       }
     },
+    { "anchor": "Menus", "node": "x8TZU", "ignore": "layout container (gap only)" },
     {
       "anchor": "Menu Item (File)",
       "node": "BtKf7",
@@ -49,6 +52,22 @@
         "paddingLeft": 9,
         "text": "File"
       }
+    },
+    { "anchor": "Menu Items (Edit/View/Schema/Connection/Help)", "node": "SlwlV,twoJR,MD58R,cd41o,eTNSi", "ignore": "same component (Menu Item) as File" },
+    { "anchor": "Tier 1 spacer", "node": "PuLxQ", "ignore": "spacer" },
+    { "anchor": "Window Controls", "node": "B39gIN", "ignore": "layout container" },
+    {
+      "anchor": "Window control (Minimize)",
+      "node": "B39gIN/jxW7T",
+      "selector": ".win-ctls .win-ctl:nth-of-type(1)",
+      "props": { "fg": "text-secondary", "width": 42 }
+    },
+    { "anchor": "Window controls (Maximize/Close)", "node": "B39gIN/LLesS,B39gIN/NWL5q", "ignore": "same component as Minimize" },
+    {
+      "anchor": "Tier 2 Context",
+      "node": "soioF",
+      "selector": ".tb-c-tier2",
+      "props": { "bg": "surface", "height": 42 }
     },
     {
       "anchor": "Project Switcher",
@@ -70,6 +89,7 @@
       "selector": ".tb-c-tier2 .ctx-switcher:nth-of-type(2)",
       "props": { "bg": "surface-2", "radius": 8, "gap": 8, "borderTopWidth": 0 }
     },
+    { "anchor": "Tier 2 spacer", "node": "uiJb2", "ignore": "spacer" },
     {
       "anchor": "Drift Chip",
       "node": "i4sFj",

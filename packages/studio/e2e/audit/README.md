@@ -20,12 +20,29 @@ titlebar — formalized and repeatable.
    or 600-vs-700 weight are meaningful). Percentage radii are resolved against the box
    (`50%` on a 26px circle == `13px`).
 
-Run (build first):
+**Coverage model:** the manifest enumerates the *full* composition-level node set of the
+component. Every styled node is either **anchored** (`selector` + `props`) or explicitly
+**`ignore`d** (with a reason — layout containers, spacers, component instances). A node that is
+neither is reported as **UNMAPPED** — so coverage is visible, not silent. (This is what closes
+the "forgot to anchor the frame's bottom border" class of miss; see Proof.)
+
+**Two signals, run together:**
 
 ```
 npx electron-vite build
-node e2e/audit/audit-titlebar.mjs   # exit 1 on any divergence / missing anchor
+node e2e/audit/audit-titlebar.mjs     # structural/token diff — design conformance (needs anchors)
+node e2e/audit/visual-titlebar.mjs    # pixel diff vs committed baseline — drift guard (anchor-free)
 ```
+
+Both exit non-zero on failure. Re-baseline the pixel test after an intended change:
+`UPDATE_BASELINE=1 node e2e/audit/visual-titlebar.mjs`.
+
+- **Structural audit** — semantic, deterministic, token-aware; catches divergence from the
+  *design* but only for anchored props.
+- **Pixel visual-regression** (`visual-titlebar.mjs`, `baselines/titlebar.png`) — screenshots
+  the titlebar and diffs against a committed baseline via `pixelmatch`. Catches *any* visual
+  change (a border vanishing, a color shift) with no anchor needed, but relative to the last
+  approved baseline rather than the design. The two are complementary.
 
 ## Extending
 
@@ -41,12 +58,14 @@ node e2e/audit/audit-titlebar.mjs   # exit 1 on any divergence / missing anchor
 
 - The **manifest is a committed snapshot** (Pencil MCP isn't available in plain CI). Re-export
   when the design changes. This decouples the audit from a live Pencil so it can gate CI.
+- **Coverage = anchor completeness for the structural audit.** The UNMAPPED report makes gaps
+  visible *within* the enumerated node set, but a brand-new Pencil node only enters the set when
+  the manifest is re-exported. The pixel signal backstops this (it needs no anchors).
 - **Geometry from Pencil**: variable-bound `width`/`height` resolve to 0 in Pencil — compare
   only numeric dims.
 - Per-prop **adapters** may be needed (e.g. a "glyph" frame's `fill` → the inner SVG `color`).
-- Complementary: a **pixel** visual-regression (Playwright screenshot vs Pencil
-  `export_nodes` PNG) catches rendering drift this structural diff doesn't — worth adding as a
-  second signal.
+- Generalize the two runners to take a `--manifest`/area arg so new components (explorer, …)
+  reuse them instead of copy-paste.
 
 ## Proof
 

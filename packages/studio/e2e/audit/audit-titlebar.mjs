@@ -75,8 +75,22 @@ async function extract(selector) {
 const divergences = [];
 let matches = 0;
 let missing = 0;
+let ignored = 0;
+let anchored = 0;
+const unmapped = [];
 
 for (const rec of manifest.records) {
+  // Coverage model: every styled node must be anchored (selector+props) or explicitly ignored.
+  // A node with neither is a gap — surfaced rather than silently uncovered.
+  if (rec.ignore) {
+    ignored++;
+    continue;
+  }
+  if (!rec.selector || !rec.props) {
+    unmapped.push(rec.anchor);
+    continue;
+  }
+  anchored++;
   const built = await extract(rec.selector);
   if (!built) {
     missing++;
@@ -111,17 +125,27 @@ for (const rec of manifest.records) {
 
 console.log("\n=== Titlebar design-vs-build audit ===");
 console.log(
-  `anchors: ${manifest.records.length}  |  prop matches: ${matches}  |  divergences: ${divergences.length}  |  missing anchors: ${missing}`,
+  `nodes: ${manifest.records.length}  |  anchored: ${anchored}  |  ignored: ${ignored}  |  unmapped: ${unmapped.length}`,
 );
+console.log(
+  `prop matches: ${matches}  |  divergences: ${divergences.length}  |  missing anchors: ${missing}`,
+);
+if (unmapped.length) {
+  console.log(
+    "\nUNMAPPED (styled node with no selector + no ignore — coverage gap):",
+  );
+  for (const a of unmapped) console.log(`  ${a}`);
+}
 if (divergences.length) {
   console.log("\nDIVERGENCES:");
   for (const d of divergences)
     console.log(
       `  [${d.anchor}] ${d.prop}: expected ${JSON.stringify(d.expected)}, got ${JSON.stringify(d.actual)}`,
     );
-} else {
-  console.log("\nAll anchored props match the design. ✔");
+}
+if (!divergences.length && !missing && !unmapped.length) {
+  console.log("\nAll anchored props match the design, full coverage. ✔");
 }
 
 await app.close();
-process.exit(divergences.length || missing ? 1 : 0);
+process.exit(divergences.length || missing || unmapped.length ? 1 : 0);

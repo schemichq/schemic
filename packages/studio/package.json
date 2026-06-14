@@ -45,7 +45,9 @@
     "@vitejs/plugin-react": "^6.0.2",
     "electron": "^42.4.0",
     "electron-vite": "^5.0.0",
+    "pixelmatch": "^7.2.0",
     "playwright": "^1.60.0",
+    "pngjs": "^7.0.0",
     "vite": "^8.0.16",
     "vite-plugin-top-level-await": "^1.6.0",
     "vite-plugin-wasm": "^3.6.0"
