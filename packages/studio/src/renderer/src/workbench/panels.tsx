@@ -8,6 +8,7 @@ import { installSurqlTemplateHighlight } from "../monaco/surqlTemplate";
 import { getCodegen } from "../runtime";
 import { activeDoc, type Doc, useStudio } from "../store";
 import { PaneHeader, type PaneType } from "./PaneHeader";
+import { TerminalPane } from "./TerminalPane";
 
 // Apply (or clear) the linked-span decoration + reveal on an editor.
 function applyLinkedSpan(
@@ -470,20 +471,6 @@ function SurrealqlPreview({
   );
 }
 
-function TerminalBody() {
-  return (
-    <div className="preview-body">
-      <div className="preview-pending">
-        <p className="preview-pending-title">Terminal</p>
-        <p className="preview-pending-sub">
-          Live <code>sz</code> CLI output streams here once the terminal adapter
-          lands.
-        </p>
-      </div>
-    </div>
-  );
-}
-
 function ProblemsBody() {
   return (
     <div className="preview-body">
@@ -537,7 +524,7 @@ export function OutputPane() {
       {type === "surrealql" && (
         <SurrealqlPreview doc={active} state={codegen} />
       )}
-      {type === "terminal" && <TerminalBody />}
+      {type === "terminal" && <TerminalPane />}
       {type === "problems" && <ProblemsBody />}
     </div>
   );

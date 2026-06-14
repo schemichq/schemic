@@ -4,7 +4,6 @@ import {
   type IDockviewPanelProps,
 } from "dockview";
 import { EditorPanel, OutputPane } from "./panels";
-import { TerminalPane } from "./TerminalPane";
 
 const components = {
   editor: (_props: IDockviewPanelProps) => <EditorPanel />,
@@ -36,7 +35,6 @@ export function Workbench() {
           onReady={onReady}
         />
       </div>
-      <TerminalPane />
     </div>
   );
 }

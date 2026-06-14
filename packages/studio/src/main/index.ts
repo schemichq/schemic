@@ -11,6 +11,13 @@ import {
   surqlNotify,
   surqlRequest,
 } from "./surqlLsp";
+import {
+  setTerminalEventSink,
+  terminalDispose,
+  terminalDisposeAll,
+  terminalRun,
+  terminalSignal,
+} from "./terminal";
 
 // WSL/headless friendliness: avoid GPU + sandbox issues when running under WSLg.
 app.disableHardwareAcceleration();
@@ -125,6 +132,20 @@ ipcMain.handle(
     surqlRequest(method, params, rootUri),
 );
 
+// Integrated terminal (command-runner). The renderer runs a command line in the project cwd
+// (path-scoped) and receives streamed output on `terminal:event`. (Terminal capability adapter.)
+setTerminalEventSink((e) => {
+  for (const w of BrowserWindow.getAllWindows())
+    w.webContents.send("terminal:event", e);
+});
+ipcMain.on("terminal:run", (_e, id: string, line: string, cwd: string) =>
+  terminalRun(id, line, assertAllowed(cwd)),
+);
+ipcMain.on("terminal:signal", (_e, id: string, signal: NodeJS.Signals) =>
+  terminalSignal(id, signal),
+);
+ipcMain.on("terminal:dispose", (_e, id: string) => terminalDispose(id));
+
 ipcMain.handle("dialog:openDirectory", async () => {
   const r = await dialog.showOpenDialog({ properties: ["openDirectory"] });
   const dir = r.canceled ? null : (r.filePaths[0] ?? null);
@@ -181,5 +202,6 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   stopTsServer();
   stopSurqlLsp();
+  terminalDisposeAll();
   app.quit();
 });

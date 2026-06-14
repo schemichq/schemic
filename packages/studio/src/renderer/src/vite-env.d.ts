@@ -53,6 +53,18 @@ interface StudioBridge {
     request: (command: string, args: unknown) => Promise<unknown>;
     onEvent: (cb: (msg: unknown) => void) => () => void;
   };
+  terminal: {
+    run: (id: string, line: string, cwd: string) => void;
+    signal: (id: string, signal: string) => void;
+    dispose: (id: string) => void;
+    onEvent: (
+      cb: (
+        e:
+          | { type: "data"; id: string; chunk: string }
+          | { type: "exit"; id: string; code: number | null },
+      ) => void,
+    ) => () => void;
+  };
   surql: {
     available: () => Promise<boolean>;
     notify: (method: string, params: unknown, rootUri: string | null) => void;

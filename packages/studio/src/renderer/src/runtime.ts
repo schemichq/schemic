@@ -7,6 +7,9 @@ import type { LanguageService } from "./adapters/LanguageService";
 import { BundledTypesLanguageService } from "./adapters/lsp/BundledTypesLanguageService";
 import { TsServerLanguageService } from "./adapters/lsp/TsServerLanguageService";
 import type { QueryEngine } from "./adapters/QueryEngine";
+import type { Terminal } from "./adapters/Terminal";
+import { IpcTerminal } from "./adapters/terminal/IpcTerminal";
+import { NullTerminal } from "./adapters/terminal/NullTerminal";
 
 // Runtime profile: binds capability adapters for the active mode. For now there is
 // one profile (playground = wasm in renderer). Desktop/remote profiles and the
@@ -30,6 +33,14 @@ let codegen: Codegen | null = null;
 export function getCodegen(): Codegen {
   if (!codegen) codegen = new IpcCodegen();
   return codegen;
+}
+
+let terminal: Terminal | null = null;
+
+export function getTerminal(): Terminal {
+  if (!terminal)
+    terminal = window.studio?.terminal ? new IpcTerminal() : new NullTerminal();
+  return terminal;
 }
 
 let languageService: LanguageService | null = null;

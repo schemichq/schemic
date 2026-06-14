@@ -19,6 +19,8 @@
     "@monaco-editor/react": "^4.7.0",
     "@surrealdb/wasm": "^3.0.3",
     "@tanstack/react-hotkeys": "^0.10.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "cmdk": "^1.1.1",
     "dockview": "^6.6.1",
     "jiti": "^2.6.1",

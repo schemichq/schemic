@@ -48,6 +48,18 @@ contextBridge.exposeInMainWorld("studio", {
       return () => ipcRenderer.removeListener("lsp:event", handler);
     },
   },
+  terminal: {
+    run: (id: string, line: string, cwd: string) =>
+      ipcRenderer.send("terminal:run", id, line, cwd),
+    signal: (id: string, signal: string) =>
+      ipcRenderer.send("terminal:signal", id, signal),
+    dispose: (id: string) => ipcRenderer.send("terminal:dispose", id),
+    onEvent: (cb: (e: unknown) => void) => {
+      const handler = (_e: unknown, msg: unknown) => cb(msg);
+      ipcRenderer.on("terminal:event", handler);
+      return () => ipcRenderer.removeListener("terminal:event", handler);
+    },
+  },
   surql: {
     available: (): Promise<boolean> => ipcRenderer.invoke("surql:available"),
     notify: (method: string, params: unknown, rootUri: string | null) =>
