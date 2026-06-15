@@ -13,7 +13,7 @@
   "dependencies": {
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "surreal-zod": "workspace:*",
+    "@schemic/core": "workspace:*",
     "surrealdb": "2.0.3",
     "zod": "4.3.5"
   },

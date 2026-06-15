@@ -9,7 +9,7 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "surreal-zod": "workspace:*",
+    "@schemic/core": "workspace:*",
     "surrealdb": "^2.0.3"
   }
 }

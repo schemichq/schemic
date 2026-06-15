@@ -1,9 +1,9 @@
 import { type RecordId, type Surreal, surql, Table } from "surrealdb";
-import type { App, Create, Update } from "surreal-zod";
+import type { App, Create, Update } from "@schemic/core";
 import { Comment, Project, Task } from "../src/schema";
 
 /**
- * Browser data layer. Every read runs the row through `surreal-zod` `decode`
+ * Browser data layer. Every read runs the row through `@schemic/core` `decode`
  * (DB -> app types: RecordId, Date, Duration, enums) and every write builds its
  * payload with `encode` / `encodePartial` (app -> wire). All queries run as the
  * signed-in record user, so table PERMISSIONS scope the results automatically.

@@ -1,8 +1,9 @@
-import { sz, surql, defineTable } from "surreal-zod";
+import { s, surql, defineTable } from "@schemic/core";
 
 export const User = defineTable("user", {
-  id: sz.string(),
-  createdAt: sz.datetime().$default(surql`time::now()`).$readonly(),
-  email: sz.string().$assert(surql`string::is_email($value)`),
-  name: sz.string().$assert(surql`string::len($value) >= 0`),
+  id: s.string(),
+  createdAt: s.datetime().$default(surql`time::now()`).$readonly(),
+  email: s.string().$assert(surql`string::is_email($value)`),
+  name: s.string().$assert(surql`string::len($value) >= 0`),
+  role: s.enum(["user","admin"]),
 });

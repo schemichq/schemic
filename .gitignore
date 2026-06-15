@@ -40,3 +40,5 @@ dist/
 # local npm auth / scratch
 .npmrc
 history.txt
+# private client example — never committed
+packages/example-credilisto/

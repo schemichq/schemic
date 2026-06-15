@@ -4,9 +4,9 @@ import {
   defineRelation,
   defineTable,
   surql,
-  sz,
+  s,
   type Wire,
-} from "surreal-zod";
+} from "@schemic/core";
 
 /**
  * Shared, isomorphic data model for the project/task tracker. Imported by the
@@ -16,7 +16,7 @@ import {
  * with per-field `$default`, enums (status/priority/role), datetime, duration,
  * DB-side `$default` / `$readonly` / `$comment` / `$value`, per-table row-level
  * `.permissions(...)`, and DB `ASSERT`s — both auto-baked by format builders
- * (`sz.email()` -> `string::is_email`) and authored via `$`-constraints (`.$min(1)`).
+ * (`s.email()` -> `string::is_email`) and authored via `$`-constraints (`.$min(1)`).
  *
  * NOTE: `passhash` is modeled with `.$internal()`: it still emits its `DEFINE FIELD`
  * (so the SCHEMAFULL SIGNUP write succeeds) plus `PERMISSIONS NONE`, but is excluded
@@ -35,13 +35,13 @@ import {
 
 /** End users. `id` omitted -> `record<user>` with a DB-generated id. */
 export const User = defineTable("user", {
-  name: sz.string().$min(1),
-  // sz.email() bakes `ASSERT string::is_email($value)` for free (3.x validator).
+  name: s.string().$min(1),
+  // s.email() bakes `ASSERT string::is_email($value)` for free (3.x validator).
   // .unique() adds a DEFINE INDEX so the DB enforces one account per address.
-  email: sz.email().unique(),
+  email: s.email().unique(),
   // DB-managed, client-hidden: written by the record-access SIGNUP block, never exposed.
-  passhash: sz.string().$internal(),
-  createdAt: sz.datetime().$default(surql`time::now()`).$readonly().$comment("Signup time"),
+  passhash: s.string().$internal(),
+  createdAt: s.datetime().$default(surql`time::now()`).$readonly().$comment("Signup time"),
 })
   .comment("Application end users")
   .permissions({
@@ -54,22 +54,22 @@ export const User = defineTable("user", {
 /** Projects owned by a user; `owner` defaults to the signed-in user and is fixed. */
 export const Project = defineTable("project", {
   owner: User.record().$default(surql`$auth.id`).$readonly(),
-  name: sz.string().$min(1),
-  description: sz.string().optional(),
-  color: sz.string().$default("#6366f1"),
+  name: s.string().$min(1),
+  description: s.string().optional(),
+  color: s.string().$default("#6366f1"),
   // Manual sort order in the project list (added in migration 2; widened int -> float in 3).
-  order: sz.float().$default(0),
-  tags: sz.string().array().$default(surql`[]`),
+  order: s.float().$default(0),
+  tags: s.string().array().$default(surql`[]`),
   // Nested create-optionality: each nested `$default` field is optional in the create input,
   // so a client may supply a PARTIAL `settings` (e.g. `{ defaultView: "board" }`) and the DB
   // fills the omitted nested defaults — while both stay REQUIRED on the decoded app side.
-  settings: sz
+  settings: s
     .object({
-      isPublic: sz.boolean().$default(surql`false`),
-      defaultView: sz.enum(["list", "board"]).$default("list"),
+      isPublic: s.boolean().$default(surql`false`),
+      defaultView: s.enum(["list", "board"]).$default("list"),
     })
     .$default(surql`{}`),
-  createdAt: sz.datetime().$default(surql`time::now()`).$readonly(),
+  createdAt: s.datetime().$default(surql`time::now()`).$readonly(),
 })
   .comment("Project workspaces")
   .permissions({
@@ -83,20 +83,20 @@ export const Project = defineTable("project", {
 /** Tasks within a project. Demonstrates enums, duration, links + arrays of links. */
 export const Task = defineTable("task", {
   project: Project.record(),
-  title: sz.string().$min(1).$comment("Short summary"),
-  description: sz.string().optional(),
-  status: sz.enum(["todo", "in_progress", "done", "archived"]).$default("todo"),
-  priority: sz.enum(["low", "medium", "high", "urgent"]).$default("medium"),
+  title: s.string().$min(1).$comment("Short summary"),
+  description: s.string().optional(),
+  status: s.enum(["todo", "in_progress", "done", "archived"]).$default("todo"),
+  priority: s.enum(["low", "medium", "high", "urgent"]).$default("medium"),
   /** Estimated effort (Surreal `duration`, e.g. `2h`, `3d`). */
-  estimate: sz.duration().optional(),
+  estimate: s.duration().optional(),
   assignees: User.record().array().$default(surql`[]`),
-  labels: sz.string().array().$default(surql`[]`),
-  dueAt: sz.datetime().optional(),
-  completedAt: sz.datetime().optional().nullable(),
+  labels: s.string().array().$default(surql`[]`),
+  dueAt: s.datetime().optional(),
+  completedAt: s.datetime().optional().nullable(),
   createdBy: User.record().$default(surql`$auth.id`).$readonly(),
-  createdAt: sz.datetime().$default(surql`time::now()`).$readonly(),
+  createdAt: s.datetime().$default(surql`time::now()`).$readonly(),
   /** Always stamped on every write via a DB-side VALUE clause. */
-  updatedAt: sz.datetime().$value(surql`time::now()`, { optional: true }),
+  updatedAt: s.datetime().$value(surql`time::now()`, { optional: true }),
 })
   .comment("Project tasks")
   // Stamp/clear `completedAt` as `status` crosses the "done" line. Only fires when the
@@ -123,8 +123,8 @@ export const Task = defineTable("task", {
 export const Comment = defineTable("comment", {
   task: Task.record(),
   author: User.record().$default(surql`$auth.id`).$readonly(),
-  body: sz.string().$min(1),
-  createdAt: sz.datetime().$default(surql`time::now()`).$readonly().$comment("When posted"),
+  body: s.string().$min(1),
+  createdAt: s.datetime().$default(surql`time::now()`).$readonly().$comment("When posted"),
 })
   .comment("Task comments")
   .permissions({
@@ -138,8 +138,8 @@ export const Comment = defineTable("comment", {
 /** Reusable, per-workspace labels (added in migration 3). */
 export const Tag = defineTable("tag", {
   project: Project.record(),
-  name: sz.string().$min(1).unique(),
-  color: sz.string().$default("#999999"),
+  name: s.string().$min(1).unique(),
+  color: s.string().$default("#999999"),
 })
   .comment("Reusable task labels")
   .permissions({
@@ -151,8 +151,8 @@ export const Tag = defineTable("tag", {
 
 /** Graph: user ->member-> project, carrying a membership role. */
 export const Member = defineRelation("member", {
-  role: sz.enum(["owner", "editor", "viewer"]).$default("viewer"),
-  since: sz.datetime().$default(surql`time::now()`).$readonly(),
+  role: s.enum(["owner", "editor", "viewer"]).$default("viewer"),
+  since: s.datetime().$default(surql`time::now()`).$readonly(),
 })
   .from(User)
   .to(Project)
@@ -166,7 +166,7 @@ export const Member = defineRelation("member", {
 
 /** Graph: user ->watch-> task (notifications / follows). */
 export const Watch = defineRelation("watch", {
-  since: sz.datetime().$default(surql`time::now()`).$readonly(),
+  since: s.datetime().$default(surql`time::now()`).$readonly(),
 })
   .from(User)
   .to(Task)
@@ -179,7 +179,7 @@ export const Watch = defineRelation("watch", {
 
 /** Graph: task ->depends_on-> task. */
 export const DependsOn = defineRelation("depends_on", {
-  kind: sz.enum(["blocks", "relates_to"]).$default("blocks"),
+  kind: s.enum(["blocks", "relates_to"]).$default("blocks"),
 })
   .from(Task)
   .to(Task)

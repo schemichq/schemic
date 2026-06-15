@@ -2,7 +2,7 @@
  * Live integration tests against the running SurrealDB. They:
  *   - migrate a scratch database (schema + record access + permissions),
  *   - sign up two end users via record access,
- *   - exercise create/update + surreal-zod decode/encode (RecordId, Date, Duration,
+ *   - exercise create/update + @schemic/core decode/encode (RecordId, Date, Duration,
  *     enums, nested objects),
  *   - and assert permission isolation (user B cannot see user A's private data,
  *     until A grants membership).
@@ -11,7 +11,7 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Duration, RecordId, Surreal, surql } from "surrealdb";
-import type { App } from "surreal-zod";
+import type { App } from "@schemic/core";
 import { type DbConfig, DB, signIn, signUp } from "../src/db";
 import { Comment, Member, Project, Task, User } from "../src/schema";
 import { migrate } from "../setup";

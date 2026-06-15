@@ -1,7 +1,7 @@
-import { defineConfig } from "surreal-zod/config";
+import { defineConfig } from "@schemic/core/config";
 
 /**
- * surreal-zod migration CLI config for the tracker dogfood.
+ * @schemic/core migration CLI config for the tracker dogfood.
  *
  * `schema` points at `./src` — the loader scans it for exported `TableDef`s, picking up the
  * seven tables/relations from `src/schema.ts` (and ignoring `src/db.ts`, which exports none).
