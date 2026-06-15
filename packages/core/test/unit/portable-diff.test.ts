@@ -7,8 +7,12 @@ import {
   planPortable,
   portableDiff,
 } from "../../src/cli/portable-diff";
+import type { PortableDb } from "../../src/driver/portable-ir";
+import { postgresDriver } from "../../src/driver/postgres";
 import { surrealDriver } from "../../src/driver/surreal";
 import { defineTable, s } from "../../src/pure";
+
+const EMPTY_DB: PortableDb = { tables: [], functions: [], accesses: [] };
 
 // CLI driver-parametric path (multi-DB spike): `sz diff --driver postgres` authors from sz.*,
 // connects to a real Postgres engine (PGlite), introspects, and reports the gap — all through the
@@ -153,5 +157,51 @@ describe("diffPortable (driver-neutral structural diff)", () => {
     );
     expect(up.join("\n")).toContain("DEFINE FIELD age ON TABLE user");
     expect(down.join("\n")).toMatch(/REMOVE FIELD.*age/);
+  });
+});
+
+describe("driver.diff (portable IR -> up/down + display items)", () => {
+  test("surreal: an added field -> DEFINE up, REMOVE down, add item", () => {
+    const prev = surrealDriver.lower(
+      [defineTable("user", { name: s.string() })],
+      [],
+    );
+    const next = surrealDriver.lower(
+      [defineTable("user", { name: s.string(), age: s.int().optional() })],
+      [],
+    );
+    const diff = surrealDriver.diff(prev, next);
+    expect(diff.up.join("\n")).toContain("DEFINE FIELD age ON TABLE user");
+    expect(diff.down.join("\n")).toMatch(/REMOVE FIELD.*age/);
+    expect(
+      diff.items?.some((i) => i.op === "add" && i.key === "field:user:age"),
+    ).toBe(true);
+  });
+
+  // The keystone: a clause-only change must ALTER (preserve row data), NOT DEFINE … OVERWRITE.
+  // This only works because the portable->DDL emission now carries clause maps (increment 1).
+  test("surreal: a clause-only change uses ALTER FIELD, not OVERWRITE", () => {
+    const prev = surrealDriver.lower(
+      [defineTable("user", { name: s.string() })],
+      [],
+    );
+    const next = surrealDriver.lower(
+      [defineTable("user", { name: s.string().$comment("the name") })],
+      [],
+    );
+    const up = surrealDriver.diff(prev, next).up.join("\n");
+    expect(up).toContain("ALTER FIELD name ON TABLE user");
+    expect(up).not.toContain("OVERWRITE");
+  });
+
+  test("postgres: a new table -> CREATE up, DROP down", () => {
+    const next = surrealDriver.lower(
+      [defineTable("user", { name: s.string(), active: s.boolean() })],
+      [],
+    );
+    const diff = postgresDriver.diff(EMPTY_DB, next);
+    expect(diff.up.join("\n")).toContain('CREATE TABLE "user"');
+    expect(diff.down.join("\n")).toContain('DROP TABLE IF EXISTS "user"');
+    expect(diff.items?.length).toBeGreaterThan(0);
   });
 });

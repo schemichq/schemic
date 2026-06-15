@@ -8,79 +8,25 @@
 // replace the full snapshot/migration-file pipeline (that stays Surreal-only until the engine-wide
 // kind->PortableType swap graduates from spike to implementation).
 
-import type { Statement } from "../driver";
 import { getDriver } from "../driver";
+// The dialect-free diff engine now lives in the driver layer; re-export so existing CLI/test
+// imports (`diffPortable`/`planPortable`) keep resolving here.
+import {
+  diffPortable,
+  type PortableDiffItem,
+  planPortable,
+} from "../driver/portable-diff";
 import type { PortableDb } from "../driver/portable-ir";
 import { surrealDriver } from "../driver/surreal";
 import type { ResolvedConfig } from "./config";
 import { loadDefs } from "./schema";
 import { ok, plural, style } from "./style";
 
+export type { PortableDiffItem } from "../driver/portable-diff";
+export { diffPortable, planPortable } from "../driver/portable-diff";
+
 /** A loaded, opaque driver connection (each driver's `connect` returns its own type). */
 type Conn = unknown;
-
-/** Statement identity for structural comparison — `kind:table:name` (matches the Surreal diff). */
-const keyOf = (s: Statement) => `${s.kind}:${s.table ?? ""}:${s.name}`;
-
-export type PortableDiffItem =
-  | { op: "add"; key: string; stmt: Statement }
-  | { op: "change"; key: string; before: Statement; after: Statement }
-  | { op: "remove"; key: string; stmt: Statement };
-
-/**
- * A driver-neutral STRUCTURAL diff: emit both sides through the driver, key each statement by
- * `kind:table:name`, and compare per object — added / changed / removed. Dialect-free; works for any
- * driver. Items carry the full {@link Statement} so {@link planPortable} can turn them into up/down.
- */
-export function diffPortable(
-  driver: ReturnType<typeof getDriver>,
-  current: PortableDb,
-  desired: PortableDb,
-): PortableDiffItem[] {
-  const index = (db: PortableDb) => {
-    const m = new Map<string, Statement>();
-    for (const s of driver.emit(driver.normalize(db))) m.set(keyOf(s), s);
-    return m;
-  };
-  const cur = index(current);
-  const des = index(desired);
-  const items: PortableDiffItem[] = [];
-  for (const [key, stmt] of des) {
-    const before = cur.get(key);
-    if (before === undefined) items.push({ op: "add", key, stmt });
-    else if (before.ddl !== stmt.ddl)
-      items.push({ op: "change", key, before, after: stmt });
-  }
-  for (const [key, stmt] of cur) {
-    if (!des.has(key)) items.push({ op: "remove", key, stmt });
-  }
-  return items;
-}
-
-/**
- * Turn a structural diff into executable `up`/`down` DDL via the driver's change-vocabulary:
- * add -> create up / drop down; remove -> drop up / recreate down; change -> overwrite both ways.
- */
-export function planPortable(
-  driver: ReturnType<typeof getDriver>,
-  items: PortableDiffItem[],
-): { up: string[]; down: string[] } {
-  const up: string[] = [];
-  const down: string[] = [];
-  for (const it of items) {
-    if (it.op === "add") {
-      up.push(it.stmt.ddl);
-      down.push(driver.remove(it.stmt));
-    } else if (it.op === "remove") {
-      up.push(driver.remove(it.stmt));
-      down.push(it.stmt.ddl);
-    } else {
-      up.push(driver.overwrite(it.after));
-      down.push(driver.overwrite(it.before));
-    }
-  }
-  return { up, down };
-}
 
 /**
  * Run `sz diff` against a non-surreal driver. Authoring is still the `sz.*` surface (lowered to the

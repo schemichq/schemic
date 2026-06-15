@@ -10,6 +10,7 @@
 // Postgres driver is `Driver<PgClient>`, and core never sees either concrete type.
 
 import type { ResolvedConfig } from "../cli/config";
+import type { Diff } from "../cli/diff";
 import type { DefineStatement } from "../ddl";
 import type { Shape, StandaloneDef, TableDef } from "../pure";
 import type { PortableDb } from "./portable-ir";
@@ -83,6 +84,13 @@ export interface Driver<Conn = unknown> {
   normalize(db: PortableDb): PortableDb;
   /** Structured equality over the canonical portable IR (the dialect-free diff core's comparison). */
   equal(a: PortableDb, b: PortableDb): boolean;
+  /**
+   * Diff two portable IRs into executable `up`/`down` DDL (+ display items). The dialect owns the
+   * strategy: SurrealDB does clause-level `ALTER`/`OVERWRITE`; a coarser driver recreates objects.
+   * `prev` is the stored/live state, `next` the desired schema. Source-file linkage on the items is
+   * attached by the caller (the snapshot's `files` map), so a driver leaves `DiffItem.file` unset.
+   */
+  diff(prev: PortableDb, next: PortableDb): Diff;
 
   // --- execution -----------------------------------------------------------------------------
   connect(config: ResolvedConfig, over?: ConnectionOverrides): Promise<Conn>;

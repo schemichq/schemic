@@ -12,8 +12,10 @@ import type {
   ResolvedConfig,
 } from "../cli/config";
 import { connect as surrealConnect } from "../cli/config";
+import { type Diff, diffSnapshots } from "../cli/diff";
 import { applyStatements, shadowStructured } from "../cli/introspect";
 import { schemaStruct } from "../cli/lower";
+import type { Snapshot } from "../cli/meta";
 import { deepEqual, normalizeDb } from "../cli/struct";
 import { introspectStructured, structuredSnapshot } from "../cli/structure";
 import {
@@ -31,7 +33,21 @@ import type {
   Statement,
 } from "./driver";
 import { registerDriver } from "./driver";
+import { keyOf } from "./portable-diff";
 import { liftDb, lowerDb, type PortableDb } from "./portable-ir";
+
+/**
+ * Re-derive the legacy (string-DDL) {@link Snapshot} from the portable IR, so the existing clause-
+ * level `diffSnapshots` engine can run unchanged. `statements` come from `emit` (now clause-bearing),
+ * `struct` from the lowered IR (drives cosmetic-change detection). Both sides are normalized first.
+ */
+function toLegacySnapshot(db: PortableDb): Snapshot {
+  const norm = liftDb(normalizeDb(lowerDb(db)));
+  const statements: Record<string, DefineStatement> = {};
+  const snap = structuredSnapshot(lowerDb(norm));
+  for (const s of Object.values(snap.statements)) statements[keyOf(s)] = s;
+  return { version: 1, statements, struct: lowerDb(norm) };
+}
 
 // Apply/emit order: db-level functions first (tables/events may call fn::…), then tables, fields,
 // indexes, events, and finally access (SIGNUP/SIGNIN reference tables). Mirrors introspect.ts's RANK.
@@ -92,6 +108,12 @@ export const surrealDriver: Driver<Surreal> = {
 
   equal(a: PortableDb, b: PortableDb): boolean {
     return deepEqual(this.normalize(a), this.normalize(b));
+  },
+
+  diff(prev: PortableDb, next: PortableDb): Diff {
+    // Bridge to the clause-level Surreal diff engine via re-derived legacy snapshots — preserving
+    // ALTER FIELD/ALTER TABLE and the cosmetic-change detection (no portable-IR feature is lost).
+    return diffSnapshots(toLegacySnapshot(prev), toLegacySnapshot(next));
   },
 
   // --- execution -----------------------------------------------------------------------------

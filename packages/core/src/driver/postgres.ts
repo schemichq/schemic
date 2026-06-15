@@ -17,6 +17,7 @@
 //    no Postgres analogue and are dropped by `normalize` with no DDL emitted.
 
 import type { ResolvedConfig } from "../cli/config";
+import type { Diff } from "../cli/diff";
 import type { DefineStatement } from "../ddl";
 import type {
   ApplyOptions,
@@ -29,6 +30,7 @@ import type {
 import { registerDriver } from "./driver";
 import type { PortableType, ScalarName } from "./portable";
 import { nullable } from "./portable";
+import { buildDiff } from "./portable-diff";
 import type { PortableDb, PortableField, PortableTable } from "./portable-ir";
 
 // A minimal structural view of a PGlite/node-postgres connection (so core needs no hard pg dep).
@@ -421,6 +423,8 @@ export const postgresDriver: Driver<PgConn> = {
   introspect: (conn, exclude) => pgIntrospect(conn, exclude),
   normalize: pgNormalize,
   equal: (a, b) => deepEqualJson(pgNormalize(a), pgNormalize(b)),
+  diff: (prev: PortableDb, next: PortableDb): Diff =>
+    buildDiff(postgresDriver as Driver<unknown>, prev, next),
 
   connect(
     config: ResolvedConfig,
