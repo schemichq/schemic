@@ -3,7 +3,11 @@ import { defineConfig } from "tsup";
 export default defineConfig([
   // Library + config helper (consumed via `import`).
   {
-    entry: { index: "src/index.ts", config: "src/config.ts" },
+    entry: {
+      index: "src/index.ts",
+      config: "src/config.ts",
+      driver: "src/driver/sdk.ts",
+    },
     outDir: "lib",
     format: ["esm"],
     target: "esnext",

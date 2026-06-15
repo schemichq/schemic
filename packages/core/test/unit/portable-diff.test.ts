@@ -1,18 +1,16 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+// Registers the "postgres" driver (now a separate package) for the `diff --driver postgres` test.
+import "@schemic/postgres";
 import type { ResolvedConfig } from "../../src/cli/config";
 import {
   diffPortable,
   planPortable,
   portableDiff,
 } from "../../src/cli/portable-diff";
-import type { PortableDb } from "../../src/driver/portable-ir";
-import { postgresDriver } from "../../src/driver/postgres";
 import { surrealDriver } from "../../src/driver/surreal";
 import { defineTable, s } from "../../src/pure";
-
-const EMPTY_DB: PortableDb = { tables: [], functions: [], accesses: [] };
 
 // CLI driver-parametric path (multi-DB spike): `sz diff --driver postgres` authors from sz.*,
 // connects to a real Postgres engine (PGlite), introspects, and reports the gap — all through the
@@ -194,63 +192,9 @@ describe("driver.diff (portable IR -> up/down + display items)", () => {
     expect(up).not.toContain("OVERWRITE");
   });
 
-  test("postgres: a new table -> CREATE up, DROP down", () => {
-    const next = surrealDriver.lower(
-      [defineTable("user", { name: s.string(), active: s.boolean() })],
-      [],
-    );
-    const diff = postgresDriver.diff(EMPTY_DB, next);
-    expect(diff.up.join("\n")).toContain('CREATE TABLE "user"');
-    expect(diff.down.join("\n")).toContain('DROP TABLE IF EXISTS "user"');
-    expect(diff.items?.length).toBeGreaterThan(0);
-  });
-
-  // Field-level pg diff (g2): dropping an FK-bearing table drops it with CASCADE on `up`, and the
-  // rollback recreates the table BEFORE re-adding its FK constraint on `down`.
-  test("postgres: dropping an FK-bearing table -> DROP CASCADE up, recreate table-before-FK down", () => {
-    const prev = surrealDriver.lower(
-      [
-        defineTable("user", { name: s.string() }),
-        defineTable("post", { title: s.string(), author: s.recordId("user") }),
-      ],
-      [],
-    );
-    const next = surrealDriver.lower(
-      [defineTable("user", { name: s.string() })],
-      [],
-    );
-    const { up, down } = postgresDriver.diff(prev, next);
-
-    // up: a single CASCADE drop handles the table and its FK (no separate DROP CONSTRAINT needed).
-    expect(up.join("\n")).toContain('DROP TABLE IF EXISTS "post" CASCADE');
-
-    const downTable = down.findIndex((sql) =>
-      sql.includes('CREATE TABLE "post"'),
-    );
-    const downFk = down.findIndex((sql) => sql.includes("ADD CONSTRAINT"));
-    expect(downTable).toBeGreaterThanOrEqual(0);
-    expect(downFk).toBeGreaterThanOrEqual(0);
-    expect(downTable).toBeLessThan(downFk); // table recreated before its FK
-  });
-
-  // The keystone of the field-level pg diff: adding a column is an ALTER TABLE ADD COLUMN, NOT a
-  // whole-table drop+recreate (which would destroy every row).
-  test("postgres: adding a column -> ALTER TABLE ADD COLUMN (no table drop)", () => {
-    const prev = surrealDriver.lower(
-      [defineTable("user", { name: s.string() })],
-      [],
-    );
-    const next = surrealDriver.lower(
-      [defineTable("user", { name: s.string(), age: s.int().optional() })],
-      [],
-    );
-    const { up, down } = postgresDriver.diff(prev, next);
-    expect(up.join("\n")).toContain('ALTER TABLE "user" ADD COLUMN "age"');
-    expect(up.join("\n")).not.toContain("DROP TABLE");
-    expect(down.join("\n")).toContain(
-      'ALTER TABLE "user" DROP COLUMN IF EXISTS "age"',
-    );
-  });
+  // NOTE: postgres-specific diff cases (new table, FK-drop ordering, field-level ADD COLUMN,
+  // non-destructiveness) now live in @schemic/postgres (packages/postgres/test) with standalone
+  // portable-IR fixtures — they no longer belong to core.
 });
 
 describe("surreal: record REFERENCE clause (regression — was dropped on the portable path)", () => {

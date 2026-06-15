@@ -21,6 +21,8 @@
       },
       "devDependencies": {
         "@biomejs/biome": "^2.3.11",
+        "@electric-sql/pglite": "^0.5.2",
+        "@schemic/postgres": "workspace:*",
         "@types/bun": "latest",
         "surrealdb": "^2.0.3",
         "tsup": "^8",
@@ -96,6 +98,26 @@
         "typescript": "^5.7.2",
         "vite": "^6.0.7",
       },
+    },
+    "packages/postgres": {
+      "name": "@schemic/postgres",
+      "version": "0.1.0-alpha.0",
+      "dependencies": {
+        "@schemic/core": "workspace:*",
+      },
+      "devDependencies": {
+        "@biomejs/biome": "^2.3.11",
+        "@electric-sql/pglite": "^0.5.2",
+        "@types/bun": "latest",
+        "tsup": "^8",
+        "typescript": "^5",
+      },
+      "peerDependencies": {
+        "@electric-sql/pglite": "^0.5.2",
+      },
+      "optionalPeers": [
+        "@electric-sql/pglite",
+      ],
     },
   },
   "packages": {
@@ -390,6 +412,8 @@
     "@rollup/rollup-win32-x64-msvc": ["@rollup/rollup-win32-x64-msvc@4.55.1", "", { "os": "win32", "cpu": "x64" }, "sha512-SPEpaL6DX4rmcXtnhdrQYgzQ5W2uW3SCJch88lB2zImhJRhIIK44fkUrgIV/Q8yUNfw5oyZ5vkeQsZLhCb06lw=="],
 
     "@schemic/core": ["@schemic/core@workspace:packages/core"],
+
+    "@schemic/postgres": ["@schemic/postgres@workspace:packages/postgres"],
 
     "@shikijs/core": ["@shikijs/core@4.2.0", "", { "dependencies": { "@shikijs/primitive": "4.2.0", "@shikijs/types": "4.2.0", "@shikijs/vscode-textmate": "^10.0.2", "@types/hast": "^3.0.4", "hast-util-to-html": "^9.0.5" } }, "sha512-Hc87Ab1Ld/vEbZRCbwx344I5v+4RU8CVToUTRkqXL1+TjbuOp9U5Xa0M23V4GEWHxVn+yO5otb+HkQVm3ptWQQ=="],
 

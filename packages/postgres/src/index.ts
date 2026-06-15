@@ -16,20 +16,23 @@
 //  - Surreal-only constructs (events, access, db functions, relations, changefeed, permissions) have
 //    no Postgres analogue and are dropped by `normalize` with no DDL emitted.
 
-import type { ResolvedConfig } from "../cli/config";
-import type { Diff, DiffItem } from "../cli/diff";
 import type {
   ApplyOptions,
   ConnectionOverrides,
+  Diff,
+  DiffItem,
   Driver,
   EmitOptions,
+  PortableDb,
+  PortableField,
+  PortableTable,
+  PortableType,
+  ResolvedConfig,
+  ScalarName,
   ShadowCapability,
   Statement,
-} from "./driver";
-import { registerDriver } from "./driver";
-import type { PortableType, ScalarName } from "./portable";
-import { nullable } from "./portable";
-import type { PortableDb, PortableField, PortableTable } from "./portable-ir";
+} from "@schemic/core/driver";
+import { nullable, registerDriver } from "@schemic/core/driver";
 
 // A minimal structural view of a PGlite/node-postgres connection (so core needs no hard pg dep).
 export interface PgConn {

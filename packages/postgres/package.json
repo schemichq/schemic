@@ -1,0 +1,47 @@
+{
+  "name": "@schemic/postgres",
+  "version": "0.1.0-alpha.0",
+  "description": "PostgreSQL driver for Schemic — emit/introspect/diff the portable IR against Postgres (PGlite).",
+  "type": "module",
+  "module": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "files": [
+    "lib",
+    "src"
+  ],
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts",
+      "import": {
+        "types": "./lib/index.d.ts",
+        "default": "./lib/index.js"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsup",
+    "prepack": "bun run build",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check ."
+  },
+  "dependencies": {
+    "@schemic/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@electric-sql/pglite": "^0.5.2"
+  },
+  "peerDependenciesMeta": {
+    "@electric-sql/pglite": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.11",
+    "@electric-sql/pglite": "^0.5.2",
+    "@types/bun": "latest",
+    "tsup": "^8",
+    "typescript": "^5"
+  }
+}
