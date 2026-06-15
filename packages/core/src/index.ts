@@ -25,6 +25,11 @@ export {
   overwriteStatement,
   removeStatement,
 } from "./ddl";
+// NOTE: the multi-DB driver layer (src/driver/*) is intentionally NOT re-exported from the public
+// library surface yet — it transitively pulls the CLI-internal cli/* modules (which self-import
+// `@schemic/core` for jiti module-identity) into the library bundle. It's consumed internally by the
+// CLI (cli/portable-diff) and the tests via relative imports; the public multi-DB API is a future
+// design (see docs/MULTI-DB-SPIKE.md, graduation phase).
 export type {
   App,
   Create,

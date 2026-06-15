@@ -61,6 +61,7 @@ import {
   unlock,
 } from "./migrate";
 import { pipeThroughPager, resolvePager } from "./pager";
+import { portableDiff } from "./portable-diff";
 import {
   applyPull,
   type PullFilePlan,
@@ -358,6 +359,10 @@ kindFlags(
     "render changes as an inline word-diff instead of separate -/+ lines",
   )
   .option("--json", "output the diff as JSON")
+  .option(
+    "--driver <name>",
+    "target database driver (default from config, or 'surreal')",
+  )
   .action(
     (
       opts: CommonOpts &
@@ -371,10 +376,18 @@ kindFlags(
           pager?: string | boolean;
           inline?: boolean;
           json?: boolean;
+          driver?: string;
         },
     ) => {
       run(async () => {
         const config = await loadConfig({ config: opts.config });
+        // Multi-DB spike: a non-surreal driver routes through the portable-IR diff path (see
+        // docs/MULTI-DB-SPIKE.md), leaving the SurrealQL snapshot pipeline below untouched.
+        const driverName = opts.driver ?? config.driver ?? "surreal";
+        if (driverName !== "surreal") {
+          await portableDiff(config, driverName, { json: opts.json });
+          return;
+        }
         const filter = parseFilter(opts);
         // External pager only when explicitly requested via `--pager` (the default renders inline).
         // `--pager <cmd>` uses that command; bare `--pager` resolves the user's git diff viewer

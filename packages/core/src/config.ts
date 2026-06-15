@@ -110,6 +110,12 @@ export interface SurrealZodCheck {
 
 export interface SurrealZodConfig {
   /**
+   * Target database driver. Default `"surreal"`. The multi-DB spike adds `"postgres"` (see
+   * docs/MULTI-DB-SPIKE.md) — a non-surreal driver routes diff/connect/introspect through the
+   * portable-IR driver layer instead of the SurrealQL pipeline.
+   */
+  driver?: string;
+  /**
    * Directory (or single file) holding your schema modules, loaded recursively — so you can organize
    * by kind (`tables/`, `functions/`, `access/`, …). Default `./database/schema`.
    */

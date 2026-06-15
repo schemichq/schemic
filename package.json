@@ -2,5 +2,8 @@
   "workspaces": [
     "packages/*"
   ],
-  "version": "0.0.1-0"
+  "version": "0.0.1-0",
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.2"
+  }
 }
