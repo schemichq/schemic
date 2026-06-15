@@ -2,7 +2,9 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ResolvedConfig } from "../../src/cli/config";
-import { portableDiff } from "../../src/cli/portable-diff";
+import { diffPortable, portableDiff } from "../../src/cli/portable-diff";
+import { surrealDriver } from "../../src/driver/surreal";
+import { defineTable, s } from "../../src/pure";
 
 // CLI driver-parametric path (multi-DB spike): `sz diff --driver postgres` authors from sz.*,
 // connects to a real Postgres engine (PGlite), introspects, and reports the gap — all through the
@@ -66,21 +68,68 @@ async function capture(fn: () => Promise<void>): Promise<string> {
 }
 
 describe("sz diff --driver postgres (CLI portable path)", () => {
-  test("against an empty database, reports the CREATE TABLE gap", async () => {
+  test("against an empty database, reports the CREATE TABLE gap as adds", async () => {
     const out = await capture(() =>
       portableDiff(makeConfig(), "postgres", { json: true }),
     );
     const parsed = JSON.parse(out) as {
       driver: string;
-      inSync: boolean;
-      up: string[];
+      items: { op: string; ddl?: string; after?: string }[];
     };
     expect(parsed.driver).toBe("postgres");
-    expect(parsed.inSync).toBe(false);
-    const ddl = parsed.up.join("\n");
+    const adds = parsed.items.filter((i) => i.op === "add");
+    expect(adds.length).toBeGreaterThan(0);
+    expect(parsed.items.some((i) => i.op === "remove")).toBe(false);
+    const ddl = adds.map((i) => i.ddl).join("\n");
     expect(ddl).toContain('CREATE TABLE "user"');
     expect(ddl).toContain('"id" text PRIMARY KEY');
     expect(ddl).toContain('"age" integer'); // option<int> -> nullable column
     expect(ddl).toContain('"active" boolean NOT NULL');
+  });
+});
+
+describe("diffPortable (driver-neutral structural diff)", () => {
+  test("surreal: adds only the new field; nothing removed", () => {
+    const cur = surrealDriver.lower(
+      [defineTable("user", { name: s.string() })],
+      [],
+    );
+    const des = surrealDriver.lower(
+      [defineTable("user", { name: s.string(), age: s.int().optional() })],
+      [],
+    );
+    const items = diffPortable(surrealDriver, cur, des);
+    expect(items.filter((i) => i.op === "add").map((i) => i.key)).toEqual([
+      "field:user:age",
+    ]);
+    expect(items.some((i) => i.op === "remove" || i.op === "change")).toBe(
+      false,
+    );
+  });
+
+  test("surreal: a dropped table shows as remove", () => {
+    const cur = surrealDriver.lower(
+      [
+        defineTable("user", { name: s.string() }),
+        defineTable("post", { title: s.string() }),
+      ],
+      [],
+    );
+    const des = surrealDriver.lower(
+      [defineTable("user", { name: s.string() })],
+      [],
+    );
+    const removed = diffPortable(surrealDriver, cur, des).filter(
+      (i) => i.op === "remove",
+    );
+    expect(removed.map((i) => i.key)).toContain("table::post");
+  });
+
+  test("identical schemas diff to empty", () => {
+    const db = surrealDriver.lower(
+      [defineTable("user", { name: s.string() })],
+      [],
+    );
+    expect(diffPortable(surrealDriver, db, db)).toEqual([]);
   });
 });
