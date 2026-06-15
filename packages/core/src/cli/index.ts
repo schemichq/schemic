@@ -2,9 +2,7 @@ import { watch as fsWatch } from "node:fs";
 import { join, relative } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { Command, Help, Option } from "commander";
-import type { Surreal } from "surrealdb";
-import { getDriver } from "../driver";
-import { lowerDb } from "../driver/surreal-ir";
+import { type Driver, getDriver } from "../driver";
 import {
   type ConnectionOverrides,
   loadConfig,
@@ -19,21 +17,8 @@ import {
   isEmptyDiff,
   summarizeKinds,
 } from "./diff";
-import {
-  connectEmbedded,
-  spawnEphemeralServer,
-  surrealBinaryAvailable,
-} from "./engine";
 import { type FilterOpts, kindFlags, parseFilter } from "./filter";
 import { init } from "./init";
-import {
-  applyStatements,
-  diffAgainstDb,
-  syncPlan,
-  tsStructsAgainstDb,
-  verifyMigrations,
-} from "./introspect";
-import { schemaStruct } from "./lower";
 import {
   actionLabel,
   applyPull,
@@ -64,18 +49,17 @@ import {
 } from "./migrate";
 import { pipeThroughPager, resolvePager } from "./pager";
 import { portableDiff } from "./portable-diff";
-import { planPull, renderPerFile, renderSchemaToTS } from "./pull";
 import {
   duplicateTables,
   existingTables,
   loadDefs,
   loadSchemas,
 } from "./schema";
-import type { DbStructured } from "./structure";
 import { fail, ok, plural, style } from "./style";
-import { connect } from "./surreal-connect";
-import { buildSnapshot } from "./surreal-diff";
-import { filterStructured } from "./surreal-filter";
+
+/** The driver configured for this project (the `driver` field, defaulting to surreal). */
+const activeDriver = (config: ResolvedConfig): Driver<unknown> =>
+  getDriver(config.driver ?? "surreal");
 
 interface CommonOpts extends ConnectionOverrides {
   config?: string;
@@ -83,8 +67,8 @@ interface CommonOpts extends ConnectionOverrides {
 
 /**
  * Load config, connect via the configured driver, run, and always close the handle. The connection
- * is OPAQUE here (`db: unknown`) — the orchestration only hands it back to the same driver; a
- * surreal-specific command body casts it to `Surreal` at its own boundary.
+ * is OPAQUE here (`db: unknown`) — the orchestration only ever hands it back to the SAME driver
+ * (into a driver capability), so the CLI body never names a dialect's connection type.
  */
 async function withDb(
   opts: CommonOpts,
@@ -384,10 +368,13 @@ kindFlags(
     ) => {
       run(async () => {
         const config = await loadConfig({ config: opts.config });
-        // Multi-DB spike: a non-surreal driver routes through the portable-IR diff path (see
-        // docs/MULTI-DB-SPIKE.md), leaving the SurrealQL snapshot pipeline below untouched.
         const driverName = opts.driver ?? config.driver ?? "surreal";
-        if (driverName !== "surreal") {
+        const driver = getDriver(driverName);
+        // A driver without the rich live/snapshot diff capability routes through the portable-IR
+        // diff path (introspect + structural compare); the snapshot/`--ts`/`--live` pipeline below
+        // needs it. The CLI gates on the CAPABILITY, never on the driver name.
+        const diffLive = driver.diffLive;
+        if (!diffLive) {
           await portableDiff(config, driverName, { json: opts.json });
           return;
         }
@@ -419,43 +406,43 @@ kindFlags(
         };
         // Reuse one connection across watch runs for --live; otherwise connect per run.
         const persistent =
-          opts.watch && opts.live ? await connect(config, opts) : undefined;
+          opts.watch && opts.live
+            ? await driver.connect(config, opts)
+            : undefined;
         const once = async () => {
           // TypeScript view: render both sides PER FILE (matching `pull`'s layout) and diff each.
           if (opts.ts) {
             // Map each object to its source file (where it lives in the schema, else its kind folder).
             const loc = await existingTables(config.schemaPath);
-            const folderOf = {
+            const folderOf: Record<string, string> = {
               table: "tables",
               function: "functions",
               access: "access",
-            } as const;
-            const fileFor = (
-              kind: "table" | "function" | "access",
-              name: string,
-            ): string => {
+            };
+            const fileFor = (kind: string, name: string): string => {
               const abs = kind === "table" ? loc.get(name) : undefined;
               return abs
                 ? relative(config.root, abs)
                 : relative(
                     config.root,
-                    join(config.schemaPath, folderOf[kind], `${name}.ts`),
+                    join(
+                      config.schemaPath,
+                      folderOf[kind] ?? kind,
+                      `${name}.ts`,
+                    ),
                   );
             };
-            // Single-file layout → one combined module; directory layout → one module per object.
-            const renderFiles = (db: DbStructured): Map<string, string> =>
-              config.schemaIsFile
-                ? new Map([[config.schema ?? "schema", renderSchemaToTS(db)]])
-                : renderPerFile(db, fileFor);
+            // Single-file layout → one combined module key; directory layout → one file per object.
+            const single = config.schemaIsFile
+              ? (config.schema ?? "schema")
+              : undefined;
 
-            // current = the baseline (live DB or snapshot), desired = the declared schema.
+            // cur = the baseline (live DB or snapshot) rendered to source, des = the declared schema.
             const showTsDiff = async (
-              current: DbStructured,
-              desired: DbStructured,
+              cur: Map<string, string>,
+              des: Map<string, string>,
               matchMsg: string,
             ) => {
-              const cur = renderFiles(current);
-              const des = renderFiles(desired);
               if (opts.json) {
                 console.log(
                   JSON.stringify({
@@ -494,12 +481,18 @@ kindFlags(
             };
 
             if (opts.live) {
-              const db = persistent ?? (await connect(config, opts));
+              if (!driver.diffTsLive)
+                throw new Error(
+                  `the "${driverName}" driver does not support \`diff --ts --live\`.`,
+                );
+              const db = persistent ?? (await driver.connect(config, opts));
               try {
-                const { current, desired } = await tsStructsAgainstDb(
+                const { current, desired } = await driver.diffTsLive(
                   db,
                   config,
                   filter,
+                  fileFor,
+                  single,
                 );
                 await showTsDiff(
                   current,
@@ -507,48 +500,48 @@ kindFlags(
                   "Schema matches the live database.",
                 );
               } finally {
-                if (!persistent) await db.close();
+                if (!persistent) await driver.close(db);
               }
             } else {
-              // Offline: the snapshot's recorded schema (Struct derived from the portable IR) vs the
-              // current schema's Struct.
-              const prev = readSnapshot(
-                config.metaDir,
-                getDriver(config.driver ?? "surreal"),
-              );
-              const prevStruct = lowerDb(prev.portable);
+              if (!driver.renderSchema)
+                throw new Error(
+                  `the "${driverName}" driver does not support \`diff --ts\`.`,
+                );
+              // Offline: render the snapshot's recorded schema and the declared schema to source,
+              // then diff per file.
+              const prev = readSnapshot(config.metaDir, driver);
               if (
-                !prevStruct.tables.length &&
-                !prevStruct.functions.length &&
-                !prevStruct.accesses.length
+                !prev.portable.tables.length &&
+                !prev.portable.functions.length &&
+                !prev.portable.accesses.length
               )
                 throw new Error(
                   "offline diff --ts needs a snapshot — run `schemic gen` (or `schemic pull --write`) to record one, or pass --live.",
                 );
               const { tables, defs } = await loadDefs(config.schemaPath);
-              const desired = schemaStruct(
-                // Bridge the lib/src TableDef duality (see buildStored).
-                tables as unknown as Parameters<typeof schemaStruct>[0],
-                defs as unknown as Parameters<typeof schemaStruct>[1],
-              );
               await showTsDiff(
-                filterStructured(prevStruct, filter),
-                filterStructured(desired, filter),
+                driver.renderSchema(prev.portable, filter, fileFor, single),
+                driver.renderSchema(
+                  driver.lower(tables, defs),
+                  filter,
+                  fileFor,
+                  single,
+                ),
                 "Schema matches the snapshot.",
               );
             }
             return;
           }
           if (opts.live) {
-            const db = persistent ?? (await connect(config, opts));
+            const db = persistent ?? (await driver.connect(config, opts));
             try {
-              const diff = await diffAgainstDb(db, config, filter);
+              const diff = await diffLive(db, config, filter);
               const pending = (await status(db, config)).filter(
                 (r) => !r.applied,
               ).length;
               await emit(diff, pending);
             } finally {
-              if (!persistent) await db.close();
+              if (!persistent) await driver.close(db);
             }
           } else {
             await emit((await planMigration(config, filter)).diff);
@@ -558,7 +551,7 @@ kindFlags(
         await watchLoop(
           config,
           once,
-          persistent ? () => persistent.close() : undefined,
+          persistent ? () => driver.close(persistent) : undefined,
         );
       });
     },
@@ -628,9 +621,15 @@ const genAction = (
         style.dim(`  replaced ${plural(squashed.length, "migration")}.`),
       );
       try {
-        const db = await connect(config, opts);
+        const driver = activeDriver(config);
+        const diffLive = driver.diffLive;
+        if (!diffLive)
+          throw new Error(
+            `the "${config.driver ?? "surreal"}" driver does not support live reconcile`,
+          );
+        const db = await driver.connect(config, opts);
         try {
-          const drift = !isEmptyDiff(await diffAgainstDb(db, config, filter));
+          const drift = !isEmptyDiff(await diffLive(db, config, filter));
           const state = await reconcileBaseline(db, config, prepared, drift);
           console.log(
             style.dim(
@@ -640,7 +639,7 @@ const genAction = (
             ),
           );
         } finally {
-          await db.close();
+          await driver.close(db);
         }
       } catch (e) {
         console.log(
@@ -793,6 +792,7 @@ dbFlags(
 ).action((opts: CommonOpts & { schema?: boolean }) => {
   run(async () => {
     const config = await loadConfig({ config: opts.config });
+    const driver = activeDriver(config);
 
     // 1. Static validation (no connection): no duplicate tables, schemas parse.
     const dups = await duplicateTables(config.schemaPath);
@@ -802,110 +802,34 @@ dbFlags(
     }
     const { tables, defs } = await loadDefs(config.schemaPath);
     const kinds = summarizeKinds(
-      Object.values(buildSnapshot(tables, defs).statements).map((s) => s.ddl),
+      driver.emit(driver.lower(tables, defs)).map((s) => s.ddl),
     );
     console.log(ok(`Schemas valid${kinds ? ` — ${kinds}` : " (no objects)"}.`));
     if (opts.schema) return;
 
-    // 2. Deep check: replay every migration into throwaway scratch databases and confirm the result
-    //    matches the schema. The replay NEVER reads or writes your real database. Engine selection:
-    //    an embedded object → in-process via @surrealdb/node; `auto` prefers an ephemeral server from
-    //    the local `surreal` binary (your exact version); else the `check.db`/`db` server.
-    const engine = config.checkEngine;
-    const useBinary =
-      engine === "binary" ||
-      (engine === "auto" && surrealBinaryAvailable(config.checkBinary));
-    if (engine === "binary" && !useBinary) {
+    // 2. Deep check: replay every migration into a throwaway engine and confirm the result matches
+    //    the schema. The driver owns the replay (engine selection + apply); it NEVER touches the
+    //    real database. A driver without the capability can only `check --schema`.
+    if (!driver.checkReplay) {
       throw new Error(
-        'check.engine "binary" needs the `surreal` CLI on PATH (or set `check.binary`). Run `schemic check --schema` to skip the replay.',
+        `the "${config.driver ?? "surreal"}" driver does not support migration replay — run \`schemic check --schema\` to validate the schema only.`,
       );
     }
-
-    let db: Surreal;
-    let checkCfg: ResolvedConfig;
-    let cleanup: () => Promise<void>;
-    if (typeof engine === "object") {
-      const embedded = await connectEmbedded(engine, "check", "check");
-      db = embedded.db;
-      checkCfg = {
-        ...config,
-        db: {
-          url: embedded.url,
-          namespace: "check",
-          database: "check",
-          authLevel: "root",
-        },
-      };
-      cleanup = embedded.stop;
-      console.log(
-        style.dim(
-          `  replaying on an ${embedded.url} SurrealDB (@surrealdb/node) — no server, your data untouched`,
-        ),
-      );
-    } else if (useBinary) {
-      const server = await spawnEphemeralServer(config.checkBinary);
-      checkCfg = {
-        ...config,
-        db: {
-          url: server.url,
-          namespace: "check",
-          database: "check",
-          username: server.username,
-          password: server.password,
-          authLevel: "root",
-        },
-      };
-      db = await connect(checkCfg, {});
-      cleanup = async () => {
-        await db.close().catch(() => {});
-        await server.stop();
-      };
-      console.log(
-        style.dim(
-          "  replaying on an ephemeral in-memory SurrealDB (local `surreal` binary) — your server is untouched",
-        ),
-      );
-    } else {
-      checkCfg = { ...config, db: config.checkDb };
-      try {
-        db = await connect(checkCfg, opts);
-      } catch (e) {
-        throw new Error(
-          `${errMsg(e)}\n  (run \`schemic check --schema\` to skip the replay, install the \`surreal\` CLI for an in-memory engine, or set \`check.db\` to point the replay at a scratch server)`,
-        );
-      }
-      cleanup = async () => {
-        await db.close().catch(() => {});
-      };
-      console.log(
-        style.dim(
-          `  replaying on ${config.checkDb.url} (${config.checkDb.namespace}) — isolated scratch databases; your data is untouched`,
-        ),
-      );
+    const diff = await driver.checkReplay(config, opts, parseFilter({}), (m) =>
+      console.log(style.dim(m)),
+    );
+    if (isEmptyDiff(diff)) {
+      console.log(ok("Migrations reproduce the schema."));
+      return;
     }
-
-    try {
-      const diff = await verifyMigrations(
-        db,
-        checkCfg,
-        parseFilter({}),
-        (tag) => console.log(style.dim(`  ${tag}`)),
-      );
-      if (isEmptyDiff(diff)) {
-        console.log(ok("Migrations reproduce the schema."));
-        return;
-      }
-      console.log(
-        `\n${fail("Drift — migrations do not reproduce the schema:")}\n`,
-      );
-      console.log(formatDiff(diff, {}));
-      console.log(
-        `\n${style.dim(`${summarizeKinds(diff.up)} differ. \`schemic gen\` writes a migration to reconcile.`)}`,
-      );
-      process.exitCode = 1;
-    } finally {
-      await cleanup();
-    }
+    console.log(
+      `\n${fail("Drift — migrations do not reproduce the schema:")}\n`,
+    );
+    console.log(formatDiff(diff, {}));
+    console.log(
+      `\n${style.dim(`${summarizeKinds(diff.up)} differ. \`schemic gen\` writes a migration to reconcile.`)}`,
+    );
+    process.exitCode = 1;
   });
 });
 
@@ -958,15 +882,13 @@ dbFlags(
     row("node", process.version);
     console.log(style.bold("\nStatus"));
     try {
-      const db = await connect(config, opts);
-      let server = "unknown";
-      try {
-        server = (await db.version()).version;
-      } catch {
-        // server version unavailable
-      }
-      console.log(`  ${ok(`connected — SurrealDB ${server}`)}`);
-      await db.close();
+      const driver = activeDriver(config);
+      const db = await driver.connect(config, opts);
+      const info = driver.serverInfo
+        ? await driver.serverInfo(db)
+        : (config.driver ?? "surreal");
+      console.log(`  ${ok(`connected — ${info}`)}`);
+      await driver.close(db);
     } catch (e) {
       console.log(`  ${fail(e instanceof Error ? e.message : String(e))}`);
       process.exitCode = 1;
@@ -1046,9 +968,16 @@ kindFlags(
   ) => {
     run(async () => {
       const config = await loadConfig({ config: opts.config });
+      const driver = activeDriver(config);
       const filter = parseFilter(opts);
-      const once = async (db: Surreal) => {
-        const diff = await diffAgainstDb(db, config, filter);
+      const diffLive = driver.diffLive;
+      const syncPlan = driver.syncPlan;
+      if (!diffLive || !syncPlan)
+        throw new Error(
+          `the "${config.driver ?? "surreal"}" driver does not support \`push\`.`,
+        );
+      const once = async (db: unknown) => {
+        const diff = await diffLive(db, config, filter);
         const stmts = syncPlan(diff, opts.prune);
         if (!stmts.length) {
           console.log(ok("Database already matches the schema."));
@@ -1066,22 +995,24 @@ kindFlags(
           );
           return;
         }
-        await applyStatements(db, stmts);
-        const pruned = stmts.filter((s) => s.startsWith("REMOVE")).length;
+        await driver.apply(db, stmts);
+        const pruned =
+          opts.prune === false
+            ? 0
+            : (diff.items ?? []).filter((it) => it.op === "remove").length;
         console.log(
           `\n${ok(`synced ${plural(stmts.length - pruned, "object")}${pruned ? `, pruned ${pruned}` : ""}${kinds ? ` (${kinds})` : ""}.`)}`,
         );
       };
       if (!opts.watch) {
-        // `push` is surreal-specific (live struct diff + applyStatements) — narrow the opaque handle.
-        await withDb(opts, (db) => once(db as Surreal));
+        await withDb(opts, (db) => once(db));
         return;
       }
-      const db = await connect(config, opts);
+      const db = await driver.connect(config, opts);
       await watchLoop(
         config,
         () => once(db),
-        () => db.close(),
+        () => driver.close(db),
       );
     });
   },
@@ -1156,8 +1087,12 @@ kindFlags(
   ) => {
     run(() =>
       withDb(opts, async (db, config) => {
-        // `pull` is surreal-specific (introspect -> TS codegen) — narrow the opaque handle.
-        const plan = await planPull(db as Surreal, config, {
+        const driver = activeDriver(config);
+        if (!driver.planPull)
+          throw new Error(
+            `the "${config.driver ?? "surreal"}" driver does not support \`pull\`.`,
+          );
+        const plan = await driver.planPull(db, config, {
           filter: parseFilter(opts),
           keepLocal: opts.merge,
         });
