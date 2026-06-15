@@ -17,7 +17,7 @@ import {
   diffSnapshots,
   renderMigration,
 } from "../../src/cli/surreal-diff";
-import { EMPTY_SNAPSHOT } from "../../src/cli/meta";
+import { EMPTY_SNAPSHOT } from "../../src/cli/structure";
 
 const User = defineTable("user", { id: s.string(), name: s.string() });
 

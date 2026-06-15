@@ -13,12 +13,12 @@ import type {
 } from "../cli/config";
 import { connect as surrealConnect } from "../cli/config";
 import type { Diff } from "../cli/diff";
-import { diffSnapshots, renderMigration } from "../cli/surreal-diff";
 import { applyStatements, shadowStructured } from "../cli/introspect";
 import { schemaStruct } from "../cli/lower";
-import type { Snapshot } from "../cli/meta";
 import { deepEqual, normalizeDb } from "../cli/struct";
+import type { Snapshot } from "../cli/structure";
 import { introspectStructured, structuredSnapshot } from "../cli/structure";
+import { diffSnapshots, renderMigration } from "../cli/surreal-diff";
 import {
   type DefineStatement,
   overwriteStatement,

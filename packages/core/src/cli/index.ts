@@ -19,18 +19,12 @@ import {
   isEmptyDiff,
   summarizeKinds,
 } from "./diff";
-import { buildSnapshot } from "./surreal-diff";
 import {
   connectEmbedded,
   spawnEphemeralServer,
   surrealBinaryAvailable,
 } from "./engine";
-import {
-  type FilterOpts,
-  filterStructured,
-  kindFlags,
-  parseFilter,
-} from "./filter";
+import { type FilterOpts, kindFlags, parseFilter } from "./filter";
 import { init } from "./init";
 import {
   applyStatements,
@@ -79,6 +73,8 @@ import {
 } from "./schema";
 import type { DbStructured } from "./structure";
 import { fail, ok, plural, style } from "./style";
+import { buildSnapshot } from "./surreal-diff";
+import { filterStructured } from "./surreal-filter";
 
 interface CommonOpts extends ConnectionOverrides {
   config?: string;

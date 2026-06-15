@@ -9,7 +9,7 @@ import { dirname, join, relative } from "node:path";
 import { formatForAssert } from "@schemic/core";
 import type { Surreal } from "surrealdb";
 import type { ResolvedConfig } from "./config";
-import { type Filter, filterStructured, parseFilter } from "./filter";
+import { type Filter, parseFilter } from "./filter";
 import { type LocalOnly, mergeUnits, type RenderedUnit } from "./merge";
 import { existingTables, scanLocalEntities } from "./schema";
 import {
@@ -22,6 +22,7 @@ import {
   type StructPermissions,
   type StructTable,
 } from "./structure";
+import { filterStructured } from "./surreal-filter";
 
 /** The field clauses pull reverses into `s.*` chains (sourced from `INFO … STRUCTURE`). */
 interface ParsedField {

@@ -16,10 +16,9 @@ import {
 } from "@schemic/core";
 import type { Diff, DiffItem } from "./diff";
 import { schemaStruct } from "./lower";
-import type { Snapshot, SnapshotStatement } from "./meta";
 import type { AnyTable } from "./schema";
 import { deepEqual } from "./struct";
-import type { DbStructured } from "./structure";
+import type { DbStructured, Snapshot, SnapshotStatement } from "./structure";
 
 const keyOf = (s: Pick<DefineStatement, "kind" | "name" | "table">) =>
   `${s.kind}:${s.table ?? ""}:${s.name}`;

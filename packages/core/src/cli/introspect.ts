@@ -4,21 +4,18 @@ import { type DefineStatement, overwriteStatement } from "@schemic/core";
 import { escapeIdent, type Surreal } from "surrealdb";
 import type { ResolvedConfig } from "./config";
 import type { Diff } from "./diff";
-import { buildSnapshot, diffSnapshots } from "./surreal-diff";
-import {
-  type Filter,
-  filterSnapshot,
-  filterStructured,
-  parseFilter,
-} from "./filter";
-import { listMigrations, type Snapshot } from "./meta";
+import { type Filter, parseFilter } from "./filter";
+import { listMigrations } from "./meta";
 import { loadDefs } from "./schema";
 import { normalizeDb } from "./struct";
 import {
   type DbStructured,
   introspectStructured,
+  type Snapshot,
   structuredSnapshot,
 } from "./structure";
+import { buildSnapshot, diffSnapshots } from "./surreal-diff";
+import { filterSnapshot, filterStructured } from "./surreal-filter";
 
 const SHADOW_DB = "__surreal_zod_shadow";
 const SHADOW_MIG_DB = "__surreal_zod_shadow_mig";

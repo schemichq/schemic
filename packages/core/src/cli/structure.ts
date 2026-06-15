@@ -1,6 +1,26 @@
 import type { DefineStatement } from "@schemic/core";
 import { escapeIdent, type Surreal } from "surrealdb";
-import type { Snapshot } from "./meta";
+
+/** A snapshot statement: the emitted DDL plus the source file it came from (for `diff` annotations). */
+export type SnapshotStatement = DefineStatement & {
+  /** Project-root-relative source file (absent for objects introspected from a live DB). */
+  file?: string;
+};
+
+/**
+ * The legacy STATEMENT snapshot — canonical SurrealQL DDL keyed by `kind:table:name`, + the
+ * optional normalized Struct (for `diff --ts`). This is the Surreal driver's INTERNAL diff data
+ * model (`buildSnapshot`/`diffSnapshots`/`structuredSnapshot`), derived on demand from the portable
+ * IR. The NEUTRAL stored snapshot is `StoredSnapshot` in cli/meta.ts.
+ */
+export interface Snapshot {
+  version: 1;
+  statements: Record<string, SnapshotStatement>;
+  struct?: DbStructured;
+}
+
+/** The empty STATEMENT snapshot — the Surreal engine's "nothing yet" sentinel (e.g. baseline diff). */
+export const EMPTY_SNAPSHOT: Snapshot = { version: 1, statements: {} };
 
 /**
  * Typed views of `INFO FOR … STRUCTURE` (SurrealDB 3.x). Unlike plain `INFO FOR …` (which

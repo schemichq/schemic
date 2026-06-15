@@ -1,12 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import type { DefineStatement } from "@schemic/core";
+import { type Filter, parseFilter } from "../../src/cli/filter";
 import {
-  type Filter,
   filterSnapshot,
   included,
   mergeSnapshot,
-  parseFilter,
-} from "../../src/cli/filter";
+} from "../../src/cli/surreal-filter";
 
 const stmt = (
   kind: DefineStatement["kind"],
