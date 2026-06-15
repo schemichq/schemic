@@ -15,7 +15,7 @@ import {
   type ScalarName,
   scalar,
   union,
-} from "./portable";
+} from "@schemic/core";
 
 const SCALARS = new Set<string>([
   "any",

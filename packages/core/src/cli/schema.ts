@@ -1,9 +1,16 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import type { Shape, StandaloneDef, TableDef } from "@schemic/core";
+import type { Authored, AuthoredDef } from "@schemic/core";
 import { makeJiti } from "./config";
 
-export type AnyTable = TableDef<string, Shape>;
+/**
+ * The NEUTRAL view of a loaded table the engine reads — just `name` plus the `config.relation` flag
+ * used for ordering. A driver casts this to its own concrete table builder in `lower`. (The runtime
+ * object is the driver's real `TableDef`; the engine never names that type.)
+ */
+export interface AnyTable extends Authored {
+  readonly config: { readonly relation?: unknown };
+}
 
 /**
  * Duck-typed `TableDef` check. We avoid `instanceof` on purpose: the user's schema and the
@@ -24,7 +31,7 @@ function isTableDef(v: unknown): v is AnyTable {
 }
 
 /** Duck-typed standalone-def check (`defineEvent`/`defineFunction`) — see `isTableDef` on why not `instanceof`. */
-function isStandaloneDef(v: unknown): v is StandaloneDef {
+function isStandaloneDef(v: unknown): v is AuthoredDef {
   if (!v || typeof v !== "object") return false;
   const d = v as Record<string, unknown>;
   return (
@@ -65,17 +72,17 @@ async function* tablesIn(
  */
 export async function loadDefs(schemaPath: string): Promise<{
   tables: AnyTable[];
-  defs: StandaloneDef[];
+  defs: AuthoredDef[];
   /** Absolute source file each table/def was loaded from (for `diff`'s file annotations). */
-  fileOf: Map<AnyTable | StandaloneDef, string>;
+  fileOf: Map<AnyTable | AuthoredDef, string>;
 }> {
   if (!existsSync(schemaPath)) {
     throw new Error(`Schema path not found: ${schemaPath}`);
   }
   const jiti = makeJiti();
   const tables = new Map<string, AnyTable>();
-  const defs: StandaloneDef[] = [];
-  const fileOf = new Map<AnyTable | StandaloneDef, string>();
+  const defs: AuthoredDef[] = [];
+  const fileOf = new Map<AnyTable | AuthoredDef, string>();
   for (const file of schemaFiles(schemaPath)) {
     const mod = (await jiti.import(file)) as Record<string, unknown>;
     for (const value of Object.values(mod)) {

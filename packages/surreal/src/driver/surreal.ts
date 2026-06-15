@@ -10,8 +10,8 @@ import { escapeIdent, type Surreal } from "surrealdb";
 import type {
   ConnectionOverrides as CfgOverrides,
   ResolvedConfig,
-} from "../cli/config";
-import type { Diff } from "../cli/diff";
+} from "@schemic/core";
+import type { Diff } from "@schemic/core";
 import {
   connectEmbedded,
   spawnEphemeralServer,
@@ -26,7 +26,7 @@ import {
   verifyMigrations,
 } from "../cli/introspect";
 import { schemaStruct } from "../cli/lower";
-import type { RenderedUnit } from "../cli/merge";
+import type { RenderedUnit } from "@schemic/core";
 import { planPull, renderPerFile, renderSchemaToTS } from "../cli/pull";
 import { deepEqual, normalizeDb } from "../cli/struct";
 import type { DbStructured, Snapshot } from "../cli/structure";
@@ -49,10 +49,10 @@ import type {
   MigrationStore,
   ShadowCapability,
   Statement,
-} from "./driver";
-import { registerDriver } from "./driver";
-import { keyOf } from "./portable-diff";
-import type { PortableDb } from "./portable-ir";
+} from "@schemic/core";
+import { registerDriver } from "@schemic/core";
+import { keyOf } from "@schemic/core";
+import type { PortableDb } from "@schemic/core";
 import { liftDb, lowerDb } from "./surreal-ir";
 
 /**

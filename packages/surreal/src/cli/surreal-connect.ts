@@ -4,7 +4,7 @@
 
 import type { AuthLevel } from "@schemic/core/config";
 import { escapeIdent, Surreal } from "surrealdb";
-import type { ConnectionOverrides, ResolvedConfig } from "./config";
+import type { ConnectionOverrides, ResolvedConfig } from "@schemic/core";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 

@@ -1,14 +1,10 @@
 {
   "name": "@schemic/core",
   "version": "0.1.0-alpha.0",
-  "description": "Author SurrealDB schemas with Zod — s.* drop-in, SurrealQL DDL generation, and JS<->DB codecs.",
+  "description": "The dialect-neutral engine for Schemic — Driver contract, portable schema IR, and the migration/diff/snapshot engine.",
   "type": "module",
   "module": "lib/index.js",
   "types": "lib/index.d.ts",
-  "bin": {
-    "schemic": "lib/cli.js",
-    "sc": "lib/cli.js"
-  },
   "files": [
     "lib",
     "src"

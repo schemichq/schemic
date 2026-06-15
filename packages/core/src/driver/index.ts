@@ -39,10 +39,3 @@ export type {
   PortableTable,
   PortableTableKind,
 } from "./portable-ir";
-// liftDb/lowerDb are SURREAL lift/lower (not neutral IR) — they move to @schemic/surreal at the split.
-export { liftDb, lowerDb } from "./surreal-ir";
-// NOTE: the "postgres" driver is now the separate @schemic/postgres package (it self-registers on
-// import). Core no longer bundles it — the neutral SDK lives at `@schemic/core/driver` (src/driver/sdk.ts).
-export { emitSurqlType, parseSurqlType } from "./surql-type";
-// Registers the "surreal" driver as a side effect of import.
-export { surrealDriver } from "./surreal";

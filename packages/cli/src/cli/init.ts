@@ -27,7 +27,7 @@ export default defineConfig({
 `;
 
 const SAMPLE_SCHEMA = `import { surql } from "surrealdb";
-import { s, defineTable } from "@schemic/core";
+import { s, defineTable } from "@schemic/surreal";
 
 export const User = defineTable("user", {
   id: s.string(),

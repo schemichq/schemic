@@ -5,7 +5,8 @@
 // split this module moves to `@schemic/surreal` (see docs/AUTHORING-SPLIT.md / MULTI-DB-SPIKE.md).
 
 import { relative } from "node:path";
-import type { DefineStatement, StandaloneDef } from "@schemic/core";
+import type { DefineStatement } from "../ddl";
+import type { StandaloneDef } from "../pure";
 import {
   alterField,
   alterTable,
@@ -13,10 +14,10 @@ import {
   emitStatements,
   overwriteStatement,
   removeStatement,
-} from "@schemic/core";
-import type { Diff, DiffItem } from "./diff";
+} from "../ddl";
+import type { Diff, DiffItem } from "@schemic/core";
 import { schemaStruct } from "./lower";
-import type { AnyTable } from "./schema";
+import type { AnyTable } from "@schemic/core";
 import { deepEqual } from "./struct";
 import type { DbStructured, Snapshot, SnapshotStatement } from "./structure";
 

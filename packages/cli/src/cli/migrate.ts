@@ -12,17 +12,17 @@ import {
   type Driver,
   getDriver,
   type MigrationStore,
-} from "../driver";
-import type { ResolvedConfig } from "./config";
-import { makeJiti } from "./config";
-import { type Diff, isEmptyDiff } from "./diff";
+} from "@schemic/core";
+import type { ResolvedConfig } from "@schemic/core";
+import { makeJiti } from "@schemic/core";
+import { type Diff, isEmptyDiff } from "@schemic/core";
 import {
   type Filter,
   filterPortable,
   intersectPortable,
   mergeStored,
   parseFilter,
-} from "./filter";
+} from "@schemic/core";
 import {
   checksum,
   EMPTY_STORED,
@@ -33,8 +33,8 @@ import {
   slug,
   timestamp,
   writeSnapshot,
-} from "./meta";
-import { loadDefs } from "./schema";
+} from "@schemic/core";
+import { loadDefs } from "@schemic/core";
 
 /**
  * Build the canonical STORED snapshot from the authored schema: lower to the portable IR via the

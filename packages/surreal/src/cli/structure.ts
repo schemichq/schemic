@@ -1,4 +1,4 @@
-import type { DefineStatement } from "@schemic/core";
+import type { DefineStatement } from "../ddl";
 import { escapeIdent, type Surreal } from "surrealdb";
 
 /** A snapshot statement: the emitted DDL plus the source file it came from (for `diff` annotations). */

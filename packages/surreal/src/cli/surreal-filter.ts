@@ -3,8 +3,8 @@
 // The dialect-free `Filter` definition + the portable-IR filters live in `./filter`. In the package
 // split this module moves to `@schemic/surreal` (see docs/MULTI-DB-SPIKE.md).
 
-import type { DefineStatement } from "@schemic/core";
-import { type Filter, inCat } from "./filter";
+import type { DefineStatement } from "../ddl";
+import { type Filter, inCat } from "@schemic/core";
 import type { DbStructured, Snapshot } from "./structure";
 
 /** Whether a `DefineStatement` passes the filter (table-scoped objects also need their table in). */

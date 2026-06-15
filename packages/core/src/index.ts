@@ -1,64 +1,117 @@
 /**
- * @schemic/core — author SurrealDB schemas with Zod.
+ * @schemic/core — the dialect-neutral engine for Schemic.
  *
- * Define tables/relations with `s.*` (a drop-in for `z.*`), generate SurrealQL
- * DDL, and map JS <-> DB across Zod's two channels via codecs (`decode`/`encode`).
+ * The Driver contract + the portable schema IR + the neutral migration/diff/snapshot/CLI-support
+ * engine. NO database dialect and NO authoring surface (`s.*`/`defineTable`) live here — those ship
+ * in driver packages (`@schemic/surreal`, `@schemic/postgres`). `@schemic/cli` and the drivers all
+ * build on the surface re-exported below.
  */
 
-/** Re-exported from the SDK: author SurrealQL expressions (event/permission bodies, asserts). */
-export { surql } from "surrealdb";
-export type { DefineOptions, DefineStatement, FieldInfo } from "./ddl";
+// --- driver contract + registry ---------------------------------------------------------------
 export {
-  alterField,
-  alterTable,
-  assertExpr,
-  braceBody,
-  emitDefStatement,
-  emitField,
-  emitFieldStatements,
-  emitStatements,
-  emitTable,
-  eventClause,
-  fieldType,
-  inferField,
-  inline,
-  overwriteStatement,
-  removeStatement,
-} from "./ddl";
-// NOTE: the multi-DB driver layer (src/driver/*) is intentionally NOT re-exported from the public
-// library surface yet — it transitively pulls the CLI-internal cli/* modules (which self-import
-// `@schemic/core` for jiti module-identity) into the library bundle. It's consumed internally by the
-// CLI (cli/portable-diff) and the tests via relative imports; the public multi-DB API is a future
-// design (see docs/MULTI-DB-SPIKE.md, graduation phase).
+  type ApplyOptions,
+  type Authored,
+  type AuthoredDef,
+  type ConnectionOverrides,
+  type Driver,
+  driverNames,
+  type EmitOptions,
+  getDriver,
+  type MigrationDirection,
+  type MigrationRecord,
+  type MigrationStore,
+  registerDriver,
+  type ShadowCapability,
+  type Statement,
+} from "./driver/driver";
+// --- portable schema IR -----------------------------------------------------------------------
+export {
+  array,
+  literal,
+  nullable,
+  option,
+  type PortableType,
+  record,
+  scalar,
+  type ScalarName,
+  union,
+} from "./driver/portable";
 export type {
-  App,
-  Create,
-  Expr,
-  Shape,
-  StandaloneDef,
-  SurrealMeta,
-  TableConfig,
-  TableEvent,
-  TableIndex,
-  Update,
-  Wire,
-} from "./pure";
+  PortableAccess,
+  PortableDb,
+  PortableEvent,
+  PortableField,
+  PortableFunction,
+  PortableIndex,
+  PortablePermissions,
+  PortableTable,
+  PortableTableKind,
+} from "./driver/portable-ir";
 export {
-  AccessDef,
-  defineAccess,
-  defineEvent,
-  defineFunction,
-  defineRelation,
-  defineTable,
-  EventDef,
-  FunctionDef,
-  formatForAssert,
-  objectFieldsRegistry,
-  RecordIdField,
-  RelationDef,
-  SField,
-  SystemView,
-  s,
-  surrealTypeRegistry,
-  TableDef,
-} from "./pure";
+  diffPortable,
+  keyOf,
+  planPortable,
+  type PortableDiffItem,
+} from "./driver/portable-diff";
+// --- neutral config ---------------------------------------------------------------------------
+export { loadConfig, makeJiti, type ResolvedConfig } from "./cli/config";
+// --- neutral diff display ---------------------------------------------------------------------
+export {
+  type Diff,
+  type DiffItem,
+  formatDiff,
+  formatItems,
+  formatPatch,
+  isEmptyDiff,
+  summarizeKinds,
+  tokenDiff,
+} from "./cli/diff";
+// --- neutral filtering ------------------------------------------------------------------------
+export {
+  type Filter,
+  type FilterOpts,
+  filterPortable,
+  inCat,
+  intersectPortable,
+  kindFlags,
+  mergeStored,
+  parseFilter,
+} from "./cli/filter";
+// --- pull plan + magicast merge (neutral codegen support) -------------------------------------
+export {
+  actionLabel,
+  applyPull,
+  lineDiff,
+  type LocalOnly,
+  mergeUnits,
+  type MergeOptions,
+  type MergeResult,
+  type PullFilePlan,
+  type PullPlan,
+  type RenderedUnit,
+  unifiedDiff,
+} from "./cli/merge";
+// --- snapshot + migration metadata ------------------------------------------------------------
+export {
+  checksum,
+  EMPTY_STORED,
+  listMigrations,
+  type Migration,
+  readSnapshot,
+  slug,
+  type StoredSnapshot,
+  timestamp,
+  writeSnapshot,
+} from "./cli/meta";
+// --- pager + style ----------------------------------------------------------------------------
+export { pipeThroughPager, resolvePager } from "./cli/pager";
+export { colorEnabled, fail, ok, plural, style } from "./cli/style";
+// --- jiti schema loader (loads a project's authored schema files agnostically) ----------------
+export {
+  type AnyTable,
+  duplicateTables,
+  existingTables,
+  loadDefs,
+  loadSchemas,
+  scanLocalEntities,
+} from "./cli/schema";

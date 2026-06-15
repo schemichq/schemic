@@ -16,7 +16,7 @@ import {
   fieldType,
   inferField,
   inline,
-} from "@schemic/core";
+} from "../ddl";
 import { BoundQuery, escapeIdent } from "surrealdb";
 import type {
   AccessDef,

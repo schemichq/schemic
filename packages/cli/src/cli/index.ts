@@ -2,12 +2,12 @@ import { watch as fsWatch } from "node:fs";
 import { join, relative } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { Command, Help, Option } from "commander";
-import { type Driver, getDriver } from "../driver";
+import { type Driver, driverNames, getDriver } from "@schemic/core";
 import {
   type ConnectionOverrides,
-  loadConfig,
+  loadConfig as coreLoadConfig,
   type ResolvedConfig,
-} from "./config";
+} from "@schemic/core";
 import {
   type Diff,
   type DiffItem,
@@ -16,8 +16,8 @@ import {
   formatPatch,
   isEmptyDiff,
   summarizeKinds,
-} from "./diff";
-import { type FilterOpts, kindFlags, parseFilter } from "./filter";
+} from "@schemic/core";
+import { type FilterOpts, kindFlags, parseFilter } from "@schemic/core";
 import { init } from "./init";
 import {
   actionLabel,
@@ -26,13 +26,13 @@ import {
   type PullFilePlan,
   type PullPlan,
   unifiedDiff,
-} from "./merge";
+} from "@schemic/core";
 import {
   EMPTY_STORED,
   listMigrations,
   readSnapshot,
   writeSnapshot,
-} from "./meta";
+} from "@schemic/core";
 import {
   baseline,
   clearMigrationFiles,
@@ -47,15 +47,41 @@ import {
   status,
   unlock,
 } from "./migrate";
-import { pipeThroughPager, resolvePager } from "./pager";
+import { pipeThroughPager, resolvePager } from "@schemic/core";
 import { portableDiff } from "./portable-diff";
 import {
   duplicateTables,
   existingTables,
   loadDefs,
   loadSchemas,
-} from "./schema";
-import { fail, ok, plural, style } from "./style";
+} from "@schemic/core";
+import { fail, ok, plural, style } from "@schemic/core";
+
+/**
+ * Dynamically load + register a database driver by name. Drivers are separate packages
+ * (`@schemic/<name>`) that self-register with the core registry on import; the CLI itself contains
+ * no dialect code and discovers the driver from the project's `driver` config at runtime.
+ */
+async function ensureDriver(name: string): Promise<void> {
+  if (driverNames().includes(name)) return;
+  const pkg = `@schemic/${name}`;
+  try {
+    await import(pkg);
+  } catch (e) {
+    throw new Error(
+      `could not load the "${name}" database driver (package ${pkg}). Install it (e.g. \`bun add ${pkg}\`).\n  ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+  if (!driverNames().includes(name))
+    throw new Error(`package ${pkg} did not register a "${name}" driver.`);
+}
+
+/** Load config AND ensure its driver package is loaded/registered — every command starts here. */
+async function loadConfig(opts: { config?: string }): Promise<ResolvedConfig> {
+  const config = await coreLoadConfig(opts);
+  await ensureDriver(config.driver ?? "surreal");
+  return config;
+}
 
 /** The driver configured for this project (the `driver` field, defaulting to surreal). */
 const activeDriver = (config: ResolvedConfig): Driver<unknown> =>
@@ -369,6 +395,7 @@ kindFlags(
       run(async () => {
         const config = await loadConfig({ config: opts.config });
         const driverName = opts.driver ?? config.driver ?? "surreal";
+        await ensureDriver(driverName);
         const driver = getDriver(driverName);
         // A driver without the rich live/snapshot diff capability routes through the portable-IR
         // diff path (introspect + structural compare); the snapshot/`--ts`/`--live` pipeline below

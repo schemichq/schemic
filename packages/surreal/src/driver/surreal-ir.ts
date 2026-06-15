@@ -20,7 +20,7 @@ import type {
   PortableIndex,
   PortableTable,
   PortableTableKind,
-} from "./portable-ir";
+} from "@schemic/core";
 import { emitSurqlType, parseSurqlType } from "./surql-type";
 
 /** Lift a Surreal string-kind `DbStructured` into the portable IR. */
