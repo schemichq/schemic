@@ -201,6 +201,7 @@ live("DB accepts @schemic/core's generated DDL", () => {
       email: s.email(),
     }).event("reverify", {
       when: surql`$before.email != $after.email`,
+      // biome-ignore lint/suspicious/noThenProperty: event DSL "then" clause, not a thenable
       then: surql`UPDATE $after.id SET email = $after.email`,
     });
     expect(

@@ -130,6 +130,7 @@ const Evented = defineTable("it_evented", {
   verified: s.boolean().$default(surql`false`),
 }).event("it_reverify", {
   when: surql`$before.email != $after.email`,
+  // biome-ignore lint/suspicious/noThenProperty: event DSL "then" clause, not a thenable
   then: surql`UPDATE $after.id SET verified = false`,
 });
 
