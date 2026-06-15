@@ -21,12 +21,7 @@ import {
   introspectStructured,
 } from "../../src/cli/structure";
 import { emitDefStatement, emitStatements } from "../../src/ddl";
-import {
-  defineFunction,
-  defineRelation,
-  defineTable,
-  sz,
-} from "../../src/pure";
+import { defineFunction, defineRelation, defineTable, s } from "../../src/pure";
 
 const NS = "__sz_structparity";
 const DB = "sp";
@@ -70,32 +65,32 @@ if (!db) console.warn("[struct-parity] SurrealDB unreachable — skipping");
 // objects, arrays, records, literal unions, relation, function).
 const Big = defineTable("sp_big", {
   id: z.string(),
-  s: sz.string(),
-  i: sz.int(),
-  dt: sz.datetime(),
-  uid: sz.uuid(),
-  rec: sz.recordId("sp_big"),
-  arr: sz.array(sz.string()),
-  arrn: sz.array(sz.string(), { max: 3 }),
-  setf: sz.set(sz.string()),
-  opt: sz.string().optional(),
-  role: sz.enum(["admin", "user"]),
-  obj: sz.object({ a: sz.string(), b: sz.number().optional() }),
-  def: sz.string().$default("pending"),
-  defa: sz.datetime().$defaultAlways(surql`time::now()`),
-  val: sz.string().$value(surql`string::lowercase($value)`),
-  asrt: sz.number().$assert(surql`$value > 0`),
-  ro: sz.string().$readonly(),
-  cmt: sz.string().$comment("a field"),
-  perm: sz.string().$permissions({ select: true, update: false }),
-  uniq: sz.string().unique(),
+  s: s.string(),
+  i: s.int(),
+  dt: s.datetime(),
+  uid: s.uuid(),
+  rec: s.recordId("sp_big"),
+  arr: s.array(s.string()),
+  arrn: s.array(s.string(), { max: 3 }),
+  setf: s.set(s.string()),
+  opt: s.string().optional(),
+  role: s.enum(["admin", "user"]),
+  obj: s.object({ a: s.string(), b: s.number().optional() }),
+  def: s.string().$default("pending"),
+  defa: s.datetime().$defaultAlways(surql`time::now()`),
+  val: s.string().$value(surql`string::lowercase($value)`),
+  asrt: s.number().$assert(surql`$value > 0`),
+  ro: s.string().$readonly(),
+  cmt: s.string().$comment("a field"),
+  perm: s.string().$permissions({ select: true, update: false }),
+  uniq: s.string().unique(),
 }).permissions({ select: true, create: surql`$auth.id != NONE` });
 const Less = defineTable("sp_less", { id: z.string() })
   .schemaless()
   .comment("c");
 const Rel = defineRelation("sp_likes", { id: z.string() }).from(Big).to(Big);
-const Fn = defineFunction("sp_add", { a: sz.int(), b: sz.int() })
-  .returns(sz.int())
+const Fn = defineFunction("sp_add", { a: s.int(), b: s.int() })
+  .returns(s.int())
   .body(surql`RETURN $a + $b;`);
 
 const TABLES = [Big, Less, Rel];

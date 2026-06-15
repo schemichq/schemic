@@ -7,7 +7,7 @@ import {
   defineTable,
   SField,
   type Shape,
-  sz,
+  s,
   type TableDef,
 } from "../../src/pure";
 
@@ -23,153 +23,151 @@ const typeOf = (field: SField) => {
 
 describe("leaf types", () => {
   test("primitives", () => {
-    expect(typeOf(sz.string())).toBe("string");
-    expect(typeOf(sz.number())).toBe("number");
-    expect(typeOf(sz.boolean())).toBe("bool");
-    expect(typeOf(sz.null())).toBe("null");
-    expect(typeOf(sz.any())).toBe("any");
-    expect(typeOf(sz.unknown())).toBe("any");
+    expect(typeOf(s.string())).toBe("string");
+    expect(typeOf(s.number())).toBe("number");
+    expect(typeOf(s.boolean())).toBe("bool");
+    expect(typeOf(s.null())).toBe("null");
+    expect(typeOf(s.any())).toBe("any");
+    expect(typeOf(s.unknown())).toBe("any");
   });
 
   test("numbers discriminate int vs float by format", () => {
-    expect(typeOf(sz.int())).toBe("int");
-    expect(typeOf(sz.int32())).toBe("int");
-    expect(typeOf(sz.uint32())).toBe("int");
-    expect(typeOf(sz.bigint())).toBe("int");
-    expect(typeOf(sz.float())).toBe("float");
+    expect(typeOf(s.int())).toBe("int");
+    expect(typeOf(s.int32())).toBe("int");
+    expect(typeOf(s.uint32())).toBe("int");
+    expect(typeOf(s.bigint())).toBe("int");
+    expect(typeOf(s.float())).toBe("float");
   });
 
   test("string formats all collapse to string (TYPE leaf)", () => {
     // Non-bakeable formats (no SurrealDB validator) stay a plain `string` with no ASSERT,
     // so the bare TYPE leaf is observable. (Bakeable ones carry an ASSERT — see below.)
-    expect(typeOf(sz.jwt())).toBe("string");
-    expect(typeOf(sz.cuid())).toBe("string");
-    expect(typeOf(sz.nanoid())).toBe("string");
-    expect(typeOf(sz.base64())).toBe("string");
+    expect(typeOf(s.jwt())).toBe("string");
+    expect(typeOf(s.cuid())).toBe("string");
+    expect(typeOf(s.nanoid())).toBe("string");
+    expect(typeOf(s.base64())).toBe("string");
   });
 
   test("surreal-native types", () => {
-    expect(typeOf(sz.datetime())).toBe("datetime");
-    expect(typeOf(sz.date())).toBe("datetime");
-    expect(typeOf(sz.uuid())).toBe("uuid");
-    expect(typeOf(sz.bytes())).toBe("bytes");
-    expect(typeOf(sz.duration())).toBe("duration");
-    expect(typeOf(sz.decimal())).toBe("decimal");
-    expect(typeOf(sz.file())).toBe("file");
-    expect(typeOf(sz.geometry())).toBe("geometry");
-    expect(typeOf(sz.geometry("point"))).toBe("geometry<point>");
+    expect(typeOf(s.datetime())).toBe("datetime");
+    expect(typeOf(s.date())).toBe("datetime");
+    expect(typeOf(s.uuid())).toBe("uuid");
+    expect(typeOf(s.bytes())).toBe("bytes");
+    expect(typeOf(s.duration())).toBe("duration");
+    expect(typeOf(s.decimal())).toBe("decimal");
+    expect(typeOf(s.file())).toBe("file");
+    expect(typeOf(s.geometry())).toBe("geometry");
+    expect(typeOf(s.geometry("point"))).toBe("geometry<point>");
   });
 
   test("record links", () => {
-    expect(typeOf(sz.recordId("user"))).toBe("record<user>");
-    expect(typeOf(sz.recordId(["user", "admin"]))).toBe("record<user | admin>");
+    expect(typeOf(s.recordId("user"))).toBe("record<user>");
+    expect(typeOf(s.recordId(["user", "admin"]))).toBe("record<user | admin>");
   });
 });
 
 describe("wrappers", () => {
   test("optional -> option<>", () => {
-    expect(typeOf(sz.string().optional())).toBe("option<string>");
-    expect(typeOf(sz.int().optional())).toBe("option<int>");
+    expect(typeOf(s.string().optional())).toBe("option<string>");
+    expect(typeOf(s.int().optional())).toBe("option<int>");
   });
 
   test("zod .default() -> option<> (the value lives app-side, not in DDL)", () => {
-    expect(ddl(sz.string().default("x"))).toBe(
+    expect(ddl(s.string().default("x"))).toBe(
       "DEFINE FIELD x ON TABLE t TYPE option<string>;",
     );
   });
 
   test("nullable -> T | null", () => {
-    expect(typeOf(sz.string().nullable())).toBe("string | null");
+    expect(typeOf(s.string().nullable())).toBe("string | null");
   });
 
   test("nullish / .optional().nullable() / .nullable().optional() all -> option<T | null>", () => {
-    expect(typeOf(sz.string().nullish())).toBe("option<string | null>");
-    expect(typeOf(sz.string().optional().nullable())).toBe(
+    expect(typeOf(s.string().nullish())).toBe("option<string | null>");
+    expect(typeOf(s.string().optional().nullable())).toBe(
       "option<string | null>",
     );
-    expect(typeOf(sz.string().nullable().optional())).toBe(
+    expect(typeOf(s.string().nullable().optional())).toBe(
       "option<string | null>",
     );
   });
 
   test("prefault -> option<> (app-side default); catch is transparent", () => {
-    expect(typeOf(sz.string().prefault("x"))).toBe("option<string>");
-    expect(typeOf(sz.string().catch("x"))).toBe("string");
+    expect(typeOf(s.string().prefault("x"))).toBe("option<string>");
+    expect(typeOf(s.string().catch("x"))).toBe("string");
   });
 
   test("array / set", () => {
-    expect(typeOf(sz.string().array())).toBe("array<string>");
-    expect(typeOf(sz.set(sz.int()))).toBe("set<int>"); // set<T> is distinct from array<T>
+    expect(typeOf(s.string().array())).toBe("array<string>");
+    expect(typeOf(s.set(s.int()))).toBe("set<int>"); // set<T> is distinct from array<T>
   });
 
   test("optional/nullable any collapse to any (no invalid option<any>)", () => {
     // `any` already admits NONE/NULL, so `option<any>` is a SurrealQL parse error.
-    expect(typeOf(sz.any().optional())).toBe("any");
-    expect(typeOf(sz.any().nullable())).toBe("any");
-    expect(typeOf(sz.any().nullish())).toBe("any");
-    expect(typeOf(sz.unknown().optional())).toBe("any");
-    expect(typeOf(sz.any().array())).toBe("array<any>"); // still valid — unchanged
+    expect(typeOf(s.any().optional())).toBe("any");
+    expect(typeOf(s.any().nullable())).toBe("any");
+    expect(typeOf(s.any().nullish())).toBe("any");
+    expect(typeOf(s.unknown().optional())).toBe("any");
+    expect(typeOf(s.any().array())).toBe("array<any>"); // still valid — unchanged
   });
 
   test("any absorbs every union member (`any | T` is invalid → any)", () => {
-    expect(typeOf(sz.union([sz.string(), sz.any()]))).toBe("any");
-    expect(typeOf(sz.union([sz.any(), sz.int()]))).toBe("any");
-    expect(typeOf(sz.union([sz.string(), sz.any()]).nullable())).toBe("any");
-    expect(typeOf(sz.union([sz.string(), sz.any()]).optional())).toBe("any");
+    expect(typeOf(s.union([s.string(), s.any()]))).toBe("any");
+    expect(typeOf(s.union([s.any(), s.int()]))).toBe("any");
+    expect(typeOf(s.union([s.string(), s.any()]).nullable())).toBe("any");
+    expect(typeOf(s.union([s.string(), s.any()]).optional())).toBe("any");
     // a union with no `any` member is untouched
-    expect(typeOf(sz.union([sz.string(), sz.int()]))).toBe("string | int");
+    expect(typeOf(s.union([s.string(), s.int()]))).toBe("string | int");
   });
 
   test("a `none`-ish union member (undefined/void) -> option<T>", () => {
-    expect(typeOf(sz.union([sz.string(), z.undefined()]))).toBe(
-      "option<string>",
-    );
-    expect(typeOf(sz.union([z.void(), sz.int()]))).toBe("option<int>");
-    expect(typeOf(sz.union([sz.string(), sz.int(), z.undefined()]))).toBe(
+    expect(typeOf(s.union([s.string(), z.undefined()]))).toBe("option<string>");
+    expect(typeOf(s.union([z.void(), s.int()]))).toBe("option<int>");
+    expect(typeOf(s.union([s.string(), s.int(), z.undefined()]))).toBe(
       "option<string | int>",
     );
     // any still wins over none
-    expect(typeOf(sz.union([sz.any(), z.undefined()]))).toBe("any");
+    expect(typeOf(s.union([s.any(), z.undefined()]))).toBe("any");
   });
 });
 
 describe("DB-side metadata clauses", () => {
   test("$default emits DEFAULT and keeps the type", () => {
-    expect(ddl(sz.string().$default(surql`"hi"`))).toBe(
+    expect(ddl(s.string().$default(surql`"hi"`))).toBe(
       `DEFINE FIELD x ON TABLE t TYPE string DEFAULT "hi";`,
     );
   });
 
   test("$default strips a leading option<> (the column is always populated)", () => {
-    expect(ddl(sz.string().optional().$default(surql`"hi"`))).toBe(
+    expect(ddl(s.string().optional().$default(surql`"hi"`))).toBe(
       `DEFINE FIELD x ON TABLE t TYPE string DEFAULT "hi";`,
     );
   });
 
   test("$default accepts a plain value, rendered as a clean literal", () => {
-    expect(ddl(sz.string().$default("light"))).toBe(
+    expect(ddl(s.string().$default("light"))).toBe(
       `DEFINE FIELD x ON TABLE t TYPE string DEFAULT "light";`,
     );
-    expect(ddl(sz.int().$default(0))).toBe(
+    expect(ddl(s.int().$default(0))).toBe(
       "DEFINE FIELD x ON TABLE t TYPE int DEFAULT 0;",
     );
-    expect(ddl(sz.boolean().$default(true))).toBe(
+    expect(ddl(s.boolean().$default(true))).toBe(
       "DEFINE FIELD x ON TABLE t TYPE bool DEFAULT true;",
     );
-    expect(ddl(sz.string().$defaultAlways("hi"))).toBe(
+    expect(ddl(s.string().$defaultAlways("hi"))).toBe(
       `DEFINE FIELD x ON TABLE t TYPE string DEFAULT ALWAYS "hi";`,
     );
   });
 
   test("$defaultAlways -> DEFAULT ALWAYS", () => {
-    expect(ddl(sz.int().$defaultAlways(surql`0`))).toBe(
+    expect(ddl(s.int().$defaultAlways(surql`0`))).toBe(
       "DEFINE FIELD x ON TABLE t TYPE int DEFAULT ALWAYS 0;",
     );
   });
 
   test("$value -> VALUE and strips option<>", () => {
     expect(
-      ddl(sz.string().optional().$value(surql`string::lowercase($value)`)),
+      ddl(s.string().optional().$value(surql`string::lowercase($value)`)),
     ).toBe(
       "DEFINE FIELD x ON TABLE t TYPE string VALUE string::lowercase($value);",
     );
@@ -177,33 +175,33 @@ describe("DB-side metadata clauses", () => {
 
   test("$value with { optional: true } emits VALUE; type not wrapped in option<>", () => {
     expect(
-      ddl(sz.datetime().$value(surql`time::now()`, { optional: true })),
+      ddl(s.datetime().$value(surql`time::now()`, { optional: true })),
     ).toBe("DEFINE FIELD x ON TABLE t TYPE datetime VALUE time::now();");
   });
 
   test("$assert -> ASSERT", () => {
-    expect(ddl(sz.int().$assert(surql`$value >= 0`))).toBe(
+    expect(ddl(s.int().$assert(surql`$value >= 0`))).toBe(
       "DEFINE FIELD x ON TABLE t TYPE int ASSERT $value >= 0;",
     );
   });
 
   test("$readonly -> READONLY, $comment -> COMMENT", () => {
-    expect(ddl(sz.int().$readonly())).toBe(
+    expect(ddl(s.int().$readonly())).toBe(
       "DEFINE FIELD x ON TABLE t TYPE int READONLY;",
     );
-    expect(ddl(sz.string().$comment("a note"))).toBe(
+    expect(ddl(s.string().$comment("a note"))).toBe(
       `DEFINE FIELD x ON TABLE t TYPE string COMMENT "a note";`,
     );
   });
 
   test("$internal -> PERMISSIONS NONE (field still emitted)", () => {
-    expect(ddl(sz.string().$internal())).toBe(
+    expect(ddl(s.string().$internal())).toBe(
       "DEFINE FIELD x ON TABLE t TYPE string PERMISSIONS NONE;",
     );
   });
 
   test("clauses combine in a stable order", () => {
-    expect(ddl(sz.int().$default(surql`0`).$readonly().$comment("n"))).toBe(
+    expect(ddl(s.int().$default(surql`0`).$readonly().$comment("n"))).toBe(
       `DEFINE FIELD x ON TABLE t TYPE int DEFAULT 0 READONLY COMMENT "n";`,
     );
   });
@@ -211,86 +209,86 @@ describe("DB-side metadata clauses", () => {
 
 describe("ASSERT generation", () => {
   test("format builders bake string::is_<fmt> by default (confirmed on v3.1.3)", () => {
-    expect(ddl(sz.email())).toBe(
+    expect(ddl(s.email())).toBe(
       "DEFINE FIELD x ON TABLE t TYPE string ASSERT string::is_email($value);",
     );
-    expect(ddl(sz.url())).toBe(
+    expect(ddl(s.url())).toBe(
       "DEFINE FIELD x ON TABLE t TYPE string ASSERT string::is_url($value);",
     );
-    expect(ddl(sz.ulid())).toBe(
+    expect(ddl(s.ulid())).toBe(
       "DEFINE FIELD x ON TABLE t TYPE string ASSERT string::is_ulid($value);",
     );
-    expect(ddl(sz.ipv4())).toBe(
+    expect(ddl(s.ipv4())).toBe(
       "DEFINE FIELD x ON TABLE t TYPE string ASSERT string::is_ipv4($value);",
     );
-    expect(ddl(sz.ipv6())).toBe(
+    expect(ddl(s.ipv6())).toBe(
       "DEFINE FIELD x ON TABLE t TYPE string ASSERT string::is_ipv6($value);",
     );
   });
 
   test("formats without a SurrealDB validator stay assert-free (no fabricated regex)", () => {
-    expect(ddl(sz.jwt())).toBe("DEFINE FIELD x ON TABLE t TYPE string;");
-    expect(ddl(sz.cuid())).toBe("DEFINE FIELD x ON TABLE t TYPE string;");
-    expect(ddl(sz.nanoid())).toBe("DEFINE FIELD x ON TABLE t TYPE string;");
-    expect(ddl(sz.cidrv4())).toBe("DEFINE FIELD x ON TABLE t TYPE string;");
+    expect(ddl(s.jwt())).toBe("DEFINE FIELD x ON TABLE t TYPE string;");
+    expect(ddl(s.cuid())).toBe("DEFINE FIELD x ON TABLE t TYPE string;");
+    expect(ddl(s.nanoid())).toBe("DEFINE FIELD x ON TABLE t TYPE string;");
+    expect(ddl(s.cidrv4())).toBe("DEFINE FIELD x ON TABLE t TYPE string;");
   });
 
-  test("sz.uuid() is the native uuid type with no assert", () => {
-    expect(ddl(sz.uuid())).toBe("DEFINE FIELD x ON TABLE t TYPE uuid;");
+  test("s.uuid() is the native uuid type with no assert", () => {
+    expect(ddl(s.uuid())).toBe("DEFINE FIELD x ON TABLE t TYPE uuid;");
   });
 
   test("string $min/$max -> string::len bounds (AND-joined)", () => {
-    expect(ddl(sz.string().$min(1).$max(120))).toBe(
+    expect(ddl(s.string().$min(1).$max(120))).toBe(
       "DEFINE FIELD x ON TABLE t TYPE string ASSERT string::len($value) >= 1 AND string::len($value) <= 120;",
     );
   });
 
   test("string $length -> string::len equality", () => {
-    expect(ddl(sz.string().$length(8))).toBe(
+    expect(ddl(s.string().$length(8))).toBe(
       "DEFINE FIELD x ON TABLE t TYPE string ASSERT string::len($value) == 8;",
     );
   });
 
   test("string $regex -> $value = /re/", () => {
-    expect(ddl(sz.string().$regex(/^[a-z]+$/))).toBe(
+    expect(ddl(s.string().$regex(/^[a-z]+$/))).toBe(
       "DEFINE FIELD x ON TABLE t TYPE string ASSERT $value = /^[a-z]+$/;",
     );
   });
 
   test("number $min/$max -> bare value bounds", () => {
-    expect(ddl(sz.number().$min(0).$max(10))).toBe(
+    expect(ddl(s.number().$min(0).$max(10))).toBe(
       "DEFINE FIELD x ON TABLE t TYPE number ASSERT $value >= 0 AND $value <= 10;",
     );
   });
 
   test("number $gt/$gte/$lt/$lte map to the right operator", () => {
-    expect(ddl(sz.number().$gte(0).$lte(1))).toBe(
+    expect(ddl(s.number().$gte(0).$lte(1))).toBe(
       "DEFINE FIELD x ON TABLE t TYPE number ASSERT $value >= 0 AND $value <= 1;",
     );
-    expect(ddl(sz.number().$gt(0).$lt(1))).toBe(
+    expect(ddl(s.number().$gt(0).$lt(1))).toBe(
       "DEFINE FIELD x ON TABLE t TYPE number ASSERT $value > 0 AND $value < 1;",
     );
   });
 
   test("a $-constraint also applies the matching Zod check app-side", () => {
-    const f = sz.string().$min(2).$max(4);
+    const f = s.string().$min(2).$max(4);
     expect(f.schema.safeParse("ab").success).toBe(true);
     expect(f.schema.safeParse("a").success).toBe(false);
     expect(f.schema.safeParse("abcde").success).toBe(false);
-    const n = sz.number().$gte(0).$lte(1);
+    const n = s.number().$gte(0).$lte(1);
     expect(n.schema.safeParse(0.5).success).toBe(true);
     expect(n.schema.safeParse(2).success).toBe(false);
   });
 
   test("custom $assert(surql`…`) pushes the inlined expression", () => {
-    expect(ddl(sz.int().$assert(surql`$value % 2 == 0`))).toBe(
+    expect(ddl(s.int().$assert(surql`$value % 2 == 0`))).toBe(
       "DEFINE FIELD x ON TABLE t TYPE int ASSERT $value % 2 == 0;",
     );
   });
 
   test("a builder + a $-constraint + a custom assert AND-join into one clause (deduped)", () => {
-    // sz.email() already baked string::is_email; the custom $assert repeats it -> deduped.
-    const f = sz.email().$max(254).$assert(surql`string::is_email($value)`);
+    // s.email() already baked string::is_email; the custom $assert repeats it -> deduped.
+    const f = s.email().$max(254).$assert(surql`string::is_email($value)`);
     expect(ddl(f)).toBe(
       "DEFINE FIELD x ON TABLE t TYPE string ASSERT string::is_email($value) AND string::len($value) <= 254;",
     );
@@ -319,7 +317,7 @@ describe("ASSERT generation", () => {
 
 describe("nested structures expand into sub-fields", () => {
   test("object -> path.key children", () => {
-    const lines = ddl(sz.object({ a: sz.string(), b: sz.int() })).split("\n");
+    const lines = ddl(s.object({ a: s.string(), b: s.int() })).split("\n");
     expect(lines).toEqual([
       "DEFINE FIELD x ON TABLE t TYPE object;",
       "DEFINE FIELD x.a ON TABLE t TYPE string;",
@@ -328,7 +326,7 @@ describe("nested structures expand into sub-fields", () => {
   });
 
   test("nested object keeps child $default metadata", () => {
-    const out = ddl(sz.object({ theme: sz.string().$default(surql`"light"`) }));
+    const out = ddl(s.object({ theme: s.string().$default(surql`"light"`) }));
     expect(out).toContain(
       `DEFINE FIELD x.theme ON TABLE t TYPE string DEFAULT "light";`,
     );
@@ -336,7 +334,7 @@ describe("nested structures expand into sub-fields", () => {
 
   test("array of objects: element `.*` left to SurrealDB; only sub-fields emitted", () => {
     // SurrealDB auto-creates `x.*` from `array<object>`, so we emit only `x` and `x.*.a`.
-    const lines = ddl(sz.array(sz.object({ a: sz.string() }))).split("\n");
+    const lines = ddl(s.array(s.object({ a: s.string() }))).split("\n");
     expect(lines).toEqual([
       "DEFINE FIELD x ON TABLE t TYPE array<object>;",
       "DEFINE FIELD x.*.a ON TABLE t TYPE string;",
@@ -344,7 +342,7 @@ describe("nested structures expand into sub-fields", () => {
   });
 
   test("array of scalars has no element sub-field", () => {
-    expect(ddl(sz.string().array())).toBe(
+    expect(ddl(s.string().array())).toBe(
       "DEFINE FIELD x ON TABLE t TYPE array<string>;",
     );
   });
@@ -352,7 +350,7 @@ describe("nested structures expand into sub-fields", () => {
   test("customized array element (FLEXIBLE) is kept with OVERWRITE", () => {
     // A plain element is auto-created by SurrealDB (skipped); a FLEXIBLE element carries config
     // SurrealDB's default `.* object` doesn't, so it's emitted with OVERWRITE.
-    expect(ddl(sz.object({}).loose().array())).toEqual(
+    expect(ddl(s.object({}).loose().array())).toEqual(
       [
         "DEFINE FIELD x ON TABLE t TYPE array<object>;",
         "DEFINE FIELD OVERWRITE x.* ON TABLE t TYPE object FLEXIBLE;",
@@ -361,11 +359,11 @@ describe("nested structures expand into sub-fields", () => {
   });
 
   test("record / map -> object with a .* value field (object `.*` is emitted)", () => {
-    expect(ddl(sz.record(z.string(), sz.int())).split("\n")).toEqual([
+    expect(ddl(s.record(z.string(), s.int())).split("\n")).toEqual([
       "DEFINE FIELD x ON TABLE t TYPE object;",
       "DEFINE FIELD x.* ON TABLE t TYPE int;",
     ]);
-    expect(ddl(sz.map(z.string(), sz.string())).split("\n")).toEqual([
+    expect(ddl(s.map(z.string(), s.string())).split("\n")).toEqual([
       "DEFINE FIELD x ON TABLE t TYPE object;",
       "DEFINE FIELD x.* ON TABLE t TYPE string;",
     ]);
@@ -378,10 +376,7 @@ describe("nested structures expand into sub-fields", () => {
 
   test("intersection of objects merges children", () => {
     const out = ddl(
-      sz.intersection(
-        sz.object({ a: sz.string() }),
-        sz.object({ b: sz.int() }),
-      ),
+      s.intersection(s.object({ a: s.string() }), s.object({ b: s.int() })),
     );
     expect(out).toContain("DEFINE FIELD x ON TABLE t TYPE object;");
     expect(out).toContain("DEFINE FIELD x.a ON TABLE t TYPE string;");
@@ -391,27 +386,27 @@ describe("nested structures expand into sub-fields", () => {
 
 describe("composite leaf types", () => {
   test("union", () => {
-    expect(typeOf(sz.union([sz.string(), sz.int()]))).toBe("string | int");
+    expect(typeOf(s.union([s.string(), s.int()]))).toBe("string | int");
   });
 
   test("enum / literal", () => {
-    expect(typeOf(sz.enum(["admin", "member"]))).toBe(`"admin" | "member"`);
-    expect(typeOf(sz.literal("x"))).toBe(`"x"`);
-    expect(typeOf(sz.literal(42))).toBe("42");
-    expect(typeOf(sz.literal(true))).toBe("true");
+    expect(typeOf(s.enum(["admin", "member"]))).toBe(`"admin" | "member"`);
+    expect(typeOf(s.literal("x"))).toBe(`"x"`);
+    expect(typeOf(s.literal(42))).toBe("42");
+    expect(typeOf(s.literal(true))).toBe("true");
   });
 
   test("tuple", () => {
-    expect(typeOf(sz.tuple([sz.string(), sz.int()]))).toBe("[string, int]");
+    expect(typeOf(s.tuple([s.string(), s.int()]))).toBe("[string, int]");
   });
 
   test("nativeEnum (string and numeric)", () => {
-    expect(typeOf(sz.nativeEnum({ A: "a", B: "b" }))).toBe(`"a" | "b"`);
+    expect(typeOf(s.nativeEnum({ A: "a", B: "b" }))).toBe(`"a" | "b"`);
     enum Role {
       Guest = 0,
       Admin = 1,
     }
-    expect(typeOf(sz.nativeEnum(Role))).toBe("0 | 1");
+    expect(typeOf(s.nativeEnum(Role))).toBe("0 | 1");
   });
 });
 
@@ -429,7 +424,7 @@ describe("edge branches", () => {
   });
 
   test("intersection of non-objects -> any", () => {
-    expect(typeOf(sz.intersection(sz.string(), sz.int()))).toBe("any");
+    expect(typeOf(s.intersection(s.string(), s.int()))).toBe("any");
   });
 
   test("variadic tuple -> generic array", () => {
@@ -437,7 +432,7 @@ describe("edge branches", () => {
   });
 
   test("a $default with bindings is inlined into the DDL", () => {
-    expect(ddl(sz.int().$default(surql`${42}`))).toBe(
+    expect(ddl(s.int().$default(surql`${42}`))).toBe(
       "DEFINE FIELD x ON TABLE t TYPE int DEFAULT 42;",
     );
   });
@@ -445,9 +440,9 @@ describe("edge branches", () => {
 
 describe("recursive types", () => {
   test("self-referential lazy terminates at `any`", () => {
-    const node: SField = sz.object({
-      name: sz.string(),
-      next: sz.lazy(() => node),
+    const node: SField = s.object({
+      name: s.string(),
+      next: s.lazy(() => node),
     });
     const out = ddl(node);
     expect(out).toContain("DEFINE FIELD x.next ON TABLE t TYPE object;");
@@ -458,10 +453,10 @@ describe("recursive types", () => {
 describe("emitTable", () => {
   const User = defineTable("user", {
     id: z.string(),
-    name: sz.string(),
-    role: sz.enum(["admin", "member"]).$default(surql`"member"`),
-    createdAt: sz.datetime().$default(surql`time::now()`).$readonly(),
-    settings: sz.object({ theme: sz.string().$default(surql`"light"`) }),
+    name: s.string(),
+    role: s.enum(["admin", "member"]).$default(surql`"member"`),
+    createdAt: s.datetime().$default(surql`time::now()`).$readonly(),
+    settings: s.object({ theme: s.string().$default(surql`"light"`) }),
   }).comment("Users");
 
   test("table head: NORMAL, SCHEMAFULL, COMMENT", () => {
@@ -491,8 +486,8 @@ describe("emitTable", () => {
 
   test("an $internal() field is still emitted, with PERMISSIONS NONE", () => {
     const Account = defineTable("user", {
-      email: sz.email(),
-      passhash: sz.string().$internal(),
+      email: s.email(),
+      passhash: s.string().$internal(),
     });
     const out = emitTable(Account);
     expect(out).toContain(
@@ -514,12 +509,10 @@ describe("emitTable", () => {
   });
 
   test("object .loose()/.flexible() -> FLEXIBLE; .strict()/default -> not", () => {
-    expect(ddl(sz.object({ a: sz.string() }).loose())).toContain("FLEXIBLE");
-    expect(ddl(sz.object({ a: sz.string() }).flexible())).toContain("FLEXIBLE");
-    expect(ddl(sz.object({ a: sz.string() }).strict())).not.toContain(
-      "FLEXIBLE",
-    );
-    expect(ddl(sz.object({ a: sz.string() }))).not.toContain("FLEXIBLE");
+    expect(ddl(s.object({ a: s.string() }).loose())).toContain("FLEXIBLE");
+    expect(ddl(s.object({ a: s.string() }).flexible())).toContain("FLEXIBLE");
+    expect(ddl(s.object({ a: s.string() }).strict())).not.toContain("FLEXIBLE");
+    expect(ddl(s.object({ a: s.string() }))).not.toContain("FLEXIBLE");
   });
 
   test("existsPrefix: overwrite / ignore", () => {
@@ -530,7 +523,7 @@ describe("emitTable", () => {
       "DEFINE TABLE IF NOT EXISTS user",
     );
     // applies to fields too
-    expect(emitField("x", "t", sz.string(), { exists: "overwrite" })).toBe(
+    expect(emitField("x", "t", s.string(), { exists: "overwrite" })).toBe(
       "DEFINE FIELD OVERWRITE x ON TABLE t TYPE string;",
     );
   });
@@ -540,7 +533,7 @@ describe("emitTable", () => {
     const B = defineTable("post", { id: z.string() });
     const Tag = defineTable("tag", { id: z.string() });
     const Liked = defineRelation("liked", {
-      strength: sz.number().$assert(surql`$value >= 0`),
+      strength: s.number().$assert(surql`$value >= 0`),
     })
       .from(A)
       .to(B);
@@ -584,7 +577,7 @@ describe("PERMISSIONS", () => {
   /** The first line (table head) of a table's DDL. */
   const head = (t: TableDef<string, Shape>) => emitTable(t).split("\n")[0];
   const tbl = (perms: Parameters<TableDef<string, Shape>["permissions"]>[0]) =>
-    defineTable("t", { name: sz.string() }).permissions(perms);
+    defineTable("t", { name: s.string() }).permissions(perms);
 
   describe("renderPermissions algorithm (4 table ops)", () => {
     const ops = ["select", "create", "update", "delete"] as const;
@@ -668,7 +661,7 @@ describe("PERMISSIONS", () => {
     });
 
     test("a shared BoundQuery covers all four ops, after COMMENT", () => {
-      const T = defineTable("t", { name: sz.string() })
+      const T = defineTable("t", { name: s.string() })
         .comment("notes")
         .permissions(surql`owner = $auth.id`);
       expect(head(T)).toBe(
@@ -691,7 +684,7 @@ describe("PERMISSIONS", () => {
 
   describe("field wiring (3 ops, no delete)", () => {
     test("blanket BoundQuery covers select, create, update only", () => {
-      expect(ddl(sz.string().$permissions(surql`published = true`))).toBe(
+      expect(ddl(s.string().$permissions(surql`published = true`))).toBe(
         "DEFINE FIELD x ON TABLE t TYPE string PERMISSIONS FOR select, create, update WHERE published = true;",
       );
     });
@@ -699,7 +692,7 @@ describe("PERMISSIONS", () => {
     test("an omitted field op stays unemitted (defaults to FULL in the DB)", () => {
       expect(
         ddl(
-          sz
+          s
             .string()
             .$permissions({ select: surql`published = true`, update: false }),
         ),
@@ -709,17 +702,17 @@ describe("PERMISSIONS", () => {
     });
 
     test("$permissions(false) / (true) -> NONE / FULL", () => {
-      expect(ddl(sz.string().$permissions(false))).toBe(
+      expect(ddl(s.string().$permissions(false))).toBe(
         "DEFINE FIELD x ON TABLE t TYPE string PERMISSIONS NONE;",
       );
-      expect(ddl(sz.string().$permissions(true))).toBe(
+      expect(ddl(s.string().$permissions(true))).toBe(
         "DEFINE FIELD x ON TABLE t TYPE string PERMISSIONS FULL;",
       );
     });
 
     test("an $internal() field still emits PERMISSIONS NONE (internal wins over $permissions)", () => {
       expect(
-        ddl(sz.string().$internal().$permissions({ select: surql`x` })),
+        ddl(s.string().$internal().$permissions({ select: surql`x` })),
       ).toBe("DEFINE FIELD x ON TABLE t TYPE string PERMISSIONS NONE;");
     });
   });

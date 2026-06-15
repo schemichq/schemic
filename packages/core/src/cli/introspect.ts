@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { type DefineStatement, overwriteStatement } from "surreal-zod";
+import { type DefineStatement, overwriteStatement } from "@schemic/core";
 import { escapeIdent, type Surreal } from "surrealdb";
 import type { ResolvedConfig } from "./config";
 import { buildSnapshot, type Diff, diffSnapshots } from "./diff";
@@ -154,7 +154,7 @@ async function replayMigrations(
 /**
  * Verify that replaying every migration from zero reconstructs the declared schema — the only check
  * that catches "the sum of the migrations no longer equals the schema" (a hand-edited migration, or
- * a schema change someone forgot to `sz gen`). Replays the migrations into one scratch DB and applies
+ * a schema change someone forgot to `schemic gen`). Replays the migrations into one scratch DB and applies
  * the current schema into another, then diffs the two introspected snapshots; since BOTH sides are
  * normalized through SurrealDB (`INFO`), only genuine drift shows up. An empty diff means they agree.
  * `up` is what the migrations are missing relative to the schema. Needs root/namespace auth.

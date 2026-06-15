@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { z } from "zod";
 import { DateTime, RecordId, Uuid } from "surrealdb";
-import { sz, defineTable } from "../../src/pure";
+import { z } from "zod";
+import { defineTable, s } from "../../src/pure";
 
 const UUID = "0190b6e0-1234-7890-abcd-ef0123456789";
 
 describe("native codecs (schema-level)", () => {
   test("datetime: DateTime <-> Date", () => {
-    const schema = sz.datetime().schema;
+    const schema = s.datetime().schema;
     const decoded = z.decode(
       schema,
       new DateTime(new Date("2020-01-01T00:00:00.000Z")),
@@ -20,7 +20,7 @@ describe("native codecs (schema-level)", () => {
   });
 
   test("uuid: Uuid <-> string", () => {
-    const schema = sz.uuid().schema;
+    const schema = s.uuid().schema;
     const decoded = z.decode(schema, new Uuid(UUID));
     expect(decoded).toBe(UUID);
 
@@ -30,11 +30,11 @@ describe("native codecs (schema-level)", () => {
   });
 
   test("uuid: encoding an invalid string fails", () => {
-    expect(() => z.encode(sz.uuid().schema, "not-a-uuid")).toThrow();
+    expect(() => z.encode(s.uuid().schema, "not-a-uuid")).toThrow();
   });
 
   test("bytes: Uint8Array passes through, ArrayBuffer is normalized", () => {
-    const schema = sz.bytes().schema;
+    const schema = s.bytes().schema;
     const u8 = new Uint8Array([1, 2, 3]);
     expect(z.decode(schema, u8)).toBeInstanceOf(Uint8Array);
 
@@ -44,7 +44,7 @@ describe("native codecs (schema-level)", () => {
   });
 
   test("recordId is identity (no codec), but enforces the table", () => {
-    const schema = sz.recordId("user").schema;
+    const schema = s.recordId("user").schema;
     const rid = new RecordId("user", "x");
     expect(schema.safeParse(rid).success).toBe(true);
     expect(schema.safeParse(new RecordId("post", "x")).success).toBe(false);
@@ -53,7 +53,7 @@ describe("native codecs (schema-level)", () => {
 
 describe("field-level codec (SField.decode / encode)", () => {
   test("datetime: decode(DateTime) -> Date, encode(Date) -> DateTime", () => {
-    const f = sz.datetime();
+    const f = s.datetime();
     const dt = new DateTime(new Date("2020-01-01T00:00:00.000Z"));
     const decoded = f.decode(dt);
     expect(decoded).toBeInstanceOf(Date);
@@ -64,7 +64,7 @@ describe("field-level codec (SField.decode / encode)", () => {
   });
 
   test("uuid: decode(Uuid) -> string, encode(string) -> Uuid", () => {
-    const f = sz.uuid();
+    const f = s.uuid();
     expect(f.decode(new Uuid(UUID))).toBe(UUID);
     const encoded = f.encode(UUID);
     expect(encoded).toBeInstanceOf(Uuid);
@@ -72,13 +72,13 @@ describe("field-level codec (SField.decode / encode)", () => {
   });
 
   test("encode throws on an invalid value; safeEncode reports it", () => {
-    expect(() => sz.uuid().encode("not-a-uuid")).toThrow();
-    expect(sz.uuid().safeEncode("not-a-uuid").success).toBe(false);
-    expect(sz.uuid().safeEncode(UUID).success).toBe(true);
+    expect(() => s.uuid().encode("not-a-uuid")).toThrow();
+    expect(s.uuid().safeEncode("not-a-uuid").success).toBe(false);
+    expect(s.uuid().safeEncode(UUID).success).toBe(true);
   });
 
   test("async + deprecated parse alias", async () => {
-    const f = sz.datetime();
+    const f = s.datetime();
     const decoded = await f.decodeAsync(
       new DateTime(new Date("2020-01-01T00:00:00.000Z")),
     );
@@ -97,9 +97,9 @@ describe("field-level codec (SField.decode / encode)", () => {
 describe("table decode/encode", () => {
   const T = defineTable("t", {
     id: z.string(),
-    when: sz.datetime(),
-    tag: sz.uuid(),
-    data: sz.bytes(),
+    when: s.datetime(),
+    tag: s.uuid(),
+    data: s.bytes(),
   });
 
   test("decode: wire row -> app object", () => {

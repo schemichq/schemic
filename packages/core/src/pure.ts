@@ -31,7 +31,7 @@ import { z } from "zod";
 export const surrealTypeRegistry = new WeakMap<z.ZodType, string>();
 
 /**
- * Maps an object schema built via `sz.object` to its original SField shape, so
+ * Maps an object schema built via `s.object` to its original SField shape, so
  * nested fields keep their DDL metadata ($default/$assert/...) during generation.
  */
 export const objectFieldsRegistry = new WeakMap<
@@ -149,7 +149,7 @@ function formatAssert(format: string): string | undefined {
 
 /**
  * Reverse of {@link formatAssert}: recover a format name from a baked `string::is_<fmt>($value)`
- * assert. Used by `pull` to restore `sz.<format>()` instead of `sz.string().$assert(...)`. Returns
+ * assert. Used by `pull` to restore `s.<format>()` instead of `s.string().$assert(...)`. Returns
  * undefined for any other assert — including one that combines a format with extra text — so only an
  * exact, single-format assert reverses (a user's own assert is never swallowed).
  */
@@ -285,7 +285,7 @@ export class SField<
 
   // --- Field-level codec (raw, on `this.schema`): `decode` reads (wire -> app), `encode`
   // writes (app -> wire). Create-shaping is a table concept, so these are NOT create-shaped —
-  // e.g. `sz.datetime().decode(dbDateTime) -> Date`, `sz.uuid().encode("…") -> Uuid`. ---
+  // e.g. `s.datetime().decode(dbDateTime) -> Date`, `s.uuid().encode("…") -> Uuid`. ---
   /** Decode a DB value to its app type (wire -> app). */
   decode(value: unknown): z.output<S> {
     return z.decode(this.schema, value as never);
@@ -506,7 +506,7 @@ export class SField<
   }
   /**
    * `COMPUTED <expr>` — a derived, read-only column computed from other fields. Never written, so
-   * it's create-OPTIONAL: `sz.string().$computed(surql\`string::concat(first, " ", last)\`)`.
+   * it's create-OPTIONAL: `s.string().$computed(surql\`string::concat(first, " ", last)\`)`.
    */
   $computed(expr: BoundQuery): SField<S, Flags | "create"> {
     return new SField(this.schema, { ...this.surreal, computed: expr });
@@ -649,11 +649,11 @@ export class SField<
     });
   }
   /**
-   * Teach surreal-zod how to store this value in SurrealDB: give the **wire type** as an `sz.*`
+   * Teach @schemic/core how to store this value in SurrealDB: give the **wire type** as an `s.*`
    * field (its SurrealQL DDL type and Zod schema are derived from it) plus a codec
    * (`encode`: app -> wire, `decode`: wire -> app). This turns an otherwise-unmappable field
-   * (e.g. `sz.custom`/`sz.instanceof`) into a real table field and clears the no-mapping brand;
-   * `sz.input<>` then reports the wire type. Omit the codec for an identity mapping (the app
+   * (e.g. `s.custom`/`s.instanceof`) into a real table field and clears the no-mapping brand;
+   * `s.input<>` then reports the wire type. Omit the codec for an identity mapping (the app
    * value is stored as-is). `$`-prefixed to avoid clashing with Zod.
    */
   $surreal<WF extends AnyField | z.ZodType, A = z.output<S>>(
@@ -699,7 +699,7 @@ function datetimeCodec() {
   return codec;
 }
 
-/** Like `datetimeCodec`, but the app side coerces to `Date` (`sz.coerce.date`). Same `datetime` DDL. */
+/** Like `datetimeCodec`, but the app side coerces to `Date` (`s.coerce.date`). Same `datetime` DDL. */
 function coercedDatetimeCodec() {
   const codec = z.codec(z.instanceof(DateTime), z.coerce.date(), {
     decode: (dt): Date => new Date(dt.toString()),
@@ -842,7 +842,7 @@ type ZodsOf<T extends readonly (AnyField | z.ZodType)[]> = {
 };
 
 /** Field constructors — the authoring surface. */
-export const sz = {
+export const s = {
   string: () => new SField(z.string()),
   number: () => new SField(z.number()),
   boolean: () => new SField(z.boolean()),
@@ -929,7 +929,7 @@ export const sz = {
     ),
   /**
    * A `record<…>` link. Pass a table name, the imported `TableDef`/`RelationDef`, or an array for a
-   * multi-table union — `sz.recordId(User)`, `sz.recordId([User, Service])` — so a table's name is
+   * multi-table union — `s.recordId(User)`, `s.recordId([User, Service])` — so a table's name is
    * only ever written in its own definition. (For a single-table link `User.record()` is preferred:
    * it also carries the id value type; `User.record().or(Post.record())` composes a union.)
    */
@@ -1106,7 +1106,7 @@ export const sz = {
   null: () => new SField(z.null()),
 
   // --- Non-Surreal types ---
-  // Present so a global `z.*` -> `sz.*` swap never collides. They carry NO SurrealQL mapping,
+  // Present so a global `z.*` -> `s.*` swap never collides. They carry NO SurrealQL mapping,
   // so they're rejected as a table field at compile time (and by `inferField` at runtime) —
   // unless you teach them to serialize via `.$surreal(type, codec)`.
   symbol: () => noDdl(new SField(z.symbol())),
@@ -1149,7 +1149,7 @@ type ZShape<S extends Shape> = {
 /** Every field's zshape, including internal ones — backs the `.system` view. */
 type ZShapeAll<S extends Shape> = { [K in keyof S]: SchemaOf<S[K]> };
 /**
- * The schema type returned by `sz.object`: a plain `z.ZodObject` carrying its original
+ * The schema type returned by `s.object`: a plain `z.ZodObject` carrying its original
  * `Shape` via a type-only `~szShape` brand. The brand is optional, so the runtime cast
  * (`z.object(...) as SZObject<S>`) is sound and the brand is invisible to `z.input`/
  * `z.output`/`App`/`Wire` — nested fields stay REQUIRED on the decoded side. It exists
@@ -1241,7 +1241,7 @@ function unwrapCore(schema: z.ZodType): z.ZodType {
   return s;
 }
 
-/** If `core` is a `ZodArray` whose (unwrapped) element is a registered `sz.object`, return
+/** If `core` is a `ZodArray` whose (unwrapped) element is a registered `s.object`, return
  * that element's fields; otherwise undefined. */
 function arrayElementFields(
   core: z.ZodType,
@@ -1254,12 +1254,12 @@ function arrayElementFields(
 
 /**
  * Validate + encode one provided field value to its wire form (non-throwing — the shared core
- * of both `encode` and `safeEncode`). A nested `sz.object` (or an array of one) recurses via
+ * of both `encode` and `safeEncode`). A nested `s.object` (or an array of one) recurses via
  * `safeEncodeInput`, so absent nested keys are OMITTED — on CREATE the DB fills their defaults;
  * on UPDATE `encodePartial` is deep-partial and pairs with `MERGE` (which deep-merges), so
  * omitted siblings are preserved. Leaf fields go through `z.safeEncode` (which validates);
  * issues are pushed into `issues` with their path prefixed by `path`, so the aggregate
- * `ZodError` carries fully-qualified paths. Object-LEVEL refinements on a nested `sz.object`
+ * `ZodError` carries fully-qualified paths. Object-LEVEL refinements on a nested `s.object`
  * are skipped (rare; leaf validation still runs).
  */
 function safeEncodeValue(
@@ -1312,7 +1312,7 @@ function safeEncodeInput(
  * the PROVIDED keys, aggregating every leaf issue (with correct paths) into one `z.ZodError`.
  * `safeEncode` returns the result; `encode` throws `error` (so `encode` and `safeEncode` are
  * the same operation — `encode` = `safeEncode` + throw — including for a PARTIAL nested
- * `sz.object`).
+ * `s.object`).
  */
 function safeEncodeFields(
   fields: Record<string, AnyField>,
@@ -1326,7 +1326,7 @@ function safeEncodeFields(
 }
 
 /** Async mirror of `safeEncodeValue` — awaits `z.safeEncodeAsync` per leaf and recurses into a
- * nested `sz.object` (or array of one) via `safeEncodeInputAsync`. Backs the `*Async` writes. */
+ * nested `s.object` (or array of one) via `safeEncodeInputAsync`. Backs the `*Async` writes. */
 async function safeEncodeValueAsync(
   field: AnyField,
   v: unknown,
@@ -1398,7 +1398,7 @@ type AppOf<F> = z.output<SchemaOf<F>>;
 type InputOptional<F> = undefined extends z.input<SchemaOf<F>> ? true : false;
 
 /**
- * Recover the nested `Shape` of an `sz.object` schema (`never` if the schema isn't one).
+ * Recover the nested `Shape` of an `s.object` schema (`never` if the schema isn't one).
  * Identity-preserving wrappers (optional/default/readonly/nullable) are peeled first, then
  * the `~szShape` brand is read. The inner `NS extends Shape ? NS : never` drops the
  * `| undefined` that inferring from an optional property can introduce, so the result is the
@@ -1420,7 +1420,7 @@ type ShapeOf<Sc> =
             : never;
 
 /**
- * The element `Shape` of an `sz.object(...).array()` field (`never` otherwise). Peels the
+ * The element `Shape` of an `s.object(...).array()` field (`never` otherwise). Peels the
  * same identity-preserving wrappers off the array, then reads the element's `~szShape`.
  */
 type ArrayShapeOf<Sc> =
@@ -1437,9 +1437,9 @@ type ArrayShapeOf<Sc> =
             : never;
 
 /**
- * The create-input VALUE type for a field. A nested `sz.object` recurses into its own
+ * The create-input VALUE type for a field. A nested `s.object` recurses into its own
  * `CreateShape` (so nested `$default`/`"create"` fields become optional too); an array of
- * `sz.object` becomes that nested create-shape's array; everything else is the plain app
+ * `s.object` becomes that nested create-shape's array; everything else is the plain app
  * type (`AppOf`). `[X] extends [never]` guards each branch because `never extends Shape` is
  * vacuously true and would otherwise wrongly match the object branch for scalar fields.
  */
@@ -1459,7 +1459,7 @@ type CreateOptional<S extends Shape, K extends keyof S> = K extends "id"
     ? true
     : InputOptional<S[K]>;
 // Public create input: internal fields are never settable by clients. Field VALUES use
-// `CreateValue` so a nested `sz.object`'s own create-optional fields (a nested `$default`)
+// `CreateValue` so a nested `s.object`'s own create-optional fields (a nested `$default`)
 // are optional too — while `CreateOptional` (the `?` modifier) is unchanged.
 type CreateShape<S extends Shape> = Prettify<
   {
@@ -1497,8 +1497,8 @@ type UpdateExcluded<S extends Shape, K extends keyof S> = K extends "id"
 /**
  * The update-input VALUE type for a field — a DEEP partial, since `MERGE` recursively
  * deep-merges nested objects (so any subset of nested keys is a valid patch). A nested
- * `sz.object` recurses into its own `UpdateShape` (every nested field optional); an array
- * of `sz.object` becomes that update-shape's array; everything else is the plain app type
+ * `s.object` recurses into its own `UpdateShape` (every nested field optional); an array
+ * of `s.object` becomes that update-shape's array; everything else is the plain app type
  * (`AppOf`). The `[X] extends [never]` guards mirror `CreateValue` (so scalar fields don't
  * wrongly match the object branch via `never extends Shape`).
  */
@@ -1512,7 +1512,7 @@ type UpdateValue<F, Sc = SchemaOf<F>> = [ShapeOf<Sc>] extends [never]
     ? UpdateShape<NS>
     : AppOf<F>;
 // Public update input: internal fields are excluded. Field VALUES use `UpdateValue` so a
-// nested `sz.object` is itself a deep partial (every nested key optional), matching MERGE.
+// nested `s.object` is itself a deep partial (every nested key optional), matching MERGE.
 type UpdateShape<S extends Shape> = Prettify<{
   [K in keyof S as IsInternal<S[K]> extends true
     ? never
@@ -2168,7 +2168,7 @@ export function defineEvent(
 }
 
 interface FunctionConfig {
-  /** Return type (an sz schema, inferred to a SurrealQL type — like a field). */
+  /** Return type (an s schema, inferred to a SurrealQL type — like a field). */
   returns?: AnyField;
   /** Function body: a `surql\`…\`` block (or raw string). Required to emit. */
   body?: Expr;
@@ -2180,20 +2180,20 @@ interface FunctionConfig {
 /**
  * A custom function — `DEFINE FUNCTION fn::<name>(<args>) [-> <returns>] { <body> }`. Built with a
  * chainable, immutable API (like {@link TableDef}): `defineFunction(name, args).returns(…).body(…)`.
- * Args and the return type are sz schemas (inferred to SurrealQL types, same as table fields).
+ * Args and the return type are s schemas (inferred to SurrealQL types, same as table fields).
  */
 export class FunctionDef {
   readonly kind = "function" as const;
   constructor(
     readonly name: string,
-    /** Ordered named args, each an sz schema. */
+    /** Ordered named args, each an s schema. */
     readonly args: Record<string, AnyField>,
     readonly config: FunctionConfig = {},
   ) {}
   private withConfig(c: Partial<FunctionConfig>): FunctionDef {
     return new FunctionDef(this.name, this.args, { ...this.config, ...c });
   }
-  /** Declare the return type (an sz schema). */
+  /** Declare the return type (an s schema). */
   returns(type: AnyField): FunctionDef {
     return this.withConfig({ returns: type });
   }
@@ -2212,8 +2212,8 @@ export class FunctionDef {
 
 /**
  * Declare a custom function as a standalone, exportable object:
- * `export const greet = defineFunction("greet", { name: sz.string() }).returns(sz.string()).body(surql\`…\`)`.
- * Emitted as `DEFINE FUNCTION fn::greet(...)`. Args are sz schemas (inferred to SurrealQL types).
+ * `export const greet = defineFunction("greet", { name: s.string() }).returns(s.string()).body(surql\`…\`)`.
+ * Emitted as `DEFINE FUNCTION fn::greet(...)`. Args are s schemas (inferred to SurrealQL types).
  */
 export function defineFunction(name: string, args: Shape = {}): FunctionDef {
   return new FunctionDef(
@@ -2314,7 +2314,7 @@ export function defineAccess(name: string): AccessDef {
 export type StandaloneDef = EventDef | FunctionDef | AccessDef;
 
 /**
- * The underlying Zod schema of any sz value: a field (`SField`), a table/relation def
+ * The underlying Zod schema of any s value: a field (`SField`), a table/relation def
  * (anything carrying an `.object`), or a raw Zod type.
  */
 type ZodOf<T> = T extends { object: infer O }
@@ -2323,24 +2323,24 @@ type ZodOf<T> = T extends { object: infer O }
     : never
   : SchemaOf<T>;
 
-/** The app-facing type (what your code reads). Same as `sz.output` / Zod's `infer`. */
+/** The app-facing type (what your code reads). Same as `s.output` / Zod's `infer`. */
 export type App<T> = z.output<ZodOf<T>>;
-/** The DB wire type (what crosses the wire). Same as `sz.input`. */
+/** The DB wire type (what crosses the wire). Same as `s.input`. */
 export type Wire<T> = z.input<ZodOf<T>>;
 
 /**
- * Zod-style inference helpers, exposed on `sz` (a type-only namespace merged with the `sz`
+ * Zod-style inference helpers, exposed on `s` (a type-only namespace merged with the `s`
  * value — the same trick Zod uses for `z.infer`). They accept fields, table/relation defs,
  * and raw schemas alike:
- *   - `sz.infer<T>` / `sz.output<T>` / `sz.TypeOf<T>` -> the decoded **app** type (== `App<T>`)
- *   - `sz.input<T>`                                   -> the **wire/DB** type (== `Wire<T>`)
+ *   - `s.infer<T>` / `s.output<T>` / `s.TypeOf<T>` -> the decoded **app** type (== `App<T>`)
+ *   - `s.input<T>`                                   -> the **wire/DB** type (== `Wire<T>`)
  */
-export namespace sz {
+export namespace s {
   export type infer<T> = z.output<ZodOf<T>>;
   export type output<T> = z.output<ZodOf<T>>;
   export type input<T> = z.input<ZodOf<T>>;
   export type TypeOf<T> = z.output<ZodOf<T>>;
-  /** Any sz field — the `z.ZodTypeAny` analogue, for typing generic schemas. */
+  /** Any s field — the `z.ZodTypeAny` analogue, for typing generic schemas. */
   export type Field = AnyField;
 }
 /** The typed input for creating a record (DB-filled fields optional). */

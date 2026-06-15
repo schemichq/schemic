@@ -119,7 +119,7 @@ and `fromInfo` already produces the same `kind` expressions that `inferField`/th
    raw-DDL passthrough for unmodeled, so no coverage regression), switch offline diff to structural,
    wire `diff --ts`, re-baseline examples.
 
-`sz diff --live` stays INFO-vs-INFO via shadow-apply (it never trusts the converter to match the
+`schemic diff --live` stays INFO-vs-INFO via shadow-apply (it never trusts the converter to match the
 DB). The Struct-IR governs the OFFLINE world; it just makes that world renderable + structurally
 diffable.
 

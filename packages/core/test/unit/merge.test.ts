@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { mergeUnits, type RenderedUnit, unifiedDiff } from "../../src/cli/merge";
+import {
+  mergeUnits,
+  type RenderedUnit,
+  unifiedDiff,
+} from "../../src/cli/merge";
 
 const tableUnit = (
   exportName: string,
   code: string,
-  imports = [`import { sz, defineTable } from "surreal-zod";`],
+  imports = [`import { s, defineTable } from "@schemic/core";`],
 ): RenderedUnit => ({
   kind: "table",
   name: exportName.toLowerCase(),
@@ -17,13 +21,13 @@ const MIRROR = { keepLocalFields: false, keepLocalObjects: false };
 const KEEP = { keepLocalFields: true, keepLocalObjects: true };
 
 const USER = `export const User = defineTable("user", {
-  id: sz.string(),
-  name: sz.string(),
+  id: s.string(),
+  name: s.string(),
 })
   .schemaless();`;
 
 const fileWith = (...consts: string[]) =>
-  `import { sz, defineTable } from "surreal-zod";\n\n${consts.join("\n\n")}\n`;
+  `import { s, defineTable } from "@schemic/core";\n\n${consts.join("\n\n")}\n`;
 
 describe("mergeUnits", () => {
   test("is idempotent when the DB matches the file (no churn)", () => {
@@ -41,30 +45,30 @@ describe("mergeUnits", () => {
   test("adds a DB field the file lacks", () => {
     const src = fileWith(USER);
     const desired = USER.replace(
-      "  name: sz.string(),\n",
-      "  name: sz.string(),\n  email: sz.email(),\n",
+      "  name: s.string(),\n",
+      "  name: s.string(),\n  email: s.email(),\n",
     );
     const { content } = mergeUnits(src, [tableUnit("User", desired)], MIRROR);
-    expect(content).toContain("email: sz.email()");
-    expect(content).toContain("name: sz.string()");
+    expect(content).toContain("email: s.email()");
+    expect(content).toContain("name: s.string()");
   });
 
   test("DB wins on a shared field (overwrites the local definition)", () => {
     const src = fileWith(USER);
     const desired = USER.replace(
-      "name: sz.string()",
-      "name: sz.string().optional()",
+      "name: s.string()",
+      "name: s.string().optional()",
     );
     const { content } = mergeUnits(src, [tableUnit("User", desired)], MIRROR);
-    expect(content).toContain("name: sz.string().optional()");
+    expect(content).toContain("name: s.string().optional()");
   });
 
   describe("local-only fields", () => {
     const withLocal = fileWith(
       `export const User = defineTable("user", {
-  id: sz.string(),
-  name: sz.string(),
-  nickname: sz.string().optional(),
+  id: s.string(),
+  name: s.string(),
+  nickname: s.string().optional(),
 })
   .schemaless();`,
     );
@@ -90,12 +94,12 @@ describe("mergeUnits", () => {
       expect(localOnly.fields).toEqual([
         { exportName: "User", fields: ["nickname"] },
       ]);
-      expect(content).toContain("nickname: sz.string().optional()");
+      expect(content).toContain("nickname: s.string().optional()");
     });
   });
 
   test("preserves a user's leading comment above the const", () => {
-    const src = `import { sz, defineTable } from "surreal-zod";\n\n// keep me\n${USER}\n`;
+    const src = `import { s, defineTable } from "@schemic/core";\n\n// keep me\n${USER}\n`;
     const { content } = mergeUnits(src, [tableUnit("User", USER)], MIRROR);
     expect(content).toContain("// keep me");
   });
@@ -126,7 +130,7 @@ describe("mergeUnits", () => {
 
   test("appends a brand-new object while keeping the existing one", () => {
     const src = fileWith(USER);
-    const post = `export const Post = defineTable("post", {\n  id: sz.string(),\n})\n  .schemaless();`;
+    const post = `export const Post = defineTable("post", {\n  id: s.string(),\n})\n  .schemaless();`;
     // A combined file: both the existing User and the new Post are DB objects for this file.
     const { content } = mergeUnits(
       src,
@@ -140,11 +144,11 @@ describe("mergeUnits", () => {
   test("unions in a new cross-file import", () => {
     const src = fileWith(USER);
     const desired = USER.replace(
-      "  name: sz.string(),\n",
-      "  name: sz.string(),\n  org: Org.record(),\n",
+      "  name: s.string(),\n",
+      "  name: s.string(),\n  org: Org.record(),\n",
     );
     const unit = tableUnit("User", desired, [
-      `import { sz, defineTable } from "surreal-zod";`,
+      `import { s, defineTable } from "@schemic/core";`,
       `import { Org } from "./org";`,
     ]);
     const { content } = mergeUnits(src, [unit], MIRROR);
@@ -153,24 +157,24 @@ describe("mergeUnits", () => {
   });
 
   test("replaces a whole function const (atomic, no field surgery)", () => {
-    const src = `import { defineFunction, sz, surql } from "surreal-zod";
+    const src = `import { defineFunction, s, surql } from "@schemic/core";
 
-export const greet = defineFunction("greet", { name: sz.string() })
+export const greet = defineFunction("greet", { name: s.string() })
   .body(surql\`RETURN "hi";\`);
 `;
-    const desired = `export const greet = defineFunction("greet", { name: sz.string() })
-  .returns(sz.string())
+    const desired = `export const greet = defineFunction("greet", { name: s.string() })
+  .returns(s.string())
   .body(surql\`RETURN "hello";\`);`;
     const unit: RenderedUnit = {
       kind: "function",
       name: "greet",
       exportName: "greet",
       code: desired,
-      imports: [`import { defineFunction, sz, surql } from "surreal-zod";`],
+      imports: [`import { defineFunction, s, surql } from "@schemic/core";`],
     };
     const { content } = mergeUnits(src, [unit], MIRROR);
     expect(content).toContain(`RETURN "hello"`);
-    expect(content).toContain(".returns(sz.string())");
+    expect(content).toContain(".returns(s.string())");
     expect(content).not.toContain(`RETURN "hi"`);
   });
 });

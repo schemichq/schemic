@@ -5,8 +5,8 @@ import {
   defineTable,
   objectFieldsRegistry,
   SField,
+  s,
   surrealTypeRegistry,
-  sz,
 } from "../../src/pure";
 
 const defType = (f: SField) => (f.schema._zod.def as { type: string }).type;
@@ -14,37 +14,37 @@ const fmt = (f: SField) => (f.schema._zod.def as { format?: string }).format;
 
 describe("primitive builders map to the right Zod def", () => {
   test("scalars", () => {
-    expect(defType(sz.string())).toBe("string");
-    expect(defType(sz.number())).toBe("number");
-    expect(defType(sz.boolean())).toBe("boolean");
-    expect(defType(sz.null())).toBe("null");
-    expect(defType(sz.any())).toBe("any");
-    expect(defType(sz.unknown())).toBe("unknown");
-    expect(defType(sz.bigint())).toBe("bigint");
+    expect(defType(s.string())).toBe("string");
+    expect(defType(s.number())).toBe("number");
+    expect(defType(s.boolean())).toBe("boolean");
+    expect(defType(s.null())).toBe("null");
+    expect(defType(s.any())).toBe("any");
+    expect(defType(s.unknown())).toBe("unknown");
+    expect(defType(s.bigint())).toBe("bigint");
   });
 
   test("number formats", () => {
-    expect(fmt(sz.int())).toContain("int");
-    expect(fmt(sz.int32())).toContain("int");
-    expect(fmt(sz.uint32())).toContain("int");
-    expect(fmt(sz.float())).toContain("float");
+    expect(fmt(s.int())).toContain("int");
+    expect(fmt(s.int32())).toContain("int");
+    expect(fmt(s.uint32())).toContain("int");
+    expect(fmt(s.float())).toContain("float");
   });
 });
 
 describe("native types register their SurrealQL type", () => {
   test("registry entries", () => {
-    expect(surrealTypeRegistry.get(sz.datetime().schema)).toBe("datetime");
-    expect(surrealTypeRegistry.get(sz.date().schema)).toBe("datetime");
-    expect(surrealTypeRegistry.get(sz.uuid().schema)).toBe("uuid");
-    expect(surrealTypeRegistry.get(sz.bytes().schema)).toBe("bytes");
-    expect(surrealTypeRegistry.get(sz.duration().schema)).toBe("duration");
-    expect(surrealTypeRegistry.get(sz.decimal().schema)).toBe("decimal");
-    expect(surrealTypeRegistry.get(sz.file().schema)).toBe("file");
-    expect(surrealTypeRegistry.get(sz.geometry().schema)).toBe("geometry");
-    expect(surrealTypeRegistry.get(sz.geometry("point").schema)).toBe(
+    expect(surrealTypeRegistry.get(s.datetime().schema)).toBe("datetime");
+    expect(surrealTypeRegistry.get(s.date().schema)).toBe("datetime");
+    expect(surrealTypeRegistry.get(s.uuid().schema)).toBe("uuid");
+    expect(surrealTypeRegistry.get(s.bytes().schema)).toBe("bytes");
+    expect(surrealTypeRegistry.get(s.duration().schema)).toBe("duration");
+    expect(surrealTypeRegistry.get(s.decimal().schema)).toBe("decimal");
+    expect(surrealTypeRegistry.get(s.file().schema)).toBe("file");
+    expect(surrealTypeRegistry.get(s.geometry().schema)).toBe("geometry");
+    expect(surrealTypeRegistry.get(s.geometry("point").schema)).toBe(
       "geometry<point>",
     );
-    expect(surrealTypeRegistry.get(sz.recordId("user").schema)).toBe(
+    expect(surrealTypeRegistry.get(s.recordId("user").schema)).toBe(
       "record<user>",
     );
   });
@@ -52,44 +52,44 @@ describe("native types register their SurrealQL type", () => {
 
 describe("coerce builders: same SurrealQL type, looser input", () => {
   test("coerce.* maps to the same field type as the non-coerced builder", () => {
-    expect(fieldType(sz.coerce.string())).toBe(fieldType(sz.string()));
-    expect(fieldType(sz.coerce.number())).toBe(fieldType(sz.number()));
-    expect(fieldType(sz.coerce.boolean())).toBe(fieldType(sz.boolean()));
-    expect(fieldType(sz.coerce.bigint())).toBe(fieldType(sz.bigint()));
-    expect(fieldType(sz.coerce.date())).toBe("datetime");
-    expect(surrealTypeRegistry.get(sz.coerce.date().schema)).toBe("datetime");
+    expect(fieldType(s.coerce.string())).toBe(fieldType(s.string()));
+    expect(fieldType(s.coerce.number())).toBe(fieldType(s.number()));
+    expect(fieldType(s.coerce.boolean())).toBe(fieldType(s.boolean()));
+    expect(fieldType(s.coerce.bigint())).toBe(fieldType(s.bigint()));
+    expect(fieldType(s.coerce.date())).toBe("datetime");
+    expect(surrealTypeRegistry.get(s.coerce.date().schema)).toBe("datetime");
   });
 
   test("coercion runs on the input side (string -> number, 1 -> boolean)", () => {
-    expect(sz.coerce.number().schema.parse("42")).toBe(42);
-    expect(sz.coerce.boolean().schema.parse(1)).toBe(true);
+    expect(s.coerce.number().schema.parse("42")).toBe(42);
+    expect(s.coerce.boolean().schema.parse(1)).toBe(true);
   });
 });
 
 describe("non-Surreal types: present for z.* parity, rejected as table fields", () => {
   test("the builders exist and are SFields", () => {
     const builders = [
-      sz.symbol(),
-      sz.undefined(),
-      sz.void(),
-      sz.never(),
-      sz.nan(),
-      sz.custom(),
-      sz.instanceof(Date),
-      sz.promise(sz.string()),
+      s.symbol(),
+      s.undefined(),
+      s.void(),
+      s.never(),
+      s.nan(),
+      s.custom(),
+      s.instanceof(Date),
+      s.promise(s.string()),
     ];
     for (const f of builders) expect(f).toBeInstanceOf(SField);
   });
 
   test("using one as a table field throws a clear error", () => {
-    expect(() => fieldType(sz.symbol())).toThrow(/no SurrealQL type/);
-    expect(() => fieldType(sz.never())).toThrow(/no SurrealQL type/);
-    expect(() => fieldType(sz.custom())).toThrow(/no SurrealQL type/);
-    expect(() => fieldType(sz.instanceof(Date))).toThrow(/no SurrealQL type/);
+    expect(() => fieldType(s.symbol())).toThrow(/no SurrealQL type/);
+    expect(() => fieldType(s.never())).toThrow(/no SurrealQL type/);
+    expect(() => fieldType(s.custom())).toThrow(/no SurrealQL type/);
+    expect(() => fieldType(s.instanceof(Date))).toThrow(/no SurrealQL type/);
     expect(() =>
       emitStatements(
-        // @ts-expect-error - sz.symbol() is also rejected at the type level
-        defineTable("t", { x: sz.symbol() }),
+        // @ts-expect-error - s.symbol() is also rejected at the type level
+        defineTable("t", { x: s.symbol() }),
       ),
     ).toThrow(/no SurrealQL type/);
   });
@@ -97,8 +97,8 @@ describe("non-Surreal types: present for z.* parity, rejected as table fields", 
 
 describe("nullish == optional + nullable", () => {
   test("yields option<T | null>", () => {
-    expect(fieldType(sz.nullish(sz.string()))).toBe(
-      fieldType(sz.string().optional().nullable()),
+    expect(fieldType(s.nullish(s.string()))).toBe(
+      fieldType(s.string().optional().nullable()),
     );
   });
 });
@@ -112,7 +112,7 @@ describe("$surreal — declare a DDL type + optional codec", () => {
   }
 
   test("codec form: DDL derived from the wire field, round-trips, accepted in a table", () => {
-    const price = sz.instanceof(Money).$surreal(sz.string(), {
+    const price = s.instanceof(Money).$surreal(s.string(), {
       encode: (m) => m.toString(),
       decode: (s) => new Money(Number(s)),
     });
@@ -125,8 +125,8 @@ describe("$surreal — declare a DDL type + optional codec", () => {
     ).not.toThrow();
   });
 
-  test("the wire field can be any sz.* type (its DDL is derived)", () => {
-    const tags = sz.custom<Set<string>>().$surreal(sz.array(sz.string()), {
+  test("the wire field can be any s.* type (its DDL is derived)", () => {
+    const tags = s.custom<Set<string>>().$surreal(s.array(s.string()), {
       encode: (set) => [...set],
       decode: (arr) => new Set(arr),
     });
@@ -134,41 +134,38 @@ describe("$surreal — declare a DDL type + optional codec", () => {
   });
 
   test("identity form: app value stored as the wire type (no conversion)", () => {
-    expect(fieldType(sz.custom<string>().$surreal(sz.string()))).toBe("string");
+    expect(fieldType(s.custom<string>().$surreal(s.string()))).toBe("string");
   });
 });
 
 describe("composite builders", () => {
   test("object registers its SField shape", () => {
-    const o = sz.object({ a: sz.string() });
+    const o = s.object({ a: s.string() });
     expect(defType(o)).toBe("object");
     expect(objectFieldsRegistry.get(o.schema)).toBeDefined();
   });
 
   test("collections and wrappers", () => {
-    expect(defType(sz.array(sz.string()))).toBe("array");
-    expect(defType(sz.set(sz.string()))).toBe("set");
-    expect(defType(sz.record(z.string(), sz.string()))).toBe("record");
-    expect(defType(sz.map(z.string(), sz.string()))).toBe("map");
-    expect(defType(sz.union([sz.string(), sz.int()]))).toBe("union");
-    expect(defType(sz.tuple([sz.string()]))).toBe("tuple");
+    expect(defType(s.array(s.string()))).toBe("array");
+    expect(defType(s.set(s.string()))).toBe("set");
+    expect(defType(s.record(z.string(), s.string()))).toBe("record");
+    expect(defType(s.map(z.string(), s.string()))).toBe("map");
+    expect(defType(s.union([s.string(), s.int()]))).toBe("union");
+    expect(defType(s.tuple([s.string()]))).toBe("tuple");
     expect(
       defType(
-        sz.intersection(
-          sz.object({ a: sz.string() }),
-          sz.object({ b: sz.int() }),
-        ),
+        s.intersection(s.object({ a: s.string() }), s.object({ b: s.int() })),
       ),
     ).toBe("intersection");
-    expect(defType(sz.enum(["a", "b"]))).toBe("enum");
-    expect(defType(sz.literal("x"))).toBe("literal");
-    expect(defType(sz.nativeEnum({ A: "a" }))).toBe("enum");
-    expect(defType(sz.lazy(() => sz.string()))).toBe("lazy");
+    expect(defType(s.enum(["a", "b"]))).toBe("enum");
+    expect(defType(s.literal("x"))).toBe("literal");
+    expect(defType(s.nativeEnum({ A: "a" }))).toBe("enum");
+    expect(defType(s.lazy(() => s.string()))).toBe("lazy");
     expect(
       defType(
-        sz.discriminatedUnion("kind", [
-          sz.object({ kind: sz.literal("a"), a: sz.string() }),
-          sz.object({ kind: sz.literal("b"), b: sz.int() }),
+        s.discriminatedUnion("kind", [
+          s.object({ kind: s.literal("a"), a: s.string() }),
+          s.object({ kind: s.literal("b"), b: s.int() }),
         ]),
       ),
     ).toBe("union");
@@ -176,23 +173,23 @@ describe("composite builders", () => {
 
   test("every string-format builder yields a string SField", () => {
     const builders = [
-      sz.url(),
-      sz.guid(),
-      sz.nanoid(),
-      sz.cuid(),
-      sz.cuid2(),
-      sz.ulid(),
-      sz.xid(),
-      sz.ksuid(),
-      sz.ipv4(),
-      sz.ipv6(),
-      sz.cidrv4(),
-      sz.cidrv6(),
-      sz.base64(),
-      sz.base64url(),
-      sz.e164(),
-      sz.jwt(),
-      sz.emoji(),
+      s.url(),
+      s.guid(),
+      s.nanoid(),
+      s.cuid(),
+      s.cuid2(),
+      s.ulid(),
+      s.xid(),
+      s.ksuid(),
+      s.ipv4(),
+      s.ipv6(),
+      s.cidrv4(),
+      s.cidrv6(),
+      s.base64(),
+      s.base64url(),
+      s.e164(),
+      s.jwt(),
+      s.emoji(),
     ];
     for (const b of builders) {
       expect(b).toBeInstanceOf(SField);
@@ -201,14 +198,14 @@ describe("composite builders", () => {
   });
 
   test("optional / nullable wrappers", () => {
-    expect(defType(sz.optional(sz.string()))).toBe("optional");
-    expect(defType(sz.nullable(sz.string()))).toBe("nullable");
-    expect(defType(sz.string().optional())).toBe("optional");
-    expect(defType(sz.string().nullable())).toBe("nullable");
+    expect(defType(s.optional(s.string()))).toBe("optional");
+    expect(defType(s.nullable(s.string()))).toBe("nullable");
+    expect(defType(s.string().optional())).toBe("optional");
+    expect(defType(s.string().nullable())).toBe("nullable");
   });
 
   test("accepts raw Zod schemas as element/value types", () => {
-    const a = sz.array(z.string());
+    const a = s.array(z.string());
     expect(a).toBeInstanceOf(SField);
     expect(defType(a)).toBe("array");
   });
@@ -216,20 +213,20 @@ describe("composite builders", () => {
 
 describe("field method wrappers", () => {
   test("prefault fills an absent value (and validates it)", () => {
-    const f = sz.int().prefault(5);
+    const f = s.int().prefault(5);
     expect(f).toBeInstanceOf(SField);
     expect(defType(f)).toBe("prefault");
     expect(z.decode(f.schema, undefined as never)).toBe(5);
   });
 
   test("catch recovers from a parse failure", () => {
-    const f = sz.int().catch(9);
+    const f = s.int().catch(9);
     expect(defType(f)).toBe("catch");
     expect(z.decode(f.schema, "nope" as never)).toBe(9);
   });
 
   test("nullish accepts null, undefined, and the value", () => {
-    const f = sz.string().nullish();
+    const f = s.string().nullish();
     expect(defType(f)).toBe("optional");
     expect(f.schema.safeParse(null).success).toBe(true);
     expect(f.schema.safeParse(undefined).success).toBe(true);
@@ -237,10 +234,10 @@ describe("field method wrappers", () => {
   });
 
   test("unwrap peels one wrapper and keeps surreal metadata", () => {
-    expect(defType(sz.string().optional().unwrap())).toBe("string");
-    expect(defType(sz.int().default(1).unwrap())).toBe("number");
-    expect(defType(sz.string().array().unwrap())).toBe("string");
-    expect(sz.string().$comment("c").optional().unwrap().surreal.comment).toBe(
+    expect(defType(s.string().optional().unwrap())).toBe("string");
+    expect(defType(s.int().default(1).unwrap())).toBe("number");
+    expect(defType(s.string().array().unwrap())).toBe("string");
+    expect(s.string().$comment("c").optional().unwrap().surreal.comment).toBe(
       "c",
     );
   });

@@ -7,7 +7,7 @@ import { listMigrations } from "../../src/cli/meta";
 import { newMigration } from "../../src/cli/migrate";
 
 function tmpConfig(): ResolvedConfig {
-  const root = mkdtempSync(join(tmpdir(), "sz-"));
+  const root = mkdtempSync(join(tmpdir(), "s-"));
   const migrationsDir = join(root, "migrations");
   return {
     schema: "schemas",

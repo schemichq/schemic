@@ -11,7 +11,7 @@ import {
   defineFunction,
   defineRelation,
   defineTable,
-  sz,
+  s,
 } from "../../src/pure";
 import { tryConnect } from "../helpers";
 
@@ -26,20 +26,20 @@ if (!db)
 
 const User = defineTable("it_user", {
   id: z.string(),
-  name: sz.string(),
-  status: sz.string().$default(surql`"pending"`),
-  role: sz.enum(["admin", "member"]).$default(surql`"member"`),
-  createdAt: sz.datetime().$default(surql`time::now()`).$readonly(),
+  name: s.string(),
+  status: s.string().$default(surql`"pending"`),
+  role: s.enum(["admin", "member"]).$default(surql`"member"`),
+  createdAt: s.datetime().$default(surql`time::now()`).$readonly(),
 });
 
 const Native = defineTable("it_native", {
   id: z.string(),
-  tag: sz.uuid(),
-  data: sz.bytes(),
-  when: sz.datetime(),
+  tag: s.uuid(),
+  data: s.bytes(),
+  when: s.datetime(),
 });
 
-const Friend = defineRelation("it_friend", { strength: sz.number() })
+const Friend = defineRelation("it_friend", { strength: s.number() })
   .from(User)
   .to(User);
 
@@ -126,8 +126,8 @@ live("CRUD + codecs against a live DB", () => {
 
 const Evented = defineTable("it_evented", {
   id: z.string(),
-  email: sz.email(),
-  verified: sz.boolean().$default(surql`false`),
+  email: s.email(),
+  verified: s.boolean().$default(surql`false`),
 }).event("it_reverify", {
   when: surql`$before.email != $after.email`,
   then: surql`UPDATE $after.id SET verified = false`,
@@ -167,8 +167,8 @@ live("event DDL introspects + round-trips", () => {
   });
 });
 
-const Greeter = defineFunction("it_greet", { name: sz.string() })
-  .returns(sz.string())
+const Greeter = defineFunction("it_greet", { name: s.string() })
+  .returns(s.string())
   .body(surql`RETURN "Hi " + $name`);
 
 live("function DDL introspects + round-trips", () => {

@@ -6,7 +6,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, relative } from "node:path";
-import { formatForAssert } from "surreal-zod";
+import { formatForAssert } from "@schemic/core";
 import type { Surreal } from "surrealdb";
 import type { ResolvedConfig } from "./config";
 import { type Filter, filterStructured, parseFilter } from "./filter";
@@ -23,7 +23,7 @@ import {
   type StructTable,
 } from "./structure";
 
-/** The field clauses pull reverses into `sz.*` chains (sourced from `INFO … STRUCTURE`). */
+/** The field clauses pull reverses into `s.*` chains (sourced from `INFO … STRUCTURE`). */
 interface ParsedField {
   type: string;
   default?: string;
@@ -225,10 +225,10 @@ function renderRecord(targetsRaw: string, ctx?: RenderCtx): string {
     targets.length === 1
       ? JSON.stringify(targets[0])
       : `[${targets.map((t) => JSON.stringify(t)).join(", ")}]`;
-  return `sz.recordId(${arg})`;
+  return `s.recordId(${arg})`;
 }
 
-/** Map a SurrealQL type to an `sz.*` expression (`ctx` resolves `record<…>` references). */
+/** Map a SurrealQL type to an `s.*` expression (`ctx` resolves `record<…>` references). */
 function szType(type: string, ctx?: RenderCtx): string {
   const t = type.trim();
   // option<X> and the `none | X` form the DB reports.
@@ -244,56 +244,56 @@ function szType(type: string, ctx?: RenderCtx): string {
   const arr = /^array<(.+)>$/.exec(t);
   if (arr) return `${szType(arr[1], ctx)}.array()`;
   const set = /^set<(.+)>$/.exec(t);
-  if (set) return `sz.set(${szType(set[1], ctx)})`;
+  if (set) return `s.set(${szType(set[1], ctx)})`;
   const rec = /^record<(.+?)>$/.exec(t);
   if (rec) return renderRecord(rec[1], ctx);
 
-  // Literal unions: `'a' | 'b'` -> sz.enum (all strings) or a union of literals; lone -> sz.literal.
+  // Literal unions: `'a' | 'b'` -> s.enum (all strings) or a union of literals; lone -> s.literal.
   const lits = splitTopUnion(t).map(parseLiteral);
   if (lits.length && lits.every((l) => l !== null)) {
     const vals = lits.map(
       (l) => (l as { value: string | number | boolean }).value,
     );
-    if (vals.length === 1) return `sz.literal(${JSON.stringify(vals[0])})`;
+    if (vals.length === 1) return `s.literal(${JSON.stringify(vals[0])})`;
     if (vals.every((v) => typeof v === "string"))
-      return `sz.enum([${vals.map((v) => JSON.stringify(v)).join(", ")}])`;
-    return `sz.union([${vals.map((v) => `sz.literal(${JSON.stringify(v)})`).join(", ")}])`;
+      return `s.enum([${vals.map((v) => JSON.stringify(v)).join(", ")}])`;
+    return `s.union([${vals.map((v) => `s.literal(${JSON.stringify(v)})`).join(", ")}])`;
   }
 
   // Native types carrying a `<kind>` parameter (e.g. `geometry<point>`).
   const geo = /^geometry(?:<(\w+)>)?$/.exec(t);
   if (geo)
-    return geo[1] ? `sz.geometry(${JSON.stringify(geo[1])})` : "sz.geometry()";
+    return geo[1] ? `s.geometry(${JSON.stringify(geo[1])})` : "s.geometry()";
 
   switch (t) {
     case "string":
-      return "sz.string()";
+      return "s.string()";
     case "file":
-      return "sz.file()";
+      return "s.file()";
     case "int":
-      return "sz.int()";
+      return "s.int()";
     case "float":
-      return "sz.float()";
+      return "s.float()";
     case "number":
-      return "sz.number()";
+      return "s.number()";
     case "bool":
-      return "sz.boolean()";
+      return "s.boolean()";
     case "datetime":
-      return "sz.datetime()";
+      return "s.datetime()";
     case "uuid":
-      return "sz.uuid()";
+      return "s.uuid()";
     case "decimal":
-      return "sz.decimal()";
+      return "s.decimal()";
     case "duration":
-      return "sz.duration()";
+      return "s.duration()";
     case "bytes":
-      return "sz.bytes()";
+      return "s.bytes()";
     case "object":
-      return "sz.object({})";
+      return "s.object({})";
     case "any":
-      return "sz.any()";
+      return "s.any()";
     default:
-      return `sz.any() /* ${t} */`;
+      return `s.any() /* ${t} */`;
   }
 }
 
@@ -350,19 +350,19 @@ function unwrapType(type: string): {
   return { base: t, optional, nullable };
 }
 
-/** Render an `sz.*` expression for a field node, recursing into nested objects/array elements. */
+/** Render an `s.*` expression for a field node, recursing into nested objects/array elements. */
 function renderField(node: FieldNode, indent: string, ctx?: RenderCtx): string {
   const p = node.parsed;
   const objChildren = [...node.children].filter(([k]) => k !== "*");
   const star = node.children.get("*");
   const wrap = p ? unwrapType(p.type) : null;
   // A `string` field whose ASSERT is exactly a baked `string::is_<fmt>($value)` round-trips back to
-  // the format builder (`sz.email()`, …) — the assert is the only signal, and it's dropped below
+  // the format builder (`s.email()`, …) — the assert is the only signal, and it's dropped below
   // since the builder re-bakes it. Combined/extra asserts don't match, so they stay `string` + assert.
   const fmt = p?.assert !== undefined ? formatForAssert(p.assert) : undefined;
   let expr: string;
   if (p && wrap?.base === "object") {
-    // Rebuild sz.object from dotted children (empty if none) — even when wrapped in
+    // Rebuild s.object from dotted children (empty if none) — even when wrapped in
     // option<…>/| null, so optional/nullable/flexible nested objects keep their shape.
     const inner = objChildren.length
       ? `{\n${objChildren
@@ -372,33 +372,33 @@ function renderField(node: FieldNode, indent: string, ctx?: RenderCtx): string {
           )
           .join("\n")}\n${indent}}`
       : "{}";
-    expr = `sz.object(${inner})`;
+    expr = `s.object(${inner})`;
     if (p.flexible) expr += ".loose()"; // FLEXIBLE — accepts arbitrary keys
     if (wrap.nullable) expr += ".nullable()";
     if (wrap.optional) expr += ".optional()";
   } else if (p && star && /^(array|set)\b/.test(wrap?.base ?? "")) {
     // Any array/set: the element's full structure (incl. nested sub-fields) lives in the `*`
-    // child — fold it into `<elem>.array()` / `sz.set(<elem>)`. This beats parsing the element
+    // child — fold it into `<elem>.array()` / `s.set(<elem>)`. This beats parsing the element
     // type from the parent kind, which would lose the element's sub-fields.
     const elem = renderField(star, indent, ctx);
     expr = /^set\b/.test(wrap?.base ?? "")
-      ? `sz.set(${elem})`
+      ? `s.set(${elem})`
       : `${elem}.array()`;
     if (wrap?.nullable) expr += ".nullable()";
     if (wrap?.optional) expr += ".optional()";
   } else if (p && wrap?.base === "string" && fmt) {
-    expr = `sz.${fmt}()`;
+    expr = `s.${fmt}()`;
     if (wrap.nullable) expr += ".nullable()";
     if (wrap.optional) expr += ".optional()";
   } else if (!p) {
-    expr = "sz.any()";
+    expr = "s.any()";
   } else {
     expr = szType(p.type, ctx);
   }
 
   if (p) {
     if (p.default !== undefined) {
-      // A bare literal (false/42/"x") round-trips as a plain JS value the `sz` API accepts directly;
+      // A bare literal (false/42/"x") round-trips as a plain JS value the `s` API accepts directly;
       // only non-literal expressions (time::now(), …) need the `surql` tag. Wrapping literals in
       // `surql` would churn hand-authored `.$default(false)` into `.$default(surql\`false\`)`.
       const method = p.defaultAlways ? "$defaultAlways" : "$default";
@@ -470,7 +470,7 @@ function renderTableConst(
   const open = ctx.usesSelf ? "}))" : "})";
 
   const body: string[] = [head];
-  if (!isRelation) body.push(`  id: sz.string(),`);
+  if (!isRelation) body.push(`  id: s.string(),`);
   body.push(fieldLines);
 
   let close = open;
@@ -530,13 +530,13 @@ function unitModule(u: RenderedUnit): string {
 /** The rendered unit (const statement + the imports it needs) for one table/relation. */
 function tableUnit(t: StructTable, ctx: RenderCtx): RenderedUnit {
   const { code, factory } = renderTableConst(t, ctx);
-  const imports = [`import { sz, ${factory} } from "surreal-zod";`];
+  const imports = [`import { s, ${factory} } from "@schemic/core";`];
   // Cross-table value imports (one per referenced table, sorted, self excluded).
   for (const dep of [...ctx.imports].filter((d) => d !== t.name).sort()) {
     imports.push(`import { ${ctx.constOf(dep)} } from "./${dep}";`);
   }
   // `surql` lives in surrealdb (where hand-authored files import it from) — a separate line, never
-  // folded into the surreal-zod import (which would reprint/reorder that import on every pull).
+  // folded into the @schemic/core import (which would reprint/reorder that import on every pull).
   if (code.includes("surql`"))
     imports.push(`import { surql } from "surrealdb";`);
   return {
@@ -813,8 +813,8 @@ export function applyPull(plan: PullPlan): string[] {
 /** The rendered unit for one db-level function. */
 function functionUnit(fn: StructFunction): RenderedUnit {
   const code = renderFunctionConst(fn);
-  const names = ["defineFunction", ...(code.includes("sz.") ? ["sz"] : [])];
-  const imports = [`import { ${names.join(", ")} } from "surreal-zod";`];
+  const names = ["defineFunction", ...(code.includes("s.") ? ["s"] : [])];
+  const imports = [`import { ${names.join(", ")} } from "@schemic/core";`];
   // `surql` from surrealdb on its own line (see tableUnit) — a function body is always a surql expr.
   if (code.includes("surql`"))
     imports.push(`import { surql } from "surrealdb";`);
@@ -830,7 +830,7 @@ function functionUnit(fn: StructFunction): RenderedUnit {
 /** The rendered unit for one db-level access def. */
 function accessUnit(a: StructAccess): RenderedUnit {
   const code = renderAccessConst(a);
-  const imports = [`import { defineAccess } from "surreal-zod";`];
+  const imports = [`import { defineAccess } from "@schemic/core";`];
   if (code.includes("surql`"))
     imports.push(`import { surql } from "surrealdb";`);
   return {
@@ -884,9 +884,9 @@ function mergeImports(units: RenderedUnit[]): string[] {
         .filter(Boolean))
         set.add(s);
     }
-  // surreal-zod first, then the relative cross-file imports (sorted).
+  // @schemic/core first, then the relative cross-file imports (sorted).
   order.sort((a, b) =>
-    a === "surreal-zod" ? -1 : b === "surreal-zod" ? 1 : a.localeCompare(b),
+    a === "@schemic/core" ? -1 : b === "@schemic/core" ? 1 : a.localeCompare(b),
   );
   return order.map(
     (src) =>
@@ -956,9 +956,9 @@ function assembleCombined(
     functions.length > 0 ||
     accesses.length > 0 ||
     ordered.some((r) => r.usesSurql);
-  const names = ["sz", ...factories];
-  const imports = [`import { ${names.join(", ")} } from "surreal-zod";`];
-  // `surql` from surrealdb on its own line (see tableUnit), kept out of the surreal-zod import.
+  const names = ["s", ...factories];
+  const imports = [`import { ${names.join(", ")} } from "@schemic/core";`];
+  // `surql` from surrealdb on its own line (see tableUnit), kept out of the @schemic/core import.
   if (usesSurql) imports.push(`import { surql } from "surrealdb";`);
   const body = [...ordered.map((r) => r.code), ...fnCode, ...accessCode].join(
     "\n\n",

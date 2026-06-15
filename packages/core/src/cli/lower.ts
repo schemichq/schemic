@@ -1,4 +1,4 @@
-// The Struct-IR lowering for the OFFLINE side: turn an in-memory surreal-zod `TableDef`/`RelationDef`
+// The Struct-IR lowering for the OFFLINE side: turn an in-memory @schemic/core `TableDef`/`RelationDef`
 // (and standalone `defineFunction`/`defineAccess`/`defineEvent`) into the `Struct` IR, so it can be
 // `normalize`d and structurally diffed against the live DB's `fromInfo` (introspectStructured). This
 // is the inverse of `pull` and the keystone of the Struct-IR effort. See docs/STRUCT-IR.md.
@@ -16,7 +16,7 @@ import {
   fieldType,
   inferField,
   inline,
-} from "surreal-zod";
+} from "@schemic/core";
 import { BoundQuery, escapeIdent } from "surrealdb";
 import type {
   AccessDef,

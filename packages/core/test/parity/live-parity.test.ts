@@ -1,12 +1,12 @@
 /**
  * PARITY — live round-trip against SurrealDB.
  *
- * Proves the DDL surreal-zod emits is ACCEPTED by a real SurrealDB (probed on 3.1.3)
+ * Proves the DDL @schemic/core emits is ACCEPTED by a real SurrealDB (probed on 3.1.3)
  * and round-trips through `INFO FOR TABLE ... STRUCTURE`. Skipped automatically when no
  * DB is reachable (CI / no DB), exactly like `test/live`.
  *
  * ISOLATION: everything runs inside a dedicated scratch namespace `__sz_parity` and a
- * fresh database that is DROPPED on teardown. It NEVER touches the `tracker`/`surreal-zod`
+ * fresh database that is DROPPED on teardown. It NEVER touches the `tracker`/`@schemic/core`
  * namespaces. We drive the SDK directly with explicit `.use({ namespace, database })`
  * rather than the shared `tryConnect` helper (whose default db must not be written to).
  */
@@ -19,7 +19,7 @@ import {
   defineFunction,
   defineRelation,
   defineTable,
-  sz,
+  s,
 } from "../../src/pure";
 
 const NS = "__sz_parity";
@@ -89,53 +89,53 @@ async function applyEach(
 // A broad mixed-type table exercising most of the type system + every field clause.
 const Big = defineTable("pl_big", {
   id: z.string(),
-  s: sz.string(),
-  n: sz.number(),
-  i: sz.int(),
-  fl: sz.float(),
-  dec: sz.decimal(),
-  bi: sz.bigint(),
-  b: sz.boolean(),
-  dt: sz.datetime(),
-  dur: sz.duration(),
-  byt: sz.bytes(),
-  uid: sz.uuid(),
-  fil: sz.file(),
-  geo: sz.geometry(),
-  geop: sz.geometry("point"),
-  geocol: sz.geometry("collection"),
-  em: sz.email(),
-  url: sz.url(),
-  ip: sz.ipv4(),
-  lit: sz.literal("admin"),
-  litn: sz.literal(42),
-  en: sz.enum(["a", "b"]),
-  un: sz.union([sz.string(), sz.number()]),
-  tup: sz.tuple([sz.string(), sz.number()]),
-  rec: sz.recordId("pl_big"),
-  arr: sz.array(sz.string()),
-  arrr: sz.array(sz.recordId("pl_big")),
-  setf: sz.set(sz.string()),
-  recmap: sz.record(z.string(), sz.number()),
-  opt: sz.string().optional(),
-  nul: sz.string().nullable(),
-  nush: sz.string().nullish(),
-  obj: sz.object({ a: sz.string(), b: sz.number().optional() }),
-  flex: sz.object({ a: sz.string() }).flexible(),
-  arrobj: sz.array(sz.object({ x: sz.string() })),
-  def: sz.string().$default("pending"),
-  defa: sz.datetime().$defaultAlways(surql`time::now()`),
-  val: sz.string().$value(surql`string::lowercase($value)`),
-  asrt: sz.number().$assert(surql`$value > 0`),
-  ro: sz.string().$readonly(),
-  cmt: sz.string().$comment("a field"),
-  perm: sz.string().$permissions({ select: true, update: false }),
-  intl: sz.string().$internal(),
-  idx: sz.string().index(),
-  uniq: sz.string().unique(),
+  s: s.string(),
+  n: s.number(),
+  i: s.int(),
+  fl: s.float(),
+  dec: s.decimal(),
+  bi: s.bigint(),
+  b: s.boolean(),
+  dt: s.datetime(),
+  dur: s.duration(),
+  byt: s.bytes(),
+  uid: s.uuid(),
+  fil: s.file(),
+  geo: s.geometry(),
+  geop: s.geometry("point"),
+  geocol: s.geometry("collection"),
+  em: s.email(),
+  url: s.url(),
+  ip: s.ipv4(),
+  lit: s.literal("admin"),
+  litn: s.literal(42),
+  en: s.enum(["a", "b"]),
+  un: s.union([s.string(), s.number()]),
+  tup: s.tuple([s.string(), s.number()]),
+  rec: s.recordId("pl_big"),
+  arr: s.array(s.string()),
+  arrr: s.array(s.recordId("pl_big")),
+  setf: s.set(s.string()),
+  recmap: s.record(z.string(), s.number()),
+  opt: s.string().optional(),
+  nul: s.string().nullable(),
+  nush: s.string().nullish(),
+  obj: s.object({ a: s.string(), b: s.number().optional() }),
+  flex: s.object({ a: s.string() }).flexible(),
+  arrobj: s.array(s.object({ x: s.string() })),
+  def: s.string().$default("pending"),
+  defa: s.datetime().$defaultAlways(surql`time::now()`),
+  val: s.string().$value(surql`string::lowercase($value)`),
+  asrt: s.number().$assert(surql`$value > 0`),
+  ro: s.string().$readonly(),
+  cmt: s.string().$comment("a field"),
+  perm: s.string().$permissions({ select: true, update: false }),
+  intl: s.string().$internal(),
+  idx: s.string().index(),
+  uniq: s.string().unique(),
 });
 
-live("DB accepts surreal-zod's generated DDL", () => {
+live("DB accepts @schemic/core's generated DDL", () => {
   test("the whole mixed-type table applies with ZERO rejections", async () => {
     const rejected = await applyEach(
       db!,
@@ -164,7 +164,7 @@ live("DB accepts surreal-zod's generated DDL", () => {
   });
 
   test("relations (restricted + open) apply cleanly", async () => {
-    const Rel = defineRelation("pl_rel", { weight: sz.number() })
+    const Rel = defineRelation("pl_rel", { weight: s.number() })
       .from(Big)
       .to(Big);
     const Open = defineRelation("pl_rel_open", {});
@@ -185,8 +185,8 @@ live("DB accepts surreal-zod's generated DDL", () => {
     });
     const comp = defineTable("pl_comp", {
       id: z.string(),
-      a: sz.string(),
-      b: sz.string(),
+      a: s.string(),
+      b: s.string(),
     }).index("ab_idx", ["a", "b"], { unique: true });
     for (const t of [any, drop, perms, comp]) {
       expect(
@@ -198,7 +198,7 @@ live("DB accepts surreal-zod's generated DDL", () => {
   test("event / function / access (record, jwt, bearer) apply cleanly", async () => {
     const ev = defineTable("pl_ev", {
       id: z.string(),
-      email: sz.email(),
+      email: s.email(),
     }).event("reverify", {
       when: surql`$before.email != $after.email`,
       then: surql`UPDATE $after.id SET email = $after.email`,
@@ -207,8 +207,8 @@ live("DB accepts surreal-zod's generated DDL", () => {
       await applyEach(db!, emitTable(ev, { exists: "overwrite" })),
     ).toEqual([]);
 
-    const fn = defineFunction("pl_greet", { name: sz.string() })
-      .returns(sz.string())
+    const fn = defineFunction("pl_greet", { name: s.string() })
+      .returns(s.string())
       .body(surql`RETURN "Hi " + $name`);
     expect(
       await applyEach(db!, emitDefStatement(fn, { exists: "overwrite" }).ddl),
@@ -233,12 +233,12 @@ live("DB accepts surreal-zod's generated DDL", () => {
 });
 
 live("batch 1 + 2 features round-trip on the DB", () => {
-  test("sz.set() -> set<T>, sized array<T,N> / set<T,N> round-trip", async () => {
+  test("s.set() -> set<T>, sized array<T,N> / set<T,N> round-trip", async () => {
     const T = defineTable("pl_b2_coll", {
       id: z.string(),
-      tags: sz.set(sz.string()),
-      sized: sz.array(sz.string(), { max: 3 }),
-      sizedset: sz.set(sz.int(), { max: 5 }),
+      tags: s.set(s.string()),
+      sized: s.array(s.string(), { max: 3 }),
+      sizedset: s.set(s.int(), { max: 5 }),
     });
     expect(await applyEach(db!, emitTable(T, { exists: "overwrite" }))).toEqual(
       [],
@@ -255,9 +255,9 @@ live("batch 1 + 2 features round-trip on the DB", () => {
   test("record REFERENCE [ON DELETE …] via .reference()", async () => {
     const T = defineTable("pl_b2_ref", {
       id: z.string(),
-      author: sz.recordId("pl_b2_ref").reference({ onDelete: "cascade" }),
-      friends: sz
-        .array(sz.recordId("pl_b2_ref"))
+      author: s.recordId("pl_b2_ref").reference({ onDelete: "cascade" }),
+      friends: s
+        .array(s.recordId("pl_b2_ref"))
         .reference({ onDelete: "unset" }),
     });
     expect(await applyEach(db!, emitTable(T, { exists: "overwrite" }))).toEqual(
@@ -279,16 +279,16 @@ live("batch 1 + 2 features round-trip on the DB", () => {
   test("all 10 batch-2 string::is_* validators are accepted (names are real)", async () => {
     const T = defineTable("pl_b2_val", {
       id: z.string(),
-      a: sz.alpha(),
-      an: sz.alphanum(),
-      asc: sz.ascii(),
-      num: sz.numeric(),
-      sv: sz.semver(),
-      hx: sz.hexadecimal(),
-      lat: sz.latitude(),
-      lon: sz.longitude(),
-      ip: sz.ip(),
-      dom: sz.domain(),
+      a: s.alpha(),
+      an: s.alphanum(),
+      asc: s.ascii(),
+      num: s.numeric(),
+      sv: s.semver(),
+      hx: s.hexadecimal(),
+      lat: s.latitude(),
+      lon: s.longitude(),
+      ip: s.ip(),
+      dom: s.domain(),
     });
     expect(await applyEach(db!, emitTable(T, { exists: "overwrite" }))).toEqual(
       [],
@@ -296,10 +296,10 @@ live("batch 1 + 2 features round-trip on the DB", () => {
   });
 });
 
-// --- These document live-confirmed GAPS: features the DB ACCEPTS but surreal-zod
+// --- These document live-confirmed GAPS: features the DB ACCEPTS but @schemic/core
 //     cannot express (or expresses lossily). Marked todo so the suite stays green. ---
-live("known gaps (DB supports these; surreal-zod does not)", () => {
-  test("object-literal union is accepted by the DB (surreal-zod emits plain object)", async () => {
+live("known gaps (DB supports these; @schemic/core does not)", () => {
+  test("object-literal union is accepted by the DB (@schemic/core emits plain object)", async () => {
     const rejected = await applyEach(
       db!,
       `DEFINE TABLE pl_litobj SCHEMAFULL; DEFINE FIELD r ON TABLE pl_litobj TYPE { kind: "a", x: string } | { kind: "b", y: number };`,
@@ -307,10 +307,7 @@ live("known gaps (DB supports these; surreal-zod does not)", () => {
     expect(rejected).toEqual([]);
   });
 
-  test.todo(
-    "GAP: FULLTEXT / vector (HNSW) indexes + DEFINE ANALYZER — see PARITY.md",
-    () => {},
-  );
+  test.todo("GAP: FULLTEXT / vector (HNSW) indexes + DEFINE ANALYZER — see PARITY.md", () => {});
 });
 
 afterAll(async () => {

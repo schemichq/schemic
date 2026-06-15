@@ -185,7 +185,7 @@ async function recordApplied(
  * — respecting `filter`, the same one `pull` used — and, when it differs from the stored snapshot,
  * write a migration capturing that delta, recorded as already-applied (those objects already exist
  * in the DB, so the DDL must not re-run). Only what is actually in the DB is baselined: any
- * hand-written schema not yet in the DB stays pending for the next `sz gen`. Returns the migration's
+ * hand-written schema not yet in the DB stays pending for the next `schemic gen`. Returns the migration's
  * metadata, or `created: false` when nothing changed.
  */
 export async function baseline(
@@ -195,7 +195,7 @@ export async function baseline(
 ): Promise<GenerateResult> {
   // What actually exists in the live DB (canonical INFO snapshot), used ONLY to scope the baseline:
   // the keys tell us which objects the DB really has, so hand-written schema not yet in the DB stays
-  // pending for the next `sz gen` instead of being silently marked applied.
+  // pending for the next `schemic gen` instead of being silently marked applied.
   const live = filterSnapshot(
     await introspect(
       db,
@@ -204,7 +204,7 @@ export async function baseline(
     filter,
   );
   const liveKeys = new Set(Object.keys(live.statements));
-  // The snapshot stores GENERATOR-form DDL (what `sz gen`/`sz diff` compare against offline), NOT the
+  // The snapshot stores GENERATOR-form DDL (what `schemic gen`/`schemic diff` compare against offline), NOT the
   // INFO form — the two canonical forms differ (e.g. default `PERMISSIONS`, `ON TABLE`), so mixing
   // them would make every later offline diff phantom. We take the just-pulled disk schema and keep
   // only the objects that are present in the DB.
@@ -247,7 +247,7 @@ export function clearMigrationFiles(config: ResolvedConfig): string[] {
  * fresh baseline). When the live DB already matches the schema (`drift` false), drop the now-stale
  * applied-records and record the baseline as already-applied — its DDL is never re-run. When the DB
  * differs (`drift` true), leave the history untouched and report the baseline as still pending (the
- * next `sz migrate` applies it). Caller handles the no-connection case.
+ * next `schemic migrate` applies it). Caller handles the no-connection case.
  */
 export async function reconcileBaseline(
   db: Surreal,
@@ -301,7 +301,7 @@ async function acquireLock(db: Surreal, config: ResolvedConfig): Promise<void> {
     );
   } catch {
     throw new Error(
-      "Migrations are locked — another run is in progress. If it's stale, run `sz unlock`.",
+      "Migrations are locked — another run is in progress. If it's stale, run `schemic unlock`.",
     );
   }
 }

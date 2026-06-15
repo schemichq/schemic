@@ -1,4 +1,4 @@
-// Surgically merge freshly-pulled `sz.*` definitions into existing schema files, instead of
+// Surgically merge freshly-pulled `s.*` definitions into existing schema files, instead of
 // overwriting them. Uses magicast (recast under the hood), so untouched code — user comments,
 // extra imports, unrelated consts, hand-formatted fields — survives. The live DB wins on any
 // object/field it defines; the only thing at risk is LOCAL-ONLY content (a field or whole const

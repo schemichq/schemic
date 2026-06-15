@@ -95,9 +95,9 @@ describe("renderPerFile", () => {
     expect(out).toContain(".$default(0)");
     expect(out).toContain(".$default(surql`time::now()`)");
     expect(out).not.toContain(".$default(surql`false`)");
-    // surql is imported from surrealdb, NOT folded into the surreal-zod import.
+    // surql is imported from surrealdb, NOT folded into the @schemic/core import.
     expect(out).toContain(`import { surql } from "surrealdb";`);
-    expect(out).toMatch(/import \{ sz, defineTable \} from "surreal-zod";/);
+    expect(out).toContain(`import { s, defineTable } from "@schemic/core";`);
   });
 });
 
@@ -142,9 +142,9 @@ describe("pull reverses native codecs / string formats", () => {
       sf("site", "option<string>", { assert: "string::is_url($value)" }),
       sf("handle", "string", { assert: "string::is_alpha($value)" }),
     ]);
-    expect(out).toContain("email: sz.email()");
-    expect(out).toContain("site: sz.url().optional()");
-    expect(out).toContain("handle: sz.alpha()");
+    expect(out).toContain("email: s.email()");
+    expect(out).toContain("site: s.url().optional()");
+    expect(out).toContain("handle: s.alpha()");
     expect(out).not.toContain("string::is_email");
   });
 
@@ -154,7 +154,7 @@ describe("pull reverses native codecs / string formats", () => {
       sf("notes", "string", { assert: "string::len($value) < 5" }),
     ]);
     expect(out).toContain(
-      "notes: sz.string().$assert(surql`string::len($value) < 5`)",
+      "notes: s.string().$assert(surql`string::len($value) < 5`)",
     );
   });
 
@@ -164,7 +164,7 @@ describe("pull reverses native codecs / string formats", () => {
       sf("doc", "file"),
       sf("loc", "geometry<point>"),
     ]);
-    expect(out).toContain("doc: sz.file()");
-    expect(out).toContain('loc: sz.geometry("point")');
+    expect(out).toContain("doc: s.file()");
+    expect(out).toContain('loc: s.geometry("point")');
   });
 });

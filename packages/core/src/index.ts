@@ -1,7 +1,7 @@
 /**
- * surreal-zod — author SurrealDB schemas with Zod.
+ * @schemic/core — author SurrealDB schemas with Zod.
  *
- * Define tables/relations with `sz.*` (a drop-in for `z.*`), generate SurrealQL
+ * Define tables/relations with `s.*` (a drop-in for `z.*`), generate SurrealQL
  * DDL, and map JS <-> DB across Zod's two channels via codecs (`decode`/`encode`).
  */
 
@@ -53,7 +53,7 @@ export {
   RelationDef,
   SField,
   SystemView,
+  s,
   surrealTypeRegistry,
-  sz,
   TableDef,
 } from "./pure";

@@ -1,4 +1,4 @@
-import type { DefineStatement } from "surreal-zod";
+import type { DefineStatement } from "@schemic/core";
 import { escapeIdent, type Surreal } from "surrealdb";
 import type { Snapshot } from "./meta";
 
@@ -341,7 +341,7 @@ function canonicalAccess(a: StructAccess): string {
 
 /**
  * Fold an array element type into a BARE `array`/`set` kind, so a field stored as `array` with an
- * `array.* TYPE object` element compares equal to `array<object>` (the typed form surreal-zod
+ * `array.* TYPE object` element compares equal to `array<object>` (the typed form @schemic/core
  * emits). Typed kinds (`array<X>`) and the `.*` itself are left alone — the element is in the type.
  */
 function foldArrayElement(kind: string, elementKind: string): string {
@@ -383,7 +383,7 @@ const keyOf = (s: Pick<DefineStatement, "kind" | "name" | "table">) =>
 /**
  * Build a canonical-DDL {@link Snapshot} from the structured database (tables + db-level functions).
  * Skips implicit `id` (and `in`/`out` on relations) and childless `*` array-element fields —
- * surreal-zod's emit doesn't produce them, so the snapshot must not either (else diff would
+ * @schemic/core's emit doesn't produce them, so the snapshot must not either (else diff would
  * try to drop/add them).
  */
 export function structuredSnapshot({

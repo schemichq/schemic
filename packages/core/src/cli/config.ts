@@ -1,18 +1,18 @@
 import { existsSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { createJiti } from "jiti";
 import type {
   AuthLevel,
   SurrealZodCheckEmbedded,
   SurrealZodConfig,
   SurrealZodConnection,
-} from "surreal-zod/config";
+} from "@schemic/core/config";
+import { createJiti } from "jiti";
 import { escapeIdent, Surreal } from "surrealdb";
 
 const CONFIG_NAMES = [
-  "surreal-zod.config.ts",
-  "surreal-zod.config.mjs",
-  "surreal-zod.config.js",
+  "schemic.config.ts",
+  "schemic.config.mjs",
+  "schemic.config.js",
 ];
 
 const DEFAULT_SCHEMA = "./database/schema";
@@ -89,9 +89,9 @@ export interface ResolvedConfig extends SurrealZodConfig {
   metaDir: string;
   /** Name of the table that records applied migrations. */
   migrationsTable: string;
-  /** Connection for `sz check`'s remote-engine replay (`config.check.db` merged over `db`). */
+  /** Connection for `schemic check`'s remote-engine replay (`config.check.db` merged over `db`). */
   checkDb: SurrealZodConnection;
-  /** Engine for `sz check`'s migration replay. Default `"auto"`; an object → embedded engine. */
+  /** Engine for `schemic check`'s migration replay. Default `"auto"`; an object → embedded engine. */
   checkEngine: "auto" | "binary" | "remote" | SurrealZodCheckEmbedded;
   /** Path to the `surreal` CLI for the auto/binary check engines. Default `"surreal"`. */
   checkBinary: string;
@@ -100,7 +100,7 @@ export interface ResolvedConfig extends SurrealZodConfig {
 /**
  * A jiti instance for loading the project's TS/ESM modules. Caches are off so `--watch`
  * re-reads edited schema files instead of returning a stale cached module. (Bare deps like
- * `surreal-zod` are still native-imported, so its codec registries stay shared.)
+ * `@schemic/core` are still native-imported, so its codec registries stay shared.)
  */
 export function makeJiti() {
   return createJiti(import.meta.url, {
@@ -110,7 +110,7 @@ export function makeJiti() {
   });
 }
 
-/** Find, load, and normalize `surreal-zod.config.ts`, applying env overrides for `db`. */
+/** Find, load, and normalize `schemic.config.ts`, applying env overrides for `db`. */
 export async function loadConfig(opts?: {
   config?: string;
   cwd?: string;
@@ -121,7 +121,7 @@ export async function loadConfig(opts?: {
     : CONFIG_NAMES.map((n) => resolve(cwd, n)).find((p) => existsSync(p));
   if (!path || !existsSync(path)) {
     throw new Error(
-      "No surreal-zod.config.ts found — run `surreal-zod init` first.",
+      "No schemic.config.ts found — run `schemic init` first.",
     );
   }
 

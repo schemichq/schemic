@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { DefineStatement } from "surreal-zod";
+import type { DefineStatement } from "@schemic/core";
 import {
   type Filter,
   filterSnapshot,

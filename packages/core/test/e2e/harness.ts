@@ -1,4 +1,4 @@
-// End-to-end harness: drive the real `sz` CLI as a subprocess against a throwaway in-memory
+// End-to-end harness: drive the real `schemic` CLI as a subprocess against a throwaway in-memory
 // SurrealDB, in a throwaway project directory. This exercises the WHOLE app — arg parsing, config
 // loading, jiti schema loading, the live DB, and the exact stdout/exit-code a user would see —
 // rather than calling command functions directly (which we can't anyway: the CLI calls
@@ -22,7 +22,7 @@ import {
   surrealBinaryAvailable,
 } from "../../src/cli/engine";
 
-/** packages/core — the surreal-zod package root (this file is test/e2e/harness.ts). */
+/** packages/core — the @schemic/core package root (this file is test/e2e/harness.ts). */
 export const CORE = resolve(import.meta.dir, "../..");
 const CLI = join(CORE, "src/cli/index.ts");
 
@@ -50,9 +50,9 @@ export interface Harness {
   url: string;
   /** A fresh, unique database name (the server is shared; the database isolates each test). */
   freshDb(): string;
-  /** Scaffold an empty project dir with a node_modules symlink farm so `surreal-zod` resolves. */
+  /** Scaffold an empty project dir with a node_modules symlink farm so `@schemic/core` resolves. */
   scaffold(): string;
-  /** Run `sz <args>` in `cwd`, pointed at database `db`. Extra `env` overrides the defaults. */
+  /** Run `schemic <args>` in `cwd`, pointed at database `db`. Extra `env` overrides the defaults. */
   run(
     args: string[],
     opts: { cwd: string; db: string; env?: Record<string, string> },
@@ -65,11 +65,11 @@ export interface Harness {
   cleanup(): Promise<void>;
 }
 
-/** Build the node_modules symlink farm (surreal-zod -> core, plus surrealdb + zod). */
+/** Build the node_modules symlink farm (@schemic/core -> core, plus surrealdb + zod). */
 function linkDeps(root: string): void {
   const nm = join(root, "node_modules");
-  mkdirSync(nm, { recursive: true });
-  symlinkSync(CORE, join(nm, "surreal-zod"));
+  mkdirSync(join(nm, "@schemic"), { recursive: true }); // scoped pkg needs its scope dir
+  symlinkSync(CORE, join(nm, "@schemic", "core"));
   for (const dep of ["surrealdb", "zod"]) {
     symlinkSync(realpathSync(join(CORE, "node_modules", dep)), join(nm, dep));
   }
@@ -115,7 +115,7 @@ export async function startHarness(): Promise<Harness> {
     url: server.url,
     freshDb: () => `t${++dbN}`,
     scaffold() {
-      const root = mkdtempSync(join(tmpdir(), "sz-e2e-"));
+      const root = mkdtempSync(join(tmpdir(), "s-e2e-"));
       linkDeps(root);
       roots.push(root);
       return root;
@@ -145,13 +145,13 @@ export function tableFile(body: string): string {
 /** The `user` table the sample schema ships with, optionally with extra field lines spliced in. */
 export function userSchema(extraFields = ""): string {
   return `import { surql } from "surrealdb";
-import { sz, defineTable } from "surreal-zod";
+import { s, defineTable } from "@schemic/core";
 
 export const User = defineTable("user", {
-  id: sz.string(),
-  name: sz.string(),
-  email: sz.email(),${extraFields ? `\n${extraFields}` : ""}
-  createdAt: sz.datetime().$default(surql\`time::now()\`).$readonly(),
+  id: s.string(),
+  name: s.string(),
+  email: s.email(),${extraFields ? `\n${extraFields}` : ""}
+  createdAt: s.datetime().$default(surql\`time::now()\`).$readonly(),
 });
 `;
 }

@@ -1,4 +1,4 @@
-# surreal-zod Query Builder — Design Exploration
+# @schemic/core Query Builder — Design Exploration
 
 > Status: **research + design + feasibility proof**. Nothing here is built into the
 > package. The companion POC under [`poc/`](./poc/query-builder-poc.ts) proves the
@@ -8,7 +8,7 @@
 
 ## 1. Goal & positioning
 
-Build a **type-safe SurrealQL query builder** on top of surreal-zod's `sz` schemas
+Build a **type-safe SurrealQL query builder** on top of @schemic/core's `s` schemas
 and codecs, with the explicit goal of **replacing the official `surqlize` ORM**.
 
 Targets:
@@ -18,19 +18,19 @@ Targets:
   standard function library, and `DEFINE`/admin statements.
 - **End-to-end type safety + autocomplete** — table/field names, operators, graph
   edges, and projections are all inferred and completed.
-- **Single source of truth.** The `sz` table definition already drives DDL
+- **Single source of truth.** The `s` table definition already drives DDL
   generation (`defineTable`) *and* JS↔DB codecs. The query builder becomes the
   third consumer of the same definition — no parallel type system.
 
 ### Our differentiator vs surqlize
 
 surqlize defines a **parallel** type system (`t.string()`, `t.date()`, …) that is
-*only* a query/validation model. surreal-zod's `sz.*` is a **Zod schema +
+*only* a query/validation model. @schemic/core's `s.*` is a **Zod schema +
 SurrealQL DDL metadata + codec**, so:
 
-| Capability | surqlize | surreal-zod builder |
+| Capability | surqlize | @schemic/core builder |
 |---|---|---|
-| Schema authoring | `t.*` (query-only) | `sz.*` (Zod, also drives DDL + codecs) |
+| Schema authoring | `t.*` (query-only) | `s.*` (Zod, also drives DDL + codecs) |
 | Read results | validated against `t.*`, dates via ad-hoc `DateType.parse` | **decoded through Zod codecs → real `App` types** (`Date`, `string`-from-`Uuid`, `RecordId`, `Decimal`, `Duration`, `bytes`…) |
 | Writes | plain values | encoded through codecs (`App` → wire) |
 | DDL | none | shared `defineTable` from the same def |
@@ -91,7 +91,7 @@ A `Workable` is a 3-symbol triple: render fn, type, context.
 - The **chained-generic** builder (`SelectQuery<…, E>` threading the row type).
 
 **Do differently:**
-- **Drive everything from `sz`/`TableDef`, not a parallel `t.*`.** Field types come
+- **Drive everything from `s`/`TableDef`, not a parallel `t.*`.** Field types come
   from the table's `ZodObject` (`pure.ts:497-509`), not from `AbstractType`.
 - **Results decode through codecs.** Where surqlize calls `AbstractType.parse`, we
   call `TableDef.decode` / a per-projection Zod codec so reads return real `App`
@@ -110,7 +110,7 @@ A `Workable` is a 3-symbol triple: render fn, type, context.
 ## 3. Proposed architecture
 
 ```
-sz.table(...) ─► TableDef<Name, Shape>           (already exists)
+s.table(...) ─► TableDef<Name, Shape>           (already exists)
                    │  .object : ZodObject         → App<T> = z.output<.object>
                    │  .decode/.encode (codecs)    → wire ↔ App
                    ▼
@@ -157,7 +157,7 @@ Reuse the edge-scan pattern but source it from `relation()` defs: `OutgoingEdges
 A `fn` namespace (`fn.string.lowercase(ref)`, `fn.time.now()`, …) where each entry
 is typed `(args) => FieldRef<Ret>`, generated to parity. User functions: a
 `defineFunction(name, [paramSchemas], retSchema)` returning a typed callable, with
-`retSchema` an `sz` field so the result decodes.
+`retSchema` an `s` field so the result decodes.
 
 ---
 
@@ -166,7 +166,7 @@ is typed `(args) => FieldRef<Ret>`, generated to parity. User functions: a
 | # | Problem | Approach | Risk |
 |---|---|---|---|
 | 1 | **Zod type → child type + idiom path** (nested object/array/link access in callbacks). surqlize gets this free from `AbstractType.get`; we must derive it from Zod internals. | A `FieldOf<ZodType, Key>` mapped type over `z.output`, plus a runtime walker reading `schema._zod.def` (already done in `ddl.ts:inferField`). | **Med.** Zod v4 `_zod.def` is semi-internal; nested optional/array unwrapping is fiddly but `pure.ts`/`ddl.ts` already do it. |
-| 2 | **Typing the function library at parity** (~25 namespaces, hundreds of fns). | Hand-write like surqlize, or codegen from the SurrealQL function list. Map each return to an `sz` field so results decode. | **Med (volume, not depth).** Mechanical but large; biggest single time sink. |
+| 2 | **Typing the function library at parity** (~25 namespaces, hundreds of fns). | Hand-write like surqlize, or codegen from the SurrealQL function list. Map each return to an `s` field so results decode. | **Med (volume, not depth).** Mechanical but large; biggest single time sink. |
 | 3 | **Expressions in TS** — modeling SurrealQL's operator/precedence surface as composable typed `Expr`s. | Keep `Expr` opaque (boolean); operators are methods on `FieldRef` + free `and/or/not`. Don't model precedence in types — render with parens. | **Low–Med.** Pragmatic; full operator coverage is breadth. |
 | 4 | **Recursion / inference depth** — graph recursion (`{..}`, shortest-path), deeply nested FETCH, self-referential links (`task.depends_on.task`). | Bound recursion depth in conditional types; degrade to `RecordId[]`/`unknown` past a limit (surqlize does this — `FetchPaths` only constrains the head). | **Med–High.** TS instantiation-depth (the `Type instantiation is excessively deep` ceiling) is the classic wall for graph recursion. |
 | 5 | **Inference performance & autocomplete quality** | Cache `App<TD>`/`Row<TD>` via interface merging; avoid gratuitous distributive conditionals; prefer mapped types over recursive ones. | **Med.** Large schemas × the Proxy mixin can make hovers slow; needs profiling (`tsc --extendedDiagnostics`). |
@@ -242,7 +242,7 @@ match).
 **Locked (2026-06-06):**
 - **Decoding:** decode by default → `App` types via codecs; `.raw()` opts out per query.
 - **Entrypoint:** free functions are primary — `select(db, Table)…` (works with any db at any time, tree-shakeable). PLUS an optional registry that *binds* a db and re-exposes `newSession()`/`forkSession()` from the underlying Surreal session. Rejected `orm(db, ...defs)`: the `...defs` spread doesn't scale, and schemas already come from the `TableDef` passed to `select()`.
-- **Boundary:** a `surreal-zod/orm` subpath export (opt-in, keeps core lean).
+- **Boundary:** a `@schemic/core/orm` subpath export (opt-in, keeps core lean).
 - **Status:** design committed; **build deferred** — finish other backlog first.
 - **Still open:** function-library parity strategy (hand-write vs codegen from the SurrealQL function index) — a Phase-4 call.
 
@@ -261,7 +261,7 @@ match).
 4. **Function-library parity strategy.** Hand-write (full control, large) vs codegen
    from the SurrealQL function index (faster, needs a generator)? Affects phase-4
    effort the most.
-5. **Naming / package boundary.** New subpath (`surreal-zod/query`) or separate
+5. **Naming / package boundary.** New subpath (`@schemic/core/query`) or separate
    package? And builder result default — `App[]` vs single-record helpers
    (`.one()`/`.val()`).
 
@@ -270,7 +270,7 @@ match).
 ## 8. Feasibility verdict
 
 **Realistic — with scoping.** The load-bearing mechanism (drive a fluent builder
-from an `sz` table and infer the **decoded** result type, including projections and
+from an `s` table and infer the **decoded** result type, including projections and
 codec types) **compiles today** — see the POC. Reads returning real `App` types are
 a genuine, shippable edge over surqlize that falls out almost for free.
 

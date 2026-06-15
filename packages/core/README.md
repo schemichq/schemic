@@ -1,8 +1,8 @@
-# surreal-zod
+# @schemic/core
 
 Author [SurrealDB](https://surrealdb.com) schemas with [Zod](https://zod.dev).
 
-- **`sz.*`** — a drop-in for `z.*` that also carries SurrealQL metadata.
+- **`s.*`** — a drop-in for `z.*` that also carries SurrealQL metadata.
 - **`defineTable` / `defineField`** — generate `DEFINE TABLE` / `DEFINE FIELD` DDL from your schema.
 - **`decode` / `encode`** — map DB rows ⇄ app objects across Zod's two channels via codecs
   (`DateTime`⇄`Date`, `Uuid`⇄`string`, `RecordId`, …).
@@ -10,7 +10,7 @@ Author [SurrealDB](https://surrealdb.com) schemas with [Zod](https://zod.dev).
 ## Install
 
 ```bash
-bun add surreal-zod surrealdb zod
+bun add @schemic/core surrealdb zod
 ```
 
 `surrealdb` and `zod` are peer dependencies.
@@ -18,19 +18,19 @@ bun add surreal-zod surrealdb zod
 ## Quick start
 
 ```ts
-import { sz, table, relation, defineTable, type App } from "surreal-zod";
+import { s, table, relation, defineTable, type App } from "@schemic/core";
 import { surql } from "surrealdb";
 
 export const User = table("user", {
-  id: sz.string(),                                  // -> record<user>
-  name: sz.string(),
-  email: sz.email(),
-  status: sz.string().$default("pending"),          // DB-side DEFAULT
-  createdAt: sz.datetime().$default(surql`time::now()`).$readonly(),
+  id: s.string(),                                  // -> record<user>
+  name: s.string(),
+  email: s.email(),
+  status: s.string().$default("pending"),          // DB-side DEFAULT
+  createdAt: s.datetime().$default(surql`time::now()`).$readonly(),
 });
 
 export const Friend = relation("friend", {
-  strength: sz.number().$gte(0).$lte(1), // -> ASSERT $value >= 0 AND $value <= 1
+  strength: s.number().$gte(0).$lte(1), // -> ASSERT $value >= 0 AND $value <= 1
 })
   .from(User)
   .to(User);
@@ -70,9 +70,9 @@ shaping), that's just `z.encode(table.object, app)`.
 Field-level codecs work the same way directly on a field:
 
 ```ts
-sz.datetime().decode(dbDateTime); // -> Date
-sz.datetime().encode(new Date()); // -> DateTime
-sz.uuid().encode("0190b6e0-…");   // -> Uuid
+s.datetime().decode(dbDateTime); // -> Date
+s.datetime().encode(new Date()); // -> DateTime
+s.uuid().encode("0190b6e0-…");   // -> Uuid
 ```
 
 See [`examples/`](./examples) for a full schema, a live demo (`bun examples/demo.ts`),
@@ -80,7 +80,7 @@ and a small CRUD server.
 
 ## Nested objects
 
-`sz.object({ ... })` builds a nested SurrealQL `object`, and surreal-zod looks *through* it so
+`s.object({ ... })` builds a nested SurrealQL `object`, and @schemic/core looks *through* it so
 each nested field keeps its own DDL metadata and create-optionality:
 
 - A nested field with a DB `$default` (or `$value(..., { optional: true })`) is
@@ -89,10 +89,10 @@ each nested field keeps its own DDL metadata and create-optionality:
 
   ```ts
   const Project = table("project", {
-    name: sz.string(),
-    settings: sz.object({
-      isPublic: sz.boolean().$default(surql`false`),
-      defaultView: sz.enum(["list", "board"]).$default("list"),
+    name: s.string(),
+    settings: s.object({
+      isPublic: s.boolean().$default(surql`false`),
+      defaultView: s.enum(["list", "board"]).$default("list"),
     }),
   });
 
@@ -120,7 +120,7 @@ and `encodePartial` with `MERGE`. **Warning:** sending a *partial* payload with 
 
 ### Atomic (object-level) validation
 
-Only objects built with `sz.object` are flattened/recursed. A field that holds a **raw, refined
+Only objects built with `s.object` are flattened/recursed. A field that holds a **raw, refined
 `z.object`** is validated **atomically** — provide it whole, and its object-level `refine` runs:
 
 ```ts
@@ -166,13 +166,13 @@ field op you must set it `false` explicitly.
 A field can accumulate several `ASSERT` fragments that AND-combine into one `ASSERT`
 clause (deduped, order preserved). There are three sources:
 
-- **Format builders bake by default.** `sz.email()` → `ASSERT string::is_email($value)`,
-  `sz.url()` → `string::is_url`, and likewise `ulid` / `ipv4` / `ipv6` — i.e. every
+- **Format builders bake by default.** `s.email()` → `ASSERT string::is_email($value)`,
+  `s.url()` → `string::is_url`, and likewise `ulid` / `ipv4` / `ipv6` — i.e. every
   builder whose `string::is_*` validator exists on the server. SurrealDB **3.x** uses the
   underscore form (`string::is_email`, **not** `string::is::email`). Formats with no
   server validator (`nanoid`, `cuid`/`cuid2`, `xid`, `ksuid`, `cidrv4`/`cidrv6`, `guid`,
   `base64`/`base64url`, `e164`, `jwt`, `emoji`) stay assert-free — no fabricated regex.
-  `sz.uuid()` is the native `uuid` type (no assert).
+  `s.uuid()` is the native `uuid` type (no assert).
 - **`$`-constraints** apply the matching Zod check app-side **and** push a type-aware DB
   fragment (string vs. number is read from the schema):
   - `.$min(n)` / `.$max(n)` — string: `string::len($value) >= n` / `<= n`; number: `$value >= n` / `<= n`
@@ -184,9 +184,9 @@ clause (deduped, order preserved). There are three sources:
   number bounds), best-effort.
 
 ```ts
-sz.string().$min(1).$max(120);                 // string::len($value) >= 1 AND ... <= 120
-sz.number().$gte(0).$lte(1);                    // $value >= 0 AND $value <= 1
-sz.email().$assert(surql`$value != $forbidden`); // string::is_email($value) AND $value != $forbidden
+s.string().$min(1).$max(120);                 // string::len($value) >= 1 AND ... <= 120
+s.number().$gte(0).$lte(1);                    // $value >= 0 AND $value <= 1
+s.email().$assert(surql`$value != $forbidden`); // string::is_email($value) AND $value != $forbidden
 ```
 
 ## Live queries
@@ -201,7 +201,7 @@ await db.live("user", (action, value) => {
 });
 ```
 
-A typed query + live layer (results decoded automatically) is planned in `surreal-zod/orm`.
+A typed query + live layer (results decoded automatically) is planned in `@schemic/core/orm`.
 
 ## Develop
 

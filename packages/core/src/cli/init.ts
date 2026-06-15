@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-const CONFIG = `import { defineConfig } from "surreal-zod/config";
+const CONFIG = `import { defineConfig } from "@schemic/core/config";
 
 export default defineConfig({
   // schema and migrations default to ./database/schema and ./database/migrations.
@@ -16,7 +16,7 @@ export default defineConfig({
     password: process.env.SURREAL_PASS,
     authLevel: "root", // "root" | "namespace" | "database"
   },
-  // \`sz check\` replays your migrations to confirm they reproduce the schema. By default ("auto") it
+  // \`schemic check\` replays your migrations to confirm they reproduce the schema. By default ("auto") it
   // spins up an ephemeral in-memory SurrealDB from your local \`surreal\` CLI — your exact version, no
   // external server, your real database untouched. Falls back to the \`db\` server if the CLI is
   // missing. To always use a server (and keep it off production) point the replay at a scratch one:
@@ -27,19 +27,19 @@ export default defineConfig({
 `;
 
 const SAMPLE_SCHEMA = `import { surql } from "surrealdb";
-import { sz, defineTable } from "surreal-zod";
+import { s, defineTable } from "@schemic/core";
 
 export const User = defineTable("user", {
-  id: sz.string(),
-  name: sz.string(),
-  email: sz.email(),
-  createdAt: sz.datetime().$default(surql\`time::now()\`).$readonly(),
+  id: s.string(),
+  name: s.string(),
+  email: s.email(),
+  createdAt: s.datetime().$default(surql\`time::now()\`).$readonly(),
 });
 `;
 
 const SEED = `import type { Surreal } from "surrealdb";
 
-/** Run with \`surreal-zod seed\`. Receives a connected client. */
+/** Run with \`schemic seed\`. Receives a connected client. */
 export default async function seed(db: Surreal) {
   // await db.create("user", { name: "Ada", email: "ada@example.com" });
 }
@@ -63,7 +63,7 @@ export interface InitResult {
 /** Scaffold the `database/` layout + config + sample schema. Never overwrites existing files. */
 export function init(cwd: string): InitResult {
   const files: Record<string, string> = {
-    "surreal-zod.config.ts": CONFIG,
+    "schemic.config.ts": CONFIG,
     "database/schema/tables/user.ts": SAMPLE_SCHEMA,
     "database/seed.ts": SEED,
     "database/migrations/meta/_snapshot.json": INITIAL_SNAPSHOT,

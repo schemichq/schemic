@@ -1,4 +1,4 @@
-// `sz pull` end to end: idempotency (the regression lock for the surql-import / literal-default
+// `schemic pull` end to end: idempotency (the regression lock for the surql-import / literal-default
 // fixes), the local-only guard (--merge / --discard), and the documented codec asymmetries.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -39,13 +39,13 @@ e2e("pull", () => {
         root,
         "database/schema/tables/flag.ts",
         `import { surql } from "surrealdb";
-import { sz, defineTable } from "surreal-zod";
+import { s, defineTable } from "@schemic/core";
 
 export const Flag = defineTable("flag", {
-  id: sz.string(),
-  enabled: sz.boolean().$default(false),
-  count: sz.int().$default(0),
-  createdAt: sz.datetime().$default(surql\`time::now()\`),
+  id: s.string(),
+  enabled: s.boolean().$default(false),
+  count: s.int().$default(0),
+  createdAt: s.datetime().$default(surql\`time::now()\`),
 });
 `,
       );
@@ -63,10 +63,10 @@ export const Flag = defineTable("flag", {
       // An expression default keeps surql, imported from surrealdb on its own line.
       expect(flag).toContain(".$default(surql`time::now()`)");
       expect(flag).toContain(`import { surql } from "surrealdb";`);
-      // surql is NEVER folded into the surreal-zod import.
+      // surql is NEVER folded into the @schemic/core import.
       const szLine = flag
         .split("\n")
-        .find((l) => l.includes('from "surreal-zod"'));
+        .find((l) => l.includes('from "@schemic/core"'));
       expect(szLine).toBeDefined();
       expect(szLine).not.toContain("surql");
 
@@ -84,11 +84,11 @@ export const Flag = defineTable("flag", {
       H.write(
         root,
         "database/schema/tables/flag.ts",
-        `import { sz, defineTable } from "surreal-zod";
+        `import { s, defineTable } from "@schemic/core";
 
 export const Flag = defineTable("flag", {
-  id: sz.string(),
-  enabled: sz.boolean().$default(false),
+  id: s.string(),
+  enabled: s.boolean().$default(false),
 });
 `,
       );
@@ -98,12 +98,12 @@ export const Flag = defineTable("flag", {
       H.write(
         root,
         "database/schema/tables/flag.ts",
-        `import { sz, defineTable } from "surreal-zod";
+        `import { s, defineTable } from "@schemic/core";
 
 export const Flag = defineTable("flag", {
-  id: sz.string(),
-  enabled: sz.boolean().$default(false),
-  note: sz.string().optional(),
+  id: s.string(),
+  enabled: s.boolean().$default(false),
+  note: s.string().optional(),
 });
 `,
       );
@@ -137,11 +137,11 @@ export const Flag = defineTable("flag", {
       H.write(
         root,
         "database/schema/tables/flag.ts",
-        `import { sz, defineTable } from "surreal-zod";
+        `import { s, defineTable } from "@schemic/core";
 
 export const Flag = defineTable("flag", {
-  id: sz.string(),
-  enabled: sz.boolean().$default(false),
+  id: s.string(),
+  enabled: s.boolean().$default(false),
 });
 `,
       );
@@ -149,12 +149,12 @@ export const Flag = defineTable("flag", {
       H.write(
         root,
         "database/schema/tables/flag.ts",
-        `import { sz, defineTable } from "surreal-zod";
+        `import { s, defineTable } from "@schemic/core";
 
 export const Flag = defineTable("flag", {
-  id: sz.string(),
-  enabled: sz.boolean().$default(false),
-  note: sz.string().optional(),
+  id: s.string(),
+  enabled: s.boolean().$default(false),
+  note: s.string().optional(),
 });
 `,
       );
@@ -168,9 +168,9 @@ export const Flag = defineTable("flag", {
   );
 
   test(
-    "string-format builders reverse from their baked assert (sz.email(), not string + ASSERT)",
+    "string-format builders reverse from their baked assert (s.email(), not string + ASSERT)",
     async () => {
-      // The sample `user.ts` uses sz.email(); the db stores it as `string ASSERT string::is_email`.
+      // The sample `user.ts` uses s.email(); the db stores it as `string ASSERT string::is_email`.
       // pull recovers the builder from that exact assert (and drops the now-redundant $assert).
       const root = H.scaffold();
       const db = H.freshDb();
@@ -180,7 +180,7 @@ export const Flag = defineTable("flag", {
 
       await run(["pull", "--write"]);
       const user = H.read(root, "database/schema/tables/user.ts");
-      expect(user).toContain("email: sz.email()");
+      expect(user).toContain("email: s.email()");
       expect(user).not.toContain("string::is_email"); // the assert was reversed, not re-emitted
       expect(user).not.toMatch(/email:.*\$assert/);
 
@@ -195,11 +195,11 @@ export const Flag = defineTable("flag", {
     "whole-table local-only: surfaced in preview, kept by --merge, file deleted by --discard",
     async () => {
       const { root, run } = await setupBare();
-      const flag = `import { sz, defineTable } from "surreal-zod";
+      const flag = `import { s, defineTable } from "@schemic/core";
 
 export const Flag = defineTable("flag", {
-  id: sz.string(),
-  enabled: sz.boolean().$default(false),
+  id: s.string(),
+  enabled: s.boolean().$default(false),
 });
 `;
       H.write(root, "database/schema/tables/flag.ts", flag);
@@ -209,11 +209,11 @@ export const Flag = defineTable("flag", {
       H.write(
         root,
         "database/schema/tables/draft.ts",
-        `import { sz, defineTable } from "surreal-zod";
+        `import { s, defineTable } from "@schemic/core";
 
 export const Draft = defineTable("draft", {
-  id: sz.string(),
-  title: sz.string(),
+  id: s.string(),
+  title: s.string(),
 });
 `,
       );
@@ -255,12 +255,12 @@ export const Draft = defineTable("draft", {
       H.write(
         root,
         "database/schema/tables/mix.ts",
-        `import { sz, defineTable } from "surreal-zod";
+        `import { s, defineTable } from "@schemic/core";
 
 export const HELPER = 42;
 export const Mix = defineTable("mix", {
-  id: sz.string(),
-  name: sz.string(),
+  id: s.string(),
+  name: s.string(),
 });
 `,
       );
@@ -312,11 +312,11 @@ e2e("migration guards", () => {
       H.write(
         root,
         "database/schema/tables/post.ts",
-        `import { sz, defineTable } from "surreal-zod";
+        `import { s, defineTable } from "@schemic/core";
 
 export const Post = defineTable("post", {
-  id: sz.string(),
-  title: sz.string(),
+  id: s.string(),
+  title: s.string(),
 });
 `,
       );

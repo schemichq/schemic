@@ -1,8 +1,8 @@
 /**
- * Configuration for the `surreal-zod` CLI. Author it in `surreal-zod.config.ts`:
+ * Configuration for the `schemic` CLI. Author it in `schemic.config.ts`:
  *
  * ```ts
- * import { defineConfig } from "surreal-zod/config";
+ * import { defineConfig } from "@schemic/core/config";
  *
  * export default defineConfig({
  *   db: {
@@ -59,7 +59,7 @@ export interface EmbeddedCapabilities {
 }
 
 /**
- * Run `sz check`'s replay on an EMBEDDED in-process SurrealDB via the optional `@surrealdb/node`
+ * Run `schemic check`'s replay on an EMBEDDED in-process SurrealDB via the optional `@surrealdb/node`
  * package (install it yourself — `npm i -D @surrealdb/node`). Options pass through to
  * `createNodeEngines`; `backend`/`path` choose the storage. No external server, your data untouched.
  */
@@ -78,7 +78,7 @@ export interface SurrealZodCheckEmbedded {
   transaction_timeout?: number;
 }
 
-/** `sz check` options. */
+/** `schemic check` options. */
 export interface SurrealZodCheck {
   /**
    * Engine for the migration replay:
@@ -96,14 +96,14 @@ export interface SurrealZodCheck {
   /**
    * Connection used for the `remote` engine, merged field-by-field over `db`. The replay spins up
    * throwaway scratch databases and drops them — it NEVER reads or writes your real database — but it
-   * DOES reach the server. Point this at a local/scratch SurrealDB so `sz check` never touches
+   * DOES reach the server. Point this at a local/scratch SurrealDB so `schemic check` never touches
    * production:
    *
    * ```ts
    * check: { db: { url: "ws://localhost:8000", namespace: "scratch" } }
    * ```
    *
-   * Falls back to `db` for any field you omit. (`sz check --schema` skips the replay entirely.)
+   * Falls back to `db` for any field you omit. (`schemic check --schema` skips the replay entirely.)
    */
   db?: Partial<SurrealZodConnection>;
 }
@@ -120,13 +120,13 @@ export interface SurrealZodConfig {
   db: SurrealZodConnection;
   /** Table that records applied migrations. Defaults to `_migrations`. */
   migrationsTable?: string;
-  /** Optional seed script run by `surreal-zod seed`. */
+  /** Optional seed script run by `schemic seed`. */
   seed?: string;
-  /** `sz check` overrides — e.g. a dedicated connection for its migration replay. */
+  /** `schemic check` overrides — e.g. a dedicated connection for its migration replay. */
   check?: SurrealZodCheck;
 }
 
-/** Identity helper that types a `surreal-zod.config.ts` default export. */
+/** Identity helper that types a `schemic.config.ts` default export. */
 export function defineConfig(config: SurrealZodConfig): SurrealZodConfig {
   return config;
 }

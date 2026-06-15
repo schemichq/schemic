@@ -1,11 +1,11 @@
 /**
  * CANONICAL PARITY — the two DDL emitters must agree.
  *
- * surreal-zod has two "canonical DDL" emitters that have to produce identical output for an
+ * @schemic/core has two "canonical DDL" emitters that have to produce identical output for an
  * equivalent schema, or the diff engine reports phantom changes:
- *   - the GENERATOR (`emit` in `ddl.ts`)        — TS defs -> DDL, used by offline `sz gen`/`sz diff`
+ *   - the GENERATOR (`emit` in `ddl.ts`)        — TS defs -> DDL, used by offline `schemic gen`/`schemic diff`
  *   - the INTROSPECTOR (`canonical*` in `structure.ts`) — live `INFO … STRUCTURE` -> DDL, used by
- *     `sz diff --live`/shadow-verify
+ *     `schemic diff --live`/shadow-verify
  * They are independent today (each world compares against itself), but shadow-verify will compare
  * one against the other — so they must converge. This harness applies a broad corpus to a real DB,
  * reads it back, and asserts the generator's snapshot DDL equals the introspected DDL per object.
@@ -21,12 +21,7 @@ import { z } from "zod";
 import { buildSnapshot } from "../../src/cli/diff";
 import { introspect } from "../../src/cli/introspect";
 import { emitDefStatement, emitTable } from "../../src/ddl";
-import {
-  defineFunction,
-  defineRelation,
-  defineTable,
-  sz,
-} from "../../src/pure";
+import { defineFunction, defineRelation, defineTable, s } from "../../src/pure";
 
 const NS = "__sz_canon";
 const DB = "canon";
@@ -69,29 +64,29 @@ if (!db) console.warn("[canonical-parity] SurrealDB unreachable — skipping");
 // A broad corpus exercising the clause space (types, perms, defaults, indexes, events, relation, fn).
 const Big = defineTable("c_big", {
   id: z.string(),
-  s: sz.string(),
-  i: sz.int(),
-  n: sz.number(),
-  dt: sz.datetime(),
-  b: sz.boolean(),
-  uid: sz.uuid(),
-  rec: sz.recordId("c_big"),
-  arr: sz.array(sz.string()),
-  arrn: sz.array(sz.string(), { max: 3 }),
-  setf: sz.set(sz.string()),
-  un: sz.union([sz.string(), sz.number()]),
-  opt: sz.string().optional(),
-  obj: sz.object({ a: sz.string(), b: sz.number().optional() }),
-  flex: sz.object({ a: sz.string() }).flexible(),
-  def: sz.string().$default("pending"),
-  defa: sz.datetime().$defaultAlways(surql`time::now()`),
-  val: sz.string().$value(surql`string::lowercase($value)`),
-  asrt: sz.number().$assert(surql`$value > 0`),
-  ro: sz.string().$readonly(),
-  cmt: sz.string().$comment("a field"),
-  perm: sz.string().$permissions({ select: true, update: false }),
-  idx: sz.string().index(),
-  uniq: sz.string().unique(),
+  s: s.string(),
+  i: s.int(),
+  n: s.number(),
+  dt: s.datetime(),
+  b: s.boolean(),
+  uid: s.uuid(),
+  rec: s.recordId("c_big"),
+  arr: s.array(s.string()),
+  arrn: s.array(s.string(), { max: 3 }),
+  setf: s.set(s.string()),
+  un: s.union([s.string(), s.number()]),
+  opt: s.string().optional(),
+  obj: s.object({ a: s.string(), b: s.number().optional() }),
+  flex: s.object({ a: s.string() }).flexible(),
+  def: s.string().$default("pending"),
+  defa: s.datetime().$defaultAlways(surql`time::now()`),
+  val: s.string().$value(surql`string::lowercase($value)`),
+  asrt: s.number().$assert(surql`$value > 0`),
+  ro: s.string().$readonly(),
+  cmt: s.string().$comment("a field"),
+  perm: s.string().$permissions({ select: true, update: false }),
+  idx: s.string().index(),
+  uniq: s.string().unique(),
 });
 const Schemaless = defineTable("c_less", { id: z.string() }).schemaless();
 const Commented = defineTable("c_cmt", { id: z.string() }).comment("hello");
@@ -101,10 +96,10 @@ const Perms = defineTable("c_perms", { id: z.string() }).permissions({
 });
 const Comp = defineTable("c_comp", {
   id: z.string(),
-  a: sz.string(),
-  b: sz.string(),
+  a: s.string(),
+  b: s.string(),
 }).index("ab", ["a", "b"], { unique: true });
-const Ev = defineTable("c_ev", { id: z.string(), email: sz.email() }).event(
+const Ev = defineTable("c_ev", { id: z.string(), email: s.email() }).event(
   "re",
   {
     when: surql`$before.email != $after.email`,
@@ -112,9 +107,9 @@ const Ev = defineTable("c_ev", { id: z.string(), email: sz.email() }).event(
     then: surql`UPDATE $after.id SET email = $after.email`,
   },
 );
-const Rel = defineRelation("c_rel", { weight: sz.number() }).from(Big).to(Big);
-const Fn = defineFunction("c_greet", { name: sz.string() })
-  .returns(sz.string())
+const Rel = defineRelation("c_rel", { weight: s.number() }).from(Big).to(Big);
+const Fn = defineFunction("c_greet", { name: s.string() })
+  .returns(s.string())
   .body(surql`RETURN "Hi " + $name`);
 
 // The corpus mixes TableDef/RelationDef/FunctionDef; the CLI snapshot/emit helpers take their own

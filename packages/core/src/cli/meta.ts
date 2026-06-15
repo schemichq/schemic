@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import type { DefineStatement } from "surreal-zod";
+import type { DefineStatement } from "@schemic/core";
 import type { DbStructured } from "./structure";
 
 /** A snapshot statement: the emitted DDL plus the source file it came from (for `diff` annotations). */

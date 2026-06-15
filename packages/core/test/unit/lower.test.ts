@@ -7,25 +7,25 @@ import {
   defineFunction,
   defineRelation,
   defineTable,
-  sz,
+  s,
 } from "../../src/pure";
 
 // fromTableDef lowers an in-memory TableDef to the raw Struct IR; normalizeTable then folds it to
 // the canonical form both lowerings converge on. We assert the NORMALIZED struct (the comparable
 // shape), exercising the paths/clauses fromTableDef must populate. No live DB required.
 
-const User = defineTable("user", { name: sz.string() });
-const Post = defineTable("post", { title: sz.string() });
+const User = defineTable("user", { name: s.string() });
+const Post = defineTable("post", { title: s.string() });
 
 describe("fromTableDef", () => {
   test("plain table: primitives + optional + default + assert", () => {
     const t = defineTable("user", {
-      email: sz.string().$assert(surql`string::is_email($value)`),
-      age: sz.int().optional(),
+      email: s.string().$assert(surql`string::is_email($value)`),
+      age: s.int().optional(),
       // optional + default: normalize strips `option<>` to `int` (a defaulted field is always
       // present, so INFO/the emitter store the bare type — both sides converge on `int`).
-      count: sz.int().optional().$default(0),
-      active: sz.boolean().$default(true),
+      count: s.int().optional().$default(0),
+      active: s.boolean().$default(true),
     });
     expect(normalizeTable(fromTableDef(t))).toEqual({
       name: "user",
@@ -49,7 +49,7 @@ describe("fromTableDef", () => {
 
   test("nested object field flattens to dotted paths (parent-before-child)", () => {
     const t = defineTable("account", {
-      address: sz.object({ city: sz.string(), zip: sz.string().optional() }),
+      address: s.object({ city: s.string(), zip: s.string().optional() }),
     });
     expect(normalizeTable(fromTableDef(t)).fields).toEqual([
       { name: "address", kind: "object", table: "account" },
@@ -59,7 +59,7 @@ describe("fromTableDef", () => {
   });
 
   test("array of primitive -> array<T> (no `.*`)", () => {
-    const t = defineTable("post", { tags: sz.array(sz.string()) });
+    const t = defineTable("post", { tags: s.array(s.string()) });
     expect(normalizeTable(fromTableDef(t)).fields).toEqual([
       { name: "tags", kind: "array<string>", table: "post" },
     ]);
@@ -67,7 +67,7 @@ describe("fromTableDef", () => {
 
   test("array of object emits `.*` element folded into the parent, keeps `.*` subfield", () => {
     const t = defineTable("post", {
-      authors: sz.array(sz.object({ handle: sz.string() })),
+      authors: s.array(s.object({ handle: s.string() })),
     });
     expect(normalizeTable(fromTableDef(t)).fields).toEqual([
       { name: "authors", kind: "array<object>", table: "post" },
@@ -77,7 +77,7 @@ describe("fromTableDef", () => {
 
   test("record reference with ON DELETE", () => {
     const t = defineTable("comment", {
-      author: sz.recordId("user").reference({ onDelete: "cascade" }),
+      author: s.recordId("user").reference({ onDelete: "cascade" }),
     });
     expect(normalizeTable(fromTableDef(t)).fields).toEqual([
       {
@@ -90,7 +90,7 @@ describe("fromTableDef", () => {
   });
 
   test("relation: in/out land in kind, not as fields", () => {
-    const wrote = defineRelation("wrote", { at: sz.datetime() })
+    const wrote = defineRelation("wrote", { at: s.datetime() })
       .from(User)
       .to(Post);
     const out = normalizeTable(fromTableDef(wrote));
@@ -102,7 +102,7 @@ describe("fromTableDef", () => {
 
   test("field with non-default permissions is kept", () => {
     const t = defineTable("secret", {
-      data: sz.string().$permissions({ select: false }),
+      data: s.string().$permissions({ select: false }),
     });
     expect(normalizeTable(fromTableDef(t)).fields).toEqual([
       {
@@ -116,7 +116,7 @@ describe("fromTableDef", () => {
 
   test("single-field index + table comment/changefeed", () => {
     const t = defineTable("user", {
-      email: sz.string().unique(),
+      email: s.string().unique(),
     })
       .comment("users")
       .changefeed("1h", { includeOriginal: true });
@@ -131,8 +131,8 @@ describe("fromTableDef", () => {
 
 describe("fromStandalone", () => {
   test("function -> StructFunction (args, brace-wrapped block, returns)", () => {
-    const greet = defineFunction("greet", { name: sz.string() })
-      .returns(sz.string())
+    const greet = defineFunction("greet", { name: s.string() })
+      .returns(s.string())
       .body(surql`RETURN "hi " + $name`);
     expect(fromStandalone(greet)).toEqual({
       name: "greet",

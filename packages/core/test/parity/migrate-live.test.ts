@@ -4,11 +4,11 @@
  * Proves the migration engine's clause-level `ALTER FIELD` (and index `REMOVE`+`DEFINE`) deltas
  * are ACCEPTED by a real SurrealDB and round-trip: apply v1, apply the generated up-migration to
  * reach v2 (verified via `INFO FOR TABLE … STRUCTURE`), then the down-migration to revert to v1.
- * Auto-skips when no DB is reachable. Imports `defineTable`/`sz` by PACKAGE name so the table
- * types line up with the `surreal-zod`-typed diff-engine signatures.
+ * Auto-skips when no DB is reachable. Imports `defineTable`/`s` by PACKAGE name so the table
+ * types line up with the `@schemic/core`-typed diff-engine signatures.
  */
 import { afterAll, describe, expect, test } from "bun:test";
-import { defineTable, emitTable, sz } from "surreal-zod";
+import { defineTable, emitTable, s } from "@schemic/core";
 import { Surreal } from "surrealdb";
 import { z } from "zod";
 import { buildSnapshot, diffSnapshots } from "../../src/cli/diff";
@@ -77,15 +77,15 @@ live("clause-level ALTER migrations apply + round-trip", () => {
   test("ALTER FIELD deltas + index REMOVE/DEFINE, up then down", async () => {
     const v1 = defineTable("ml_user", {
       id: z.string(),
-      name: sz.string(),
-      email: sz.string(),
-      age: sz.int().index(),
+      name: s.string(),
+      email: s.string(),
+      age: s.int().index(),
     });
     const v2 = defineTable("ml_user", {
       id: z.string(),
-      name: sz.string().optional(), // TYPE string -> option<string>
-      email: sz.string().$comment("addr"), // + COMMENT
-      age: sz.int().unique(), // index -> unique (REMOVE + DEFINE)
+      name: s.string().optional(), // TYPE string -> option<string>
+      email: s.string().$comment("addr"), // + COMMENT
+      age: s.int().unique(), // index -> unique (REMOVE + DEFINE)
     });
 
     // Apply v1.
@@ -117,8 +117,8 @@ live("clause-level ALTER migrations apply + round-trip", () => {
   });
 
   test("ALTER TABLE clause deltas (schema mode + comment), up then down", async () => {
-    const v1 = defineTable("ml_t", { id: z.string(), name: sz.string() });
-    const v2 = defineTable("ml_t", { id: z.string(), name: sz.string() })
+    const v1 = defineTable("ml_t", { id: z.string(), name: s.string() });
+    const v2 = defineTable("ml_t", { id: z.string(), name: s.string() })
       .schemaless()
       .comment("notes");
 

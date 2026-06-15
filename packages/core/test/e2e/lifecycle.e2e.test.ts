@@ -29,7 +29,7 @@ e2e("lifecycle: init -> gen -> migrate -> status -> diff -> check", () => {
       // init scaffolds the project.
       const init = await run(["init"]);
       expect(init.code).toBe(0);
-      expect(init.out).toContain("surreal-zod.config.ts");
+      expect(init.out).toContain("schemic.config.ts");
       expect(init.out).toContain("database/schema/tables/user.ts");
       expect(init.out).toContain("Initialized");
 

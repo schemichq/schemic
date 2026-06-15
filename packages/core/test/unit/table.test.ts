@@ -2,13 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { DateTime, RecordId, surql } from "surrealdb";
 import { z } from "zod";
 import { emitTable } from "../../src/ddl";
-import { defineRelation, defineTable, RecordIdField, sz } from "../../src/pure";
+import { defineRelation, defineTable, RecordIdField, s } from "../../src/pure";
 
 const defType = (s: z.ZodType) => (s._zod.def as { type: string }).type;
 
 describe("smart id", () => {
   test("a plain id schema becomes record<self, idType>", () => {
-    const T = defineTable("widget", { id: z.string(), name: sz.string() });
+    const T = defineTable("widget", { id: z.string(), name: s.string() });
     const id = T.fields.id as RecordIdField<"widget">;
     expect(id).toBeInstanceOf(RecordIdField);
     expect(id.tables).toEqual(["widget"]);
@@ -17,7 +17,7 @@ describe("smart id", () => {
   });
 
   test("an omitted id defaults to record<self>", () => {
-    const T = defineTable("widget", { name: sz.string() });
+    const T = defineTable("widget", { name: s.string() });
     const id = T.fields.id as RecordIdField<"widget">;
     expect(id).toBeInstanceOf(RecordIdField);
     expect(id.tables).toEqual(["widget"]);
@@ -47,13 +47,13 @@ describe("smart id", () => {
 describe("encode / encodePartial", () => {
   const User = defineTable("user", {
     id: z.string(),
-    name: sz.string(),
-    role: sz.enum(["admin", "member"]).$default(surql`"member"`),
-    settings: sz.object({
-      theme: sz.string(),
-      lastSeen: sz.datetime().optional(),
+    name: s.string(),
+    role: s.enum(["admin", "member"]).$default(surql`"member"`),
+    settings: s.object({
+      theme: s.string(),
+      lastSeen: s.datetime().optional(),
     }),
-    createdAt: sz.datetime().$default(surql`time::now()`).$readonly(),
+    createdAt: s.datetime().$default(surql`time::now()`).$readonly(),
   });
 
   test("encode omits absent fields and encodes the present ones", () => {
@@ -101,10 +101,10 @@ describe("encode / encodePartial", () => {
 describe("nested create-optionality (runtime)", () => {
   const Widget = defineTable("widget", {
     id: z.string(),
-    settings: sz.object({
-      theme: sz.string().$default(surql`"x"`),
-      tz: sz.string(),
-      lastSeen: sz.datetime().optional(),
+    settings: s.object({
+      theme: s.string().$default(surql`"x"`),
+      tz: s.string(),
+      lastSeen: s.datetime().optional(),
     }),
   });
 
@@ -145,8 +145,8 @@ describe("nested create-optionality (runtime)", () => {
   test("array<object>: absent nested defaults are omitted per element", () => {
     const List = defineTable("list", {
       id: z.string(),
-      tags: sz
-        .object({ name: sz.string(), color: sz.string().$default("#fff") })
+      tags: s
+        .object({ name: s.string(), color: s.string().$default("#fff") })
         .array(),
     });
     const payload = List.encode({
@@ -171,9 +171,9 @@ describe("nested create-optionality (runtime)", () => {
 describe("encode / safeEncode agreement on nested input (Fix 1)", () => {
   const T = defineTable("nested", {
     id: z.string(),
-    settings: sz.object({
-      theme: sz.string().$default(surql`"x"`),
-      tz: sz.string(),
+    settings: s.object({
+      theme: s.string().$default(surql`"x"`),
+      tz: s.string(),
     }),
   });
   // Mirror helper: did `encode` throw for this input?
@@ -217,10 +217,10 @@ describe("encode / safeEncode agreement on nested input (Fix 1)", () => {
 describe("safeEncode / encode validation (#6, #7)", () => {
   const User = defineTable("user", {
     id: z.string(),
-    name: sz.string().$min(1),
-    email: sz.email(),
-    createdAt: sz.datetime().$default(surql`time::now()`).$readonly(),
-    passhash: sz.string().$internal(),
+    name: s.string().$min(1),
+    email: s.email(),
+    createdAt: s.datetime().$default(surql`time::now()`).$readonly(),
+    passhash: s.string().$internal(),
   });
 
   test("safeEncode with valid input -> { success: true, data } with encoded/wire values", () => {
@@ -282,12 +282,12 @@ describe("safeEncode / encode validation (#6, #7)", () => {
 describe("async encode (recursive encoder)", () => {
   const User = defineTable("user", {
     id: z.string(),
-    name: sz.string().$min(1),
-    settings: sz.object({
-      theme: sz.string(),
-      lastSeen: sz.datetime().optional(),
+    name: s.string().$min(1),
+    settings: s.object({
+      theme: s.string(),
+      lastSeen: s.datetime().optional(),
     }),
-    createdAt: sz.datetime().$default(surql`time::now()`).$readonly(),
+    createdAt: s.datetime().$default(surql`time::now()`).$readonly(),
   });
 
   test("encodeAsync round-trips nested codecs and omits absent defaults", async () => {
@@ -331,8 +331,8 @@ describe("async encode (recursive encoder)", () => {
 describe("$internal fields (runtime)", () => {
   const Account = defineTable("account", {
     id: z.string(),
-    email: sz.email(),
-    passhash: sz.string().$internal(),
+    email: s.email(),
+    passhash: s.string().$internal(),
   });
 
   test("decode strips the internal field; the system view keeps it", () => {
@@ -366,9 +366,9 @@ describe("$internal fields (runtime)", () => {
 describe("shape ops", () => {
   const User = defineTable("user", {
     id: z.string(),
-    name: sz.string(),
-    email: sz.email(),
-    bio: sz.string().optional(),
+    name: s.string(),
+    email: s.email(),
+    bio: s.string().optional(),
   });
 
   test("pick / omit", () => {
@@ -395,7 +395,7 @@ describe("shape ops", () => {
   });
 
   test("extend adds fields and preserves config", () => {
-    const e = User.comment("note").extend({ nick: sz.string() });
+    const e = User.comment("note").extend({ nick: s.string() });
     expect(Object.keys(e.fields)).toContain("nick");
     expect(e.config.comment).toBe("note");
   });
@@ -421,7 +421,7 @@ describe("relation builder", () => {
   const Tag = defineTable("tag", { id: z.string() });
 
   test("from().to() sets endpoints, in/out fields, and relation config", () => {
-    const Liked = defineRelation("liked", { strength: sz.number() })
+    const Liked = defineRelation("liked", { strength: s.number() })
       .from(User)
       .to(Post);
     expect(Liked.kind).toBe("relation");

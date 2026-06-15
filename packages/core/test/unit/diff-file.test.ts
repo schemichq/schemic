@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { buildSnapshot, diffSnapshots, formatItems } from "../../src/cli/diff";
 import { EMPTY_SNAPSHOT } from "../../src/cli/meta";
-import { defineTable, sz } from "../../src/pure";
+import { defineTable, s } from "../../src/pure";
 
 describe("diff file annotations", () => {
-  const User = defineTable("user", { id: sz.string(), email: sz.email() });
+  const User = defineTable("user", { id: s.string(), email: s.email() });
   const tables = [User] as unknown as Parameters<typeof buildSnapshot>[0];
   const FILE = "database/schema/tables/user.ts";
   const fileOf = new Map<unknown, string>([[User, `/proj/${FILE}`]]);
@@ -47,8 +47,8 @@ describe("diff file annotations", () => {
 
 describe("struct snapshot (offline diff --ts)", () => {
   const User = defineTable("user", {
-    id: sz.string(),
-    age: sz.int().optional(),
+    id: s.string(),
+    age: s.int().optional(),
   });
   const tables = [User] as unknown as Parameters<typeof buildSnapshot>[0];
 

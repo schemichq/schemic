@@ -18,11 +18,11 @@ afterAll(async () => {
 });
 
 const T = 60_000;
-const POST = `import { sz, defineTable } from "surreal-zod";
+const POST = `import { s, defineTable } from "@schemic/core";
 
 export const Post = defineTable("post", {
-  id: sz.string(),
-  title: sz.string(),
+  id: s.string(),
+  title: s.string(),
 });
 `;
 
@@ -114,7 +114,7 @@ e2e("3-state divergence matrix", () => {
       H.write(
         root,
         "database/schema/tables/user.ts",
-        userSchema("  nickname: sz.string().optional(),"),
+        userSchema("  nickname: s.string().optional(),"),
       );
 
       const diff = await run(["diff"]);
@@ -141,7 +141,7 @@ e2e("3-state divergence matrix", () => {
       H.write(
         root,
         "database/schema/tables/user.ts",
-        userSchema("  nickname: sz.string().optional(),"),
+        userSchema("  nickname: s.string().optional(),"),
       );
       await run(["gen", "base", "-y"]);
       await run(["migrate"]); // snapshot + db both have nickname
@@ -191,7 +191,7 @@ e2e("3-state divergence matrix", () => {
       H.write(
         root,
         "database/schema/tables/user.ts",
-        userSchema("  a: sz.string().optional(),"),
+        userSchema("  a: s.string().optional(),"),
       );
       await run(["push"]); // db has `a`; snapshot does NOT
 
@@ -199,9 +199,7 @@ e2e("3-state divergence matrix", () => {
       H.write(
         root,
         "database/schema/tables/user.ts",
-        userSchema(
-          "  a: sz.string().optional(),\n  b: sz.string().optional(),",
-        ),
+        userSchema("  a: s.string().optional(),\n  b: s.string().optional(),"),
       );
 
       // Offline (snapshot vs schema): both new fields are pending.
@@ -243,18 +241,18 @@ e2e("3-state divergence matrix", () => {
   test(
     "push applies a flexible array-of-object field (implicit .* wildcard)",
     async () => {
-      // Regression: `sz.object({}).loose().array()` emits an implicit `<field>.*` element that the
+      // Regression: `s.object({}).loose().array()` emits an implicit `<field>.*` element that the
       // parent's definition auto-creates, so the apply MUST mark it OVERWRITE. Without that, push
       // failed with "the field '….*' already exists" → "failed transaction".
       const { root, run } = await setup();
       H.write(
         root,
         "database/schema/tables/doc.ts",
-        `import { sz, defineTable } from "surreal-zod";
+        `import { s, defineTable } from "@schemic/core";
 
 export const Doc = defineTable("doc", {
-  id: sz.string(),
-  tags: sz.object({}).loose().array(),
+  id: s.string(),
+  tags: s.object({}).loose().array(),
 });
 `,
       );

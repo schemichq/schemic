@@ -118,7 +118,7 @@ export function inferField(
     case "null":
       return leaf("null");
 
-    // No SurrealQL mapping — these exist on `sz.*` only for drop-in `z.*` parity, and are
+    // No SurrealQL mapping — these exist on `s.*` only for drop-in `z.*` parity, and are
     // rejected when used as a table field. (Registered native types — datetime/uuid/record/…
     // — are caught by the `surrealTypeRegistry` check at the top, so they never reach here.)
     case "symbol":
@@ -130,9 +130,9 @@ export function inferField(
     case "promise":
     case "custom":
       throw new Error(
-        `sz.${def.type}() has no SurrealQL type and can't be used as a table field. ` +
-          `Use a Surreal-native builder (e.g. sz.string / sz.int / sz.datetime / sz.uuid / ` +
-          `sz.recordId) instead, or keep this schema out of your table definitions.`,
+        `s.${def.type}() has no SurrealQL type and can't be used as a table field. ` +
+          `Use a Surreal-native builder (e.g. s.string / s.int / s.datetime / s.uuid / ` +
+          `s.recordId) instead, or keep this schema out of your table definitions.`,
       );
 
     case "optional":
@@ -172,7 +172,7 @@ export function inferField(
 
     case "object": {
       const shape = def.shape as Record<string, z.ZodType>;
-      const fields = objectFieldsRegistry.get(schema); // SField shape if built via sz.object
+      const fields = objectFieldsRegistry.get(schema); // SField shape if built via s.object
       const catchall = def.catchall as z.ZodType | undefined;
       const flexible = !!catchall && zdef(catchall).type === "unknown";
       const children = Object.entries(shape).map(([key, value]) => ({

@@ -244,7 +244,7 @@ function watchLoop(
 }
 
 const configFlag = (cmd: Command): Command =>
-  cmd.option("-c, --config <path>", "path to surreal-zod.config.ts");
+  cmd.option("-c, --config <path>", "path to schemic.config.ts");
 
 const dbFlags = (cmd: Command): Command =>
   configFlag(cmd)
@@ -263,21 +263,21 @@ const dbFlags = (cmd: Command): Command =>
 
 const program = new Command();
 program
-  .name("surreal-zod")
+  .name("@schemic/core")
   .description(
     "Author SurrealDB schemas with Zod — DDL generation + migrations",
   )
   .version("0.1.0-alpha.0")
-  .showHelpAfterError("(run `surreal-zod --help` for usage)")
+  .showHelpAfterError("(run `@schemic/core --help` for usage)")
   .addHelpText(
     "after",
     `
 Examples:
-  $ sz init                 scaffold database/ (schemas + migrations) + config
-  $ sz gen add_users        create a migration from schema changes
-  $ sz migrate              apply pending migrations
-  $ sz push --watch         keep the database in sync while you edit
-  $ sz diff --live          show how the schema differs from the live database
+  $ schemic init                 scaffold database/ (schemas + migrations) + config
+  $ schemic gen add_users        create a migration from schema changes
+  $ schemic migrate              apply pending migrations
+  $ schemic push --watch         keep the database in sync while you edit
+  $ schemic diff --live          show how the schema differs from the live database
 `,
   );
 
@@ -328,7 +328,7 @@ program
       console.log(style.dim(`  · ${f} (exists, skipped)`));
     console.log(
       created.length
-        ? `\n${ok("Initialized. Edit database/schema, then run `sz gen`.")}`
+        ? `\n${ok("Initialized. Edit database/schema, then run `schemic gen`.")}`
         : "\nNothing to do — already initialized.",
     );
   });
@@ -498,7 +498,7 @@ kindFlags(
               const prev = readSnapshot(config.metaDir);
               if (!prev.struct)
                 throw new Error(
-                  "offline diff --ts needs a Struct snapshot — run `sz gen` (or `sz pull --write`) to record one, or pass --live.",
+                  "offline diff --ts needs a Struct snapshot — run `schemic gen` (or `schemic pull --write`) to record one, or pass --live.",
                 );
               const { tables, defs } = await loadDefs(config.schemaPath);
               const desired = schemaStruct(
@@ -564,7 +564,7 @@ const genAction = (
           ));
         if (!proceed) {
           throw new Error(
-            `${plural(existing.length, "migration")} already exist in ${config.migrations} — a baseline would re-define objects they already created.\n  Re-run \`sz gen --baseline --force\` to replace them with one fresh baseline.`,
+            `${plural(existing.length, "migration")} already exist in ${config.migrations} — a baseline would re-define objects they already created.\n  Re-run \`schemic gen --baseline --force\` to replace them with one fresh baseline.`,
           );
         }
         squashed = clearMigrationFiles(config);
@@ -596,7 +596,7 @@ const genAction = (
       `${ok(res.file ?? "migration written")}  ${style.dim(`(+${res.up} up / ${res.down} down)`)}`,
     );
     // After a squash, reconcile the live DB's migration history (best-effort): when the DB already
-    // matches the schema, record the baseline as applied so its DDL isn't re-run and `sz status`
+    // matches the schema, record the baseline as applied so its DDL isn't re-run and `schemic status`
     // stays clean. Unreachable / drifted → leave it pending and say so.
     if (squashed) {
       console.log(
@@ -611,7 +611,7 @@ const genAction = (
             style.dim(
               state === "applied"
                 ? "  database matched the schema — baseline recorded as applied."
-                : "  database differs from the schema — baseline left pending; run `sz migrate`.",
+                : "  database differs from the schema — baseline left pending; run `schemic migrate`.",
             ),
           );
         } finally {
@@ -620,7 +620,7 @@ const genAction = (
       } catch (e) {
         console.log(
           style.dim(
-            `  database not reconciled (${errMsg(e)}) — baseline is pending; run \`sz migrate\` to apply it.`,
+            `  database not reconciled (${errMsg(e)}) — baseline is pending; run \`schemic migrate\` to apply it.`,
           ),
         );
       }
@@ -647,18 +647,18 @@ addGenCommand(
 );
 addGenCommand(program.command("generate [name]", { hidden: true }));
 
-// `snapshot` groups operations on the migration snapshot (the state `sz gen`/`sz diff` compare
-// against). `reset` clears it so the next `sz gen` baselines the full schema.
+// `snapshot` groups operations on the migration snapshot (the state `schemic gen`/`schemic diff` compare
+// against). `reset` clears it so the next `schemic gen` baselines the full schema.
 const snapshot = program
   .command("snapshot")
   .description(
-    "Manage the migration snapshot (what `sz gen`/`sz diff` compare against)",
+    "Manage the migration snapshot (what `schemic gen`/`schemic diff` compare against)",
   );
 configFlag(
   snapshot
     .command("reset")
     .description(
-      "Clear the snapshot — the next `sz gen` baselines the full schema",
+      "Clear the snapshot — the next `schemic gen` baselines the full schema",
     ),
 ).action((opts: CommonOpts) => {
   run(async () => {
@@ -669,12 +669,12 @@ configFlag(
     if (existing.length) {
       console.log(
         style.dim(
-          `  ${plural(existing.length, "migration")} still on disk — run \`sz gen --baseline --force\` to replace them with one fresh baseline. (A plain \`sz gen\` would add a baseline alongside them.)`,
+          `  ${plural(existing.length, "migration")} still on disk — run \`schemic gen --baseline --force\` to replace them with one fresh baseline. (A plain \`schemic gen\` would add a baseline alongside them.)`,
         ),
       );
     } else {
       console.log(
-        style.dim("  The next `sz gen` will baseline the full schema."),
+        style.dim("  The next `schemic gen` will baseline the full schema."),
       );
     }
   });
@@ -719,7 +719,7 @@ dbFlags(
           return;
         }
         if (!rows.length) {
-          console.log("No migrations yet. Run `sz gen`.");
+          console.log("No migrations yet. Run `schemic gen`.");
           return;
         }
         for (const r of rows) {
@@ -792,7 +792,7 @@ dbFlags(
       (engine === "auto" && surrealBinaryAvailable(config.checkBinary));
     if (engine === "binary" && !useBinary) {
       throw new Error(
-        'check.engine "binary" needs the `surreal` CLI on PATH (or set `check.binary`). Run `sz check --schema` to skip the replay.',
+        'check.engine "binary" needs the `surreal` CLI on PATH (or set `check.binary`). Run `schemic check --schema` to skip the replay.',
       );
     }
 
@@ -846,7 +846,7 @@ dbFlags(
         db = await connect(checkCfg, opts);
       } catch (e) {
         throw new Error(
-          `${errMsg(e)}\n  (run \`sz check --schema\` to skip the replay, install the \`surreal\` CLI for an in-memory engine, or set \`check.db\` to point the replay at a scratch server)`,
+          `${errMsg(e)}\n  (run \`schemic check --schema\` to skip the replay, install the \`surreal\` CLI for an in-memory engine, or set \`check.db\` to point the replay at a scratch server)`,
         );
       }
       cleanup = async () => {
@@ -875,7 +875,7 @@ dbFlags(
       );
       console.log(formatDiff(diff, {}));
       console.log(
-        `\n${style.dim(`${summarizeKinds(diff.up)} differ. \`sz gen\` writes a migration to reconcile.`)}`,
+        `\n${style.dim(`${summarizeKinds(diff.up)} differ. \`schemic gen\` writes a migration to reconcile.`)}`,
       );
       process.exitCode = 1;
     } finally {
@@ -929,7 +929,7 @@ dbFlags(
       d.username ? `${d.username} (${d.authLevel ?? "root"} access)` : "(none)",
     );
     console.log(style.bold("\nVersions"));
-    row("surreal-zod", program.version() ?? "?");
+    row("@schemic/core", program.version() ?? "?");
     row("node", process.version);
     console.log(style.bold("\nStatus"));
     try {
@@ -985,7 +985,9 @@ configFlag(
   run(async () => {
     const config = await loadConfig({ config: opts.config });
     const { file } = newMigration(config, name);
-    console.log(`${ok(file)}  ${style.dim("— edit it, then `sz migrate`")}`);
+    console.log(
+      `${ok(file)}  ${style.dim("— edit it, then `schemic migrate`")}`,
+    );
   });
 });
 
@@ -1035,7 +1037,7 @@ kindFlags(
         const kinds = summarizeKinds(stmts);
         if (opts.dryRun) {
           console.log(
-            `\n${style.dim(`${plural(stmts.length, "change")}${kinds ? ` — ${kinds}` : ""} — run \`sz push\` to apply.`)}`,
+            `\n${style.dim(`${plural(stmts.length, "change")}${kinds ? ` — ${kinds}` : ""} — run \`schemic push\` to apply.`)}`,
           );
           return;
         }
@@ -1153,7 +1155,7 @@ kindFlags(
         if (!opts.write) {
           if (changed.length)
             console.log(
-              `\n${style.dim(`${plural(changed.length, "file")} would change — run \`sz pull --write\` to apply.`)}`,
+              `\n${style.dim(`${plural(changed.length, "file")} would change — run \`schemic pull --write\` to apply.`)}`,
             );
           if (atRisk.length) printLocalOnly(atRisk);
           return;
@@ -1169,7 +1171,7 @@ kindFlags(
 
         const written = applyPull(plan);
         // Baseline: sync the snapshot and record the pulled state as an already-applied migration, so
-        // the schema matches the DB and `sz diff` doesn't report the freshly-pulled objects as pending.
+        // the schema matches the DB and `schemic diff` doesn't report the freshly-pulled objects as pending.
         const base = await baseline(db, config);
         const removed = plan.files.filter((f) => f.action === "delete").length;
         // Files we surfaced but couldn't safely delete (a local-only entity mixed with other code).

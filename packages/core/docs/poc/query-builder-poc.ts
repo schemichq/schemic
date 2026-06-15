@@ -2,50 +2,49 @@
  * Query-builder feasibility POC (TYPES ONLY — runtime is stubbed).
  *
  * Goal: prove that a fluent `select(table).where(...).return(...)` builder can be
- * driven entirely by a surreal-zod `sz` table definition, and that its RESULT
+ * driven entirely by a @schemic/core `s` table definition, and that its RESULT
  * TYPE is correctly INFERRED as the *decoded* `App` shape (codecs applied:
  * datetime -> Date, uuid -> string, recordId -> RecordId), with projections
  * narrowing the result to exactly the selected fields.
  *
- * This is the load-bearing risk for "build a query builder on top of surreal-zod".
+ * This is the load-bearing risk for "build a query builder on top of @schemic/core".
  * If this compiles, the core inference threading is feasible.
  *
  * Compile with:  bunx tsc --noEmit -p tsconfig.json   (from this directory)
  */
 
+import type { RecordId } from "surrealdb";
 import {
   type App,
-  type Shape,
-  sz,
   defineTable,
+  type Shape,
+  s,
   type TableDef,
 } from "../../src/index.ts";
-import type { RecordId } from "surrealdb";
 
 // ---------------------------------------------------------------------------
 // 0. Tiny type-level test harness (no test-runner dependency)
 // ---------------------------------------------------------------------------
-type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B
-  ? 1
-  : 2
-  ? true
-  : false;
+type Equal<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
+    ? true
+    : false;
 type Expect<T extends true> = T;
 
 // ---------------------------------------------------------------------------
-// 1. The schema — a real `sz` table. `id`/`createdAt`/`uid`/`manager` exercise
+// 1. The schema — a real `s` table. `id`/`createdAt`/`uid`/`manager` exercise
 //    the codecs and smart-id machinery we want to flow into query results.
 // ---------------------------------------------------------------------------
 const User = defineTable("user", {
-  name: sz.string(),
-  age: sz.number(),
-  email: sz.email(),
-  createdAt: sz.datetime(), // DB `datetime` <-> app `Date`   (codec)
-  uid: sz.uuid(), //            DB `uuid`     <-> app `string` (codec)
-  manager: sz.recordId("user").optional(), // record link -> RecordId<"user">
+  name: s.string(),
+  age: s.number(),
+  email: s.email(),
+  createdAt: s.datetime(), // DB `datetime` <-> app `Date`   (codec)
+  uid: s.uuid(), //            DB `uuid`     <-> app `string` (codec)
+  manager: s.recordId("user").optional(), // record link -> RecordId<"user">
 });
 
-// The decoded app type, straight from surreal-zod. The builder must reproduce
+// The decoded app type, straight from @schemic/core. The builder must reproduce
 // this for a full-row select.
 type UserApp = App<typeof User>;
 
@@ -88,11 +87,12 @@ type Row<TD extends TableDef<string, Shape>> = {
 type Projection = FieldRef<unknown> | { [k: string]: Projection };
 
 /** Collapse a projection back to its concrete decoded type. */
-type Unwrap<P> = P extends FieldRef<infer U>
-  ? U
-  : P extends Record<string, unknown>
-    ? { [K in keyof P]: Unwrap<P[K]> }
-    : never;
+type Unwrap<P> =
+  P extends FieldRef<infer U>
+    ? U
+    : P extends Record<string, unknown>
+      ? { [K in keyof P]: Unwrap<P[K]> }
+      : never;
 
 // ---------------------------------------------------------------------------
 // 4. The builder. `R` is the per-row result; the query resolves to `R[]`.
@@ -125,9 +125,8 @@ function select<TD extends TableDef<string, Shape>>(_table: TD): Select<TD> {
 }
 
 /** Extract the resolved result array type of a built query. */
-type ResultOf<Q> = Q extends Select<TableDef<string, Shape>, infer R>
-  ? R[]
-  : never;
+type ResultOf<Q> =
+  Q extends Select<TableDef<string, Shape>, infer R> ? R[] : never;
 
 // ===========================================================================
 // TYPE CHECKS  (each `_check*` must be `true` for the file to compile)

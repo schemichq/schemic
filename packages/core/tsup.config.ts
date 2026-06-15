@@ -11,7 +11,7 @@ export default defineConfig([
     clean: true,
     sourcemap: true,
   },
-  // CLI bin — needs a node shebang. Keep `surreal-zod` external (don't bundle a second copy
+  // CLI bin — needs a node shebang. Keep `@schemic/core` external (don't bundle a second copy
   // of core) so the CLI and the jiti-loaded schemas share one module instance — its codec
   // type registries (WeakMaps) must match for `datetime`/`recordId` inference to work.
   {
@@ -22,7 +22,7 @@ export default defineConfig([
     dts: false,
     clean: false,
     sourcemap: false,
-    external: ["surreal-zod", /^surreal-zod\//],
+    external: ["@schemic/core", /^@schemic\/core\//],
     banner: { js: "#!/usr/bin/env node" },
   },
 ]);

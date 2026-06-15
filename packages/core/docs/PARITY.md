@@ -1,6 +1,6 @@
-# surreal-zod ↔ SurrealDB Schema/DDL Parity Report
+# @schemic/core ↔ SurrealDB Schema/DDL Parity Report
 
-> Audit of the surreal-zod **schema / DDL layer** (`sz.*`, `defineTable`/`defineRelation`/
+> Audit of the @schemic/core **schema / DDL layer** (`s.*`, `defineTable`/`defineRelation`/
 > `defineEvent`/`defineFunction`/`defineAccess`, `emitTable`/`emitStatements`/`emitField`/
 > `emitDefStatement`) against SurrealDB's full feature set and the SurrealQL `DEFINE`
 > language. Source of truth: the official docs (URLs at the bottom). Live verification:
@@ -16,12 +16,12 @@
 
 **Overall read: the schema layer has strong, correct parity for everyday SurrealDB
 modeling.** Every `DEFINE TABLE`, `DEFINE FIELD`, `DEFINE INDEX`, `DEFINE EVENT`,
-`DEFINE FUNCTION`, and `DEFINE ACCESS` statement that surreal-zod generates for a broad
+`DEFINE FUNCTION`, and `DEFINE ACCESS` statement that @schemic/core generates for a broad
 mixed-type table (60 fields covering scalars, native types, records, collections, literals,
 unions, nested objects, FLEXIBLE, and every field clause) was **accepted by SurrealDB 3.1.3
 with ZERO rejections**, and the core types round-trip faithfully through `INFO … STRUCTURE`.
 
-**No live rejections / real bugs were found** — surreal-zod never emits DDL the DB refuses.
+**No live rejections / real bugs were found** — @schemic/core never emits DDL the DB refuses.
 The gaps below are missing *expressiveness*, not broken output.
 
 The optionality model is also correct: `option<T>` is emitted, the DB desugars it to
@@ -35,12 +35,12 @@ Four gaps from this audit are now supported, each live-verified round-trip
 (sync/diff/pull) on SurrealDB 3.1.3:
 
 ```ts
-// set<T> — distinct dedup collection (was lossy → array<T>; pull reverses set<T> → sz.set(...))
-sz.set(sz.string())
+// set<T> — distinct dedup collection (was lossy → array<T>; pull reverses set<T> → s.set(...))
+s.set(s.string())
 //→ DEFINE FIELD tags ON TABLE t TYPE set<string>;
 
 // COMPUTED — a derived, read-only / create-optional column
-sz.string().$computed(surql`string::concat(first, " ", last)`)
+s.string().$computed(surql`string::concat(first, " ", last)`)
 //→ DEFINE FIELD full ON TABLE person TYPE string COMPUTED string::concat(first, ' ', last);
 
 // CHANGEFEED — per-table change tracking, folded into the DEFINE TABLE head
@@ -59,7 +59,7 @@ SurrealDB 3.1.3** (`live-parity.test.ts`):
 
 ```ts
 // Record REFERENCE [ON DELETE …] — referential integrity on links
-sz.recordId("person").reference({ onDelete: "cascade" })
+s.recordId("person").reference({ onDelete: "cascade" })
 //→ DEFINE FIELD author ON TABLE comment TYPE record<person> REFERENCE ON DELETE CASCADE;
 
 // TYPE RELATION … ENFORCED — require both endpoints on RELATE
@@ -67,12 +67,12 @@ defineRelation("liked").from(User).to(Post).enforced()
 //→ DEFINE TABLE liked TYPE RELATION FROM user TO post ENFORCED SCHEMAFULL;
 
 // Sized array<T,N> / set<T,N> — N is the MAX size (maps to Zod .max(); set stays set)
-sz.array(sz.string(), { max: 5 })
+s.array(s.string(), { max: 5 })
 //→ DEFINE FIELD tags ON TABLE t TYPE array<string, 5>;
 
 // +10 string::is_* validators (no Zod format builder; string + DB ASSERT)
-sz.alpha() / sz.alphanum() / sz.ascii() / sz.numeric() / sz.semver() /
-sz.hexadecimal() / sz.latitude() / sz.longitude() / sz.ip() / sz.domain()
+s.alpha() / s.alphanum() / s.ascii() / s.numeric() / s.semver() /
+s.hexadecimal() / s.latitude() / s.longitude() / s.ip() / s.domain()
 //→ DEFINE FIELD f ON TABLE t TYPE string ASSERT string::is_<name>($value);
 ```
 
@@ -99,7 +99,7 @@ sz.hexadecimal() / sz.latitude() / sz.longitude() / sz.ip() / sz.domain()
 4. **Event `ASYNC [RETRY n] [MAXDEPTH n]` + `COMMENT`** (❌, medium). `defineEvent`/`.event()`
    emit only `WHEN`/`THEN`.
 
-5. **`range` / `regex` bare types** (❌, low). No `sz.range()` / `sz.regex()`.
+5. **`range` / `regex` bare types** (❌, low). No `s.range()` / `s.regex()`.
 
 6. **Computed / view tables — `AS SELECT … FROM …`** (❌, low; arguably ORM scope).
 
@@ -146,54 +146,54 @@ sz.hexadecimal() / sz.latitude() / sz.longitude() / sz.ip() / sz.domain()
 
 ## Feature-by-feature matrix
 
-### Types (`sz.*` → DDL `TYPE`)
+### Types (`s.*` → DDL `TYPE`)
 
-| Feature | SurQL `TYPE` | surreal-zod | Status | Notes |
+| Feature | SurQL `TYPE` | @schemic/core | Status | Notes |
 |---|---|---|---|---|
-| string | `string` | `sz.string()` | ✅ | |
-| bool | `bool` | `sz.boolean()` | ✅ | |
-| null | `null` | `sz.null()` | ✅ | |
-| any | `any` | `sz.any()` / `sz.unknown()` | ✅ | |
-| number (generic) | `number` | `sz.number()` | ✅ | |
-| int | `int` | `sz.int()` / `int32()` / `uint32()` / `bigint()` | ✅ | format-discriminated |
-| float | `float` | `sz.float()` | ✅ | |
-| decimal | `decimal` | `sz.decimal()` | ✅ | `Decimal` instance |
-| datetime | `datetime` | `sz.datetime()` / `sz.date()` | ✅ | codec ↔ JS `Date` |
-| duration | `duration` | `sz.duration()` | ✅ | `Duration` instance |
-| bytes | `bytes` | `sz.bytes()` | ✅ | codec ↔ `Uint8Array` |
-| uuid | `uuid` | `sz.uuid()` | ✅ | codec ↔ string |
-| file | `file` | `sz.file()` | ✅ | `FileRef` |
-| geometry | `geometry` | `sz.geometry()` | ✅ | |
-| geometry kinds | `geometry<point\|line\|polygon\|multipoint\|multiline\|multipolygon\|collection>` | `sz.geometry(kind)` | ✅ | all 7 validated live |
-| record link | `record<t>` / `record<a\|b>` | `sz.recordId(t)` / `sz.recordId([a,b])` | ✅ | |
-| array of record | `array<record<t>>` | `sz.array(sz.recordId(t))` | ✅ | |
-| literal scalar | `"admin"` / `42` | `sz.literal(v)` | ✅ | |
-| enum | `"a" \| "b"` | `sz.enum([...])` / `sz.nativeEnum({...})` | ✅ | numeric enums too |
-| scalar union | `string \| number` | `sz.union([...])` | ✅ | |
-| tuple | `[string, number]` | `sz.tuple([...])` | ✅ | variadic → generic `array` |
-| array | `array<T>` | `sz.array(x)` | ✅ | |
-| object (nested) | `object` + `f.k` subfields | `sz.object({...})` | ✅ | |
-| array of object | `array<object>` + `f.*.k` | `sz.array(sz.object({...}))` | ✅ | |
-| open record/map | `object` + `f.*` | `sz.record(k,v)` / `sz.map(k,v)` | ✅ | |
-| FLEXIBLE object | `object FLEXIBLE` | `sz.object({...}).flexible()` | ✅ | |
-| intersection | merged `object` | `sz.intersection(a,b)` | ✅ | right wins on overlap |
+| string | `string` | `s.string()` | ✅ | |
+| bool | `bool` | `s.boolean()` | ✅ | |
+| null | `null` | `s.null()` | ✅ | |
+| any | `any` | `s.any()` / `s.unknown()` | ✅ | |
+| number (generic) | `number` | `s.number()` | ✅ | |
+| int | `int` | `s.int()` / `int32()` / `uint32()` / `bigint()` | ✅ | format-discriminated |
+| float | `float` | `s.float()` | ✅ | |
+| decimal | `decimal` | `s.decimal()` | ✅ | `Decimal` instance |
+| datetime | `datetime` | `s.datetime()` / `s.date()` | ✅ | codec ↔ JS `Date` |
+| duration | `duration` | `s.duration()` | ✅ | `Duration` instance |
+| bytes | `bytes` | `s.bytes()` | ✅ | codec ↔ `Uint8Array` |
+| uuid | `uuid` | `s.uuid()` | ✅ | codec ↔ string |
+| file | `file` | `s.file()` | ✅ | `FileRef` |
+| geometry | `geometry` | `s.geometry()` | ✅ | |
+| geometry kinds | `geometry<point\|line\|polygon\|multipoint\|multiline\|multipolygon\|collection>` | `s.geometry(kind)` | ✅ | all 7 validated live |
+| record link | `record<t>` / `record<a\|b>` | `s.recordId(t)` / `s.recordId([a,b])` | ✅ | |
+| array of record | `array<record<t>>` | `s.array(s.recordId(t))` | ✅ | |
+| literal scalar | `"admin"` / `42` | `s.literal(v)` | ✅ | |
+| enum | `"a" \| "b"` | `s.enum([...])` / `s.nativeEnum({...})` | ✅ | numeric enums too |
+| scalar union | `string \| number` | `s.union([...])` | ✅ | |
+| tuple | `[string, number]` | `s.tuple([...])` | ✅ | variadic → generic `array` |
+| array | `array<T>` | `s.array(x)` | ✅ | |
+| object (nested) | `object` + `f.k` subfields | `s.object({...})` | ✅ | |
+| array of object | `array<object>` + `f.*.k` | `s.array(s.object({...}))` | ✅ | |
+| open record/map | `object` + `f.*` | `s.record(k,v)` / `s.map(k,v)` | ✅ | |
+| FLEXIBLE object | `object FLEXIBLE` | `s.object({...}).flexible()` | ✅ | |
+| intersection | merged `object` | `s.intersection(a,b)` | ✅ | right wins on overlap |
 | optional | `option<T>` | `.optional()` | ✅ | DB shows `none \| T` |
 | nullable | `T \| null` | `.nullable()` | ✅ | |
 | nullish | `option<T \| null>` | `.nullish()` | ✅ | folds correctly |
-| string formats (bakeable) | `string ASSERT string::is_*($value)` | `sz.email()/url()/ipv4()/ipv6()/ulid()` + batch 2: `alpha/alphanum/ascii/numeric/semver/hexadecimal/latitude/longitude/ip/domain` | ✅ | validators confirmed on 3.1.3 |
-| string formats (other) | `string` | `sz.jwt()/cuid()/nanoid()/base64()/…` | ✅ | no fabricated regex |
-| set (dedup) | `set<T>` | `sz.set(x)` | ✅ | batch 1 — emits `set<T>`, round-trips (was lossy → `array`) |
-| **object-literal union** | `{a:..}\|{b:..}` | `sz.discriminatedUnion(...)` → `object` | ⚠️ | per-branch structure lost |
-| **range** | `range` | — | ❌ | no `sz.range()` (bare `range` is a valid field type) |
-| **regex** | `regex` | — | ❌ | no `sz.regexType()` |
-| array/set max-size | `array<T,N>` / `set<T,N>` | `sz.array(x,{max:N})` / `sz.set(x,{max:N})` | ✅ batch 2 | N = MAX size |
+| string formats (bakeable) | `string ASSERT string::is_*($value)` | `s.email()/url()/ipv4()/ipv6()/ulid()` + batch 2: `alpha/alphanum/ascii/numeric/semver/hexadecimal/latitude/longitude/ip/domain` | ✅ | validators confirmed on 3.1.3 |
+| string formats (other) | `string` | `s.jwt()/cuid()/nanoid()/base64()/…` | ✅ | no fabricated regex |
+| set (dedup) | `set<T>` | `s.set(x)` | ✅ | batch 1 — emits `set<T>`, round-trips (was lossy → `array`) |
+| **object-literal union** | `{a:..}\|{b:..}` | `s.discriminatedUnion(...)` → `object` | ⚠️ | per-branch structure lost |
+| **range** | `range` | — | ❌ | no `s.range()` (bare `range` is a valid field type) |
+| **regex** | `regex` | — | ❌ | no `s.regexType()` |
+| array/set max-size | `array<T,N>` / `set<T,N>` | `s.array(x,{max:N})` / `s.set(x,{max:N})` | ✅ batch 2 | N = MAX size |
 
 ### DEFINE statements
 
-| Statement | surreal-zod | Status | Notes |
+| Statement | @schemic/core | Status | Notes |
 |---|---|---|---|
 | DEFINE TABLE | `defineTable` / `defineRelation` | ✅ | |
-| DEFINE FIELD | shape fields (`sz.*` + `$`-clauses) | ✅ | |
+| DEFINE FIELD | shape fields (`s.*` + `$`-clauses) | ✅ | |
 | DEFINE INDEX | `.index()` / `.unique()` / `.index(name,fields,{unique\|count})` | ✅ (plain/unique/composite/count) | search & vector kinds ❌ |
 | DEFINE EVENT | `.event(...)` / `defineEvent(...)` | ✅ | WHEN/THEN, multi-then |
 | DEFINE FUNCTION | `defineFunction(...)` | ✅ | args/returns/body/permissions/comment |
@@ -210,7 +210,7 @@ sz.hexadecimal() / sz.latitude() / sz.longitude() / sz.ip() / sz.domain()
 
 ### Table clauses
 
-| Clause | SurQL | surreal-zod | Status |
+| Clause | SurQL | @schemic/core | Status |
 |---|---|---|---|
 | TYPE NORMAL | `TYPE NORMAL` | default | ✅ |
 | TYPE ANY | `TYPE ANY` | `.typeAny()` | ✅ |
@@ -227,7 +227,7 @@ sz.hexadecimal() / sz.latitude() / sz.longitude() / sz.ip() / sz.domain()
 
 ### Field clauses
 
-| Clause | SurQL | surreal-zod | Status |
+| Clause | SurQL | @schemic/core | Status |
 |---|---|---|---|
 | TYPE | `TYPE <type>` | inferred from schema | ✅ |
 | FLEXIBLE | `TYPE object FLEXIBLE` | `.flexible()` / `.loose()` | ✅ |
@@ -244,7 +244,7 @@ sz.hexadecimal() / sz.latitude() / sz.longitude() / sz.ip() / sz.domain()
 
 ### Indexes
 
-| Kind | SurQL | surreal-zod | Status |
+| Kind | SurQL | @schemic/core | Status |
 |---|---|---|---|
 | plain (single) | `… FIELDS f` | `.index()` | ✅ |
 | UNIQUE (single) | `… FIELDS f UNIQUE` | `.unique()` | ✅ |
@@ -260,7 +260,7 @@ sz.hexadecimal() / sz.latitude() / sz.longitude() / sz.ip() / sz.domain()
 
 ## Out-of-scope inventory (FUTURE ORM / query-builder — NOT the schema layer)
 
-These are query/runtime features, intentionally not expressed via `sz.*` DDL:
+These are query/runtime features, intentionally not expressed via `s.*` DDL:
 
 - **DML / queries**: `SELECT`, `INSERT`, `CREATE`, `UPDATE`, `UPSERT`, `DELETE`, `RELATE`,
   `MERGE`/`PATCH`, `RETURN`, `LET`, `BEGIN`/`COMMIT`/`CANCEL` transactions.
@@ -287,7 +287,7 @@ used internally by the CLI/migration layer, but are not part of the authoring su
 - **`option<T>` ↔ `none | T`**: the DB reports `option<string>` as `none | string` in
   `INFO … STRUCTURE`. Equivalent; just a canonicalization the migration diff already handles.
 - **`set<T>` is real and distinct** on 3.1.3 (not normalized to `array`). Batch 1 fixed
-  `sz.set()` to emit `set<T>` and pull to reverse it back to `sz.set(...)`.
+  `s.set()` to emit `set<T>` and pull to reverse it back to `s.set(...)`.
 - **`string::is_*` validators** for email/url/ipv4/ipv6/ulid (and batch 2:
   alpha/alphanum/ascii/numeric/semver/hexadecimal/latitude/longitude/ip/domain) all exist on
   3.1.3 — the baked asserts are correct. (3.x uses the underscore form, e.g. `string::is_email`.)
@@ -295,7 +295,7 @@ used internally by the CLI/migration layer, but are not part of the authoring su
   `references<table>` are also NOT field types on 3.1.3 (back-references are the `<~` /
   `COMPUTED` query path), so they are correctly absent from the type matrix.
 - **Geometry**: bare `point`/`line`/etc. are NOT valid bare field types (only `point` is);
-  surreal-zod correctly emits `geometry<kind>`, which is accepted for all 7 kinds.
+  @schemic/core correctly emits `geometry<kind>`, which is accepted for all 7 kinds.
 
 ---
 

@@ -6,18 +6,18 @@ import {
   type Create,
   defineRelation,
   defineTable,
-  sz,
+  s,
   type Update,
   type Wire,
 } from "../../src/pure";
 
 const User = defineTable("user", {
   id: z.string(), // -> record<user, string>
-  name: sz.string(),
-  email: sz.email(),
-  bio: sz.string().optional(),
-  status: sz.string().$default(surql`"pending"`),
-  createdAt: sz.datetime().$default(surql`time::now()`).$readonly(),
+  name: s.string(),
+  email: s.email(),
+  bio: s.string().optional(),
+  status: s.string().$default(surql`"pending"`),
+  createdAt: s.datetime().$default(surql`time::now()`).$readonly(),
 });
 
 describe("Create<>", () => {
@@ -89,7 +89,7 @@ describe("App<> / Wire<>", () => {
     // self-reference doesn't create the `typeof X`-in-its-own-initializer cycle (→ `any`).
     const Node = defineTable("node", (self) => ({
       id: z.string(),
-      label: sz.string(),
+      label: s.string(),
       parent: self.optional(),
     }));
     expectTypeOf<App<typeof Node>["parent"]>().toEqualTypeOf<
@@ -100,27 +100,25 @@ describe("App<> / Wire<>", () => {
   });
 });
 
-describe("sz.infer / sz.input / sz.output / sz.TypeOf (Zod drop-in helpers)", () => {
+describe("s.infer / s.input / s.output / s.TypeOf (Zod drop-in helpers)", () => {
   test("on a table def: infer/output/TypeOf == App, input == Wire", () => {
-    expectTypeOf<sz.infer<typeof User>>().toEqualTypeOf<App<typeof User>>();
-    expectTypeOf<sz.output<typeof User>>().toEqualTypeOf<App<typeof User>>();
-    expectTypeOf<sz.TypeOf<typeof User>>().toEqualTypeOf<App<typeof User>>();
-    expectTypeOf<sz.input<typeof User>>().toEqualTypeOf<Wire<typeof User>>();
+    expectTypeOf<s.infer<typeof User>>().toEqualTypeOf<App<typeof User>>();
+    expectTypeOf<s.output<typeof User>>().toEqualTypeOf<App<typeof User>>();
+    expectTypeOf<s.TypeOf<typeof User>>().toEqualTypeOf<App<typeof User>>();
+    expectTypeOf<s.input<typeof User>>().toEqualTypeOf<Wire<typeof User>>();
     // codec fields resolve per channel, exactly like App/Wire
-    expectTypeOf<sz.infer<typeof User>["createdAt"]>().toEqualTypeOf<Date>();
-    expectTypeOf<
-      sz.input<typeof User>["createdAt"]
-    >().toEqualTypeOf<DateTime>();
+    expectTypeOf<s.infer<typeof User>["createdAt"]>().toEqualTypeOf<Date>();
+    expectTypeOf<s.input<typeof User>["createdAt"]>().toEqualTypeOf<DateTime>();
   });
 
-  test("generalizes beyond tables: a bare sz.object schema and a single field", () => {
-    const Addr = sz.object({ city: sz.string(), zip: sz.string().optional() });
-    expectTypeOf<sz.infer<typeof Addr>>().toEqualTypeOf<{
+  test("generalizes beyond tables: a bare s.object schema and a single field", () => {
+    const Addr = s.object({ city: s.string(), zip: s.string().optional() });
+    expectTypeOf<s.infer<typeof Addr>>().toEqualTypeOf<{
       city: string;
       zip?: string | undefined;
     }>();
     expectTypeOf<
-      sz.output<ReturnType<typeof sz.email>>
+      s.output<ReturnType<typeof s.email>>
     >().toEqualTypeOf<string>();
   });
 });
@@ -134,17 +132,17 @@ describe("no-DDL fields: type-level rejection + $surreal escape hatch", () => {
   }
 
   test("a no-DDL field is rejected in a table shape (object form)", () => {
-    // @ts-expect-error - sz.symbol() has no SurrealQL mapping
-    defineTable("reject_a", { x: sz.symbol() });
+    // @ts-expect-error - s.symbol() has no SurrealQL mapping
+    defineTable("reject_a", { x: s.symbol() });
     // the brand survives wrappers:
-    // @ts-expect-error - sz.never().optional() is still no-DDL
-    defineTable("reject_b", { x: sz.never().optional() });
+    // @ts-expect-error - s.never().optional() is still no-DDL
+    defineTable("reject_b", { x: s.never().optional() });
   });
 
   test("$surreal makes a custom type a real field, with app/wire types", () => {
     const T = defineTable("money_tbl", {
       id: z.string(),
-      price: sz.instanceof(Money).$surreal(sz.string(), {
+      price: s.instanceof(Money).$surreal(s.string(), {
         encode: (m) => m.toString(),
         decode: (s) => new Money(Number(s)),
       }),
@@ -154,8 +152,8 @@ describe("no-DDL fields: type-level rejection + $surreal escape hatch", () => {
   });
 
   test("the codec is type-checked against the wire field", () => {
-    sz.instanceof(Money).$surreal(sz.string(), {
-      // @ts-expect-error - encode must return a string (the sz.string() wire)
+    s.instanceof(Money).$surreal(s.string(), {
+      // @ts-expect-error - encode must return a string (the s.string() wire)
       encode: (m) => m.cents,
       decode: (s) => new Money(Number(s)),
     });
@@ -212,26 +210,24 @@ describe("encode / safeEncode return types (#6, #7)", () => {
 
 describe("field method types", () => {
   test("unwrap peels the wrapper type", () => {
-    expectTypeOf(
-      sz.string().optional().unwrap().schema,
-    ).toExtend<z.ZodString>();
-    expectTypeOf(sz.string().array().unwrap().schema).toExtend<z.ZodString>();
+    expectTypeOf(s.string().optional().unwrap().schema).toExtend<z.ZodString>();
+    expectTypeOf(s.string().array().unwrap().schema).toExtend<z.ZodString>();
   });
 
   test("$default accepts a plain value or a surql expression", () => {
-    sz.string().$default("x");
-    sz.string().$default(surql`"x"`);
-    sz.int().$default(0);
+    s.string().$default("x");
+    s.string().$default(surql`"x"`);
+    s.int().$default(0);
     // @ts-expect-error - value must match the field's type
-    sz.int().$default("not a number");
+    s.int().$default("not a number");
   });
 });
 
 describe("$internal fields", () => {
   const Account = defineTable("account", {
     id: z.string(), // -> record<account, string>
-    email: sz.email(),
-    passhash: sz.string().$internal(),
+    email: s.email(),
+    passhash: s.string().$internal(),
   });
 
   test("App excludes the internal key; the system view includes it", () => {
@@ -263,9 +259,9 @@ describe("nested create-optionality", () => {
   // has a DB $default, so `theme` is create-optional while `tz` stays required.
   const T = defineTable("nested", {
     id: z.string(),
-    settings: sz.object({
-      theme: sz.string().$default(surql`"x"`),
-      tz: sz.string(),
+    settings: s.object({
+      theme: s.string().$default(surql`"x"`),
+      tz: s.string(),
     }),
   });
 
@@ -299,8 +295,8 @@ describe("nested create-optionality", () => {
   // The object field itself is $default (create-optional) AND its nested field is too.
   const T2 = defineTable("nested2", {
     id: z.string(),
-    settings: sz
-      .object({ theme: sz.string().$default(surql`"x"`), tz: sz.string() })
+    settings: s
+      .object({ theme: s.string().$default(surql`"x"`), tz: s.string() })
       .$default(surql`{}`),
   });
 
@@ -317,8 +313,8 @@ describe("nested create-optionality", () => {
   // Array-of-object: nested defaults are create-optional per element.
   const T3 = defineTable("nested3", {
     id: z.string(),
-    tags: sz
-      .object({ name: sz.string(), color: sz.string().$default("#fff") })
+    tags: s
+      .object({ name: s.string(), color: s.string().$default("#fff") })
       .array(),
   });
 
@@ -335,8 +331,8 @@ describe("nested create-optionality", () => {
 describe("$value create-optionality", () => {
   const T = defineTable("t", {
     id: z.string(),
-    slug: sz.string().$value(surql`string::slug($value)`), // create-required (consumes $value)
-    updatedAt: sz.datetime().$value(surql`time::now()`, { optional: true }), // create-optional
+    slug: s.string().$value(surql`string::slug($value)`), // create-required (consumes $value)
+    updatedAt: s.datetime().$value(surql`time::now()`, { optional: true }), // create-optional
   });
 
   test("{ optional: true } makes the field create-optional; default stays required", () => {

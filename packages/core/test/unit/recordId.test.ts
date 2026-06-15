@@ -1,30 +1,30 @@
 import { describe, expect, test } from "bun:test";
-import { z } from "zod";
 import {
   BoundExcluded,
   BoundIncluded,
   RecordId,
   RecordIdRange,
 } from "surrealdb";
-import { sz, defineTable } from "../../src/pure";
+import { z } from "zod";
+import { defineTable, s } from "../../src/pure";
 
 describe("recordId schema validation", () => {
   test("single table restriction", () => {
-    const f = sz.recordId("user");
+    const f = s.recordId("user");
     expect(f.schema.safeParse(new RecordId("user", "x")).success).toBe(true);
     expect(f.schema.safeParse(new RecordId("post", "x")).success).toBe(false);
     expect(f.schema.safeParse("user:x").success).toBe(false); // must be a RecordId instance
   });
 
   test("multi table restriction", () => {
-    const f = sz.recordId(["user", "admin"]);
+    const f = s.recordId(["user", "admin"]);
     expect(f.schema.safeParse(new RecordId("user", "x")).success).toBe(true);
     expect(f.schema.safeParse(new RecordId("admin", "x")).success).toBe(true);
     expect(f.schema.safeParse(new RecordId("post", "x")).success).toBe(false);
   });
 
   test(".type narrows the id value type", () => {
-    const f = sz.recordId("user").type(z.number());
+    const f = s.recordId("user").type(z.number());
     expect(f.schema.safeParse(new RecordId("user", 5)).success).toBe(true);
     expect(f.schema.safeParse(new RecordId("user", "x")).success).toBe(false);
   });
@@ -32,21 +32,21 @@ describe("recordId schema validation", () => {
 
 describe(".for", () => {
   test("single-table: for(id)", () => {
-    const r = sz.recordId("user").for("alice");
+    const r = s.recordId("user").for("alice");
     expect(r).toBeInstanceOf(RecordId);
     expect(r.table.name).toBe("user");
     expect(r.id).toBe("alice");
   });
 
   test("multi-table: for(table, id)", () => {
-    const r = sz.recordId(["user", "admin"]).for("admin", "root");
+    const r = s.recordId(["user", "admin"]).for("admin", "root");
     expect(r.table.name).toBe("admin");
     expect(r.id).toBe("root");
   });
 });
 
 describe(".range", () => {
-  const f = sz.recordId("user");
+  const f = s.recordId("user");
 
   test("default: inclusive start, exclusive end", () => {
     const r = f.range("a", "z");
@@ -71,7 +71,7 @@ describe(".range", () => {
 
 describe("TableDef.record()", () => {
   test("derives a record<name> link carrying the id value type", () => {
-    const User = defineTable("user", { id: z.string(), name: sz.string() });
+    const User = defineTable("user", { id: z.string(), name: s.string() });
     const link = User.record();
     expect(link.tables).toEqual(["user"]);
     expect(link.for("x").table.name).toBe("user");
@@ -81,7 +81,7 @@ describe("TableDef.record()", () => {
   });
 
   test("defaults to RecordIdValue when no id field is declared", () => {
-    const Post = defineTable("post", { title: sz.string() });
+    const Post = defineTable("post", { title: s.string() });
     const link = Post.record();
     expect(link.tables).toEqual(["post"]);
     expect(link.schema.safeParse(new RecordId("post", 5)).success).toBe(true);

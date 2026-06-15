@@ -1,5 +1,5 @@
+import type { DefineStatement } from "@schemic/core";
 import type { Command } from "commander";
-import type { DefineStatement } from "surreal-zod";
 import type { Snapshot } from "./meta";
 import type { DbStructured } from "./structure";
 

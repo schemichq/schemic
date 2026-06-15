@@ -1,13 +1,13 @@
 {
-  "name": "surreal-zod",
+  "name": "@schemic/core",
   "version": "0.1.0-alpha.0",
-  "description": "Author SurrealDB schemas with Zod — sz.* drop-in, SurrealQL DDL generation, and JS<->DB codecs.",
+  "description": "Author SurrealDB schemas with Zod — s.* drop-in, SurrealQL DDL generation, and JS<->DB codecs.",
   "type": "module",
   "module": "lib/index.js",
   "types": "lib/index.d.ts",
   "bin": {
-    "surreal-zod": "lib/cli.js",
-    "sz": "lib/cli.js"
+    "schemic": "lib/cli.js",
+    "sc": "lib/cli.js"
   },
   "files": [
     "lib",
