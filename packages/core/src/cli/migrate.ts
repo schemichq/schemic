@@ -11,7 +11,7 @@ import { type Driver, getDriver, type MigrationStore } from "../driver";
 import type { Shape, StandaloneDef, TableDef } from "../pure";
 import type { ResolvedConfig } from "./config";
 import { makeJiti } from "./config";
-import { type Diff, isEmptyDiff, renderMigration } from "./diff";
+import { type Diff, isEmptyDiff } from "./diff";
 import {
   type Filter,
   filterPortable,
@@ -158,7 +158,7 @@ export function prepareMigration(
   return {
     tag,
     file: `${tag}.surql`,
-    content: renderMigration(tag, diff),
+    content: migStore(config).render(tag, diff),
     next,
     up: diff.up.length,
     down: diff.down.length,

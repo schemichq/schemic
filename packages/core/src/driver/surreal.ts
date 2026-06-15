@@ -12,7 +12,7 @@ import type {
   ResolvedConfig,
 } from "../cli/config";
 import { connect as surrealConnect } from "../cli/config";
-import { type Diff, diffSnapshots } from "../cli/diff";
+import { type Diff, diffSnapshots, renderMigration } from "../cli/diff";
 import { applyStatements, shadowStructured } from "../cli/introspect";
 import { schemaStruct } from "../cli/lower";
 import type { Snapshot } from "../cli/meta";
@@ -93,6 +93,7 @@ async function ensureTrackTable(conn: Surreal, table: string): Promise<void> {
 const lockTableOf = (table: string) => `${table}_lock`;
 
 const migrations: MigrationStore<Surreal> = {
+  render: (tag, diff) => renderMigration(tag, diff),
   ensure: ensureTrackTable,
 
   async applied(conn, table) {
