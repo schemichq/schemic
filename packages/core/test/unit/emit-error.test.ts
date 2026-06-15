@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildSnapshot } from "../../src/cli/diff";
+import { buildSnapshot } from "../../src/cli/surreal-diff";
 import { defineTable, s } from "../../src/pure";
 
 test("a non-Surreal field type error names the field + table", () => {

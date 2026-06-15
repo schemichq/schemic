@@ -11,14 +11,12 @@ import {
   s,
   surql,
 } from "@schemic/core";
+import { formatPatch, summarizeKinds, tokenDiff } from "../../src/cli/diff";
 import {
   buildSnapshot,
   diffSnapshots,
-  formatPatch,
   renderMigration,
-  summarizeKinds,
-  tokenDiff,
-} from "../../src/cli/diff";
+} from "../../src/cli/surreal-diff";
 import { EMPTY_SNAPSHOT } from "../../src/cli/meta";
 
 const User = defineTable("user", { id: s.string(), name: s.string() });

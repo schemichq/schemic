@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { buildSnapshot, diffSnapshots, formatItems } from "../../src/cli/diff";
+import { formatItems } from "../../src/cli/diff";
+import { buildSnapshot, diffSnapshots } from "../../src/cli/surreal-diff";
 import { EMPTY_SNAPSHOT } from "../../src/cli/meta";
 import { defineTable, s } from "../../src/pure";
 

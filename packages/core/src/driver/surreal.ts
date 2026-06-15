@@ -12,7 +12,8 @@ import type {
   ResolvedConfig,
 } from "../cli/config";
 import { connect as surrealConnect } from "../cli/config";
-import { type Diff, diffSnapshots, renderMigration } from "../cli/diff";
+import type { Diff } from "../cli/diff";
+import { diffSnapshots, renderMigration } from "../cli/surreal-diff";
 import { applyStatements, shadowStructured } from "../cli/introspect";
 import { schemaStruct } from "../cli/lower";
 import type { Snapshot } from "../cli/meta";

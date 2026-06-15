@@ -11,7 +11,6 @@ import {
   type ResolvedConfig,
 } from "./config";
 import {
-  buildSnapshot,
   type Diff,
   type DiffItem,
   formatDiff,
@@ -20,6 +19,7 @@ import {
   isEmptyDiff,
   summarizeKinds,
 } from "./diff";
+import { buildSnapshot } from "./surreal-diff";
 import {
   connectEmbedded,
   spawnEphemeralServer,

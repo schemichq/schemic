@@ -11,7 +11,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { defineTable, emitTable, s } from "@schemic/core";
 import { Surreal } from "surrealdb";
 import { z } from "zod";
-import { buildSnapshot, diffSnapshots } from "../../src/cli/diff";
+import { buildSnapshot, diffSnapshots } from "../../src/cli/surreal-diff";
 
 const NS = "__sz_migrate";
 const DB = "ml";

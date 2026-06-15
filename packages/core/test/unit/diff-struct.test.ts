@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { buildSnapshot, diffSnapshots, isEmptyDiff } from "../../src/cli/diff";
+import { isEmptyDiff } from "../../src/cli/diff";
+import { buildSnapshot, diffSnapshots } from "../../src/cli/surreal-diff";
 import { defineTable, s } from "../../src/pure";
 
 const snap = (role: ReturnType<typeof s.enum>) => {

@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { type DefineStatement, overwriteStatement } from "@schemic/core";
 import { escapeIdent, type Surreal } from "surrealdb";
 import type { ResolvedConfig } from "./config";
-import { buildSnapshot, type Diff, diffSnapshots } from "./diff";
+import type { Diff } from "./diff";
+import { buildSnapshot, diffSnapshots } from "./surreal-diff";
 import {
   type Filter,
   filterSnapshot,
