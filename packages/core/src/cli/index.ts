@@ -263,12 +263,12 @@ const dbFlags = (cmd: Command): Command =>
 
 const program = new Command();
 program
-  .name("@schemic/core")
+  .name("schemic")
   .description(
     "Author SurrealDB schemas with Zod — DDL generation + migrations",
   )
   .version("0.1.0-alpha.0")
-  .showHelpAfterError("(run `@schemic/core --help` for usage)")
+  .showHelpAfterError("(run `schemic --help` for usage)")
   .addHelpText(
     "after",
     `
