@@ -1,6 +1,6 @@
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Duration, type Surreal } from "surrealdb";
-import type { App } from "surreal-zod";
+import type { App } from "@schemic/core";
 import type { Task, User } from "../../src/schema";
 import {
   type AppProject,

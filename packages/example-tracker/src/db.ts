@@ -21,7 +21,7 @@ const env = (key: string): string | undefined =>
 
 export const DB: DbConfig = {
   url: env("SURREAL_URL") ?? "ws://127.0.0.1:8000/rpc",
-  namespace: env("SURREAL_NS") ?? "surreal-zod",
+  namespace: env("SURREAL_NS") ?? "schemic",
   database: env("SURREAL_DB") ?? "tracker",
   access: env("SURREAL_ACCESS") ?? "account",
 };

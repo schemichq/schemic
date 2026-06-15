@@ -27,7 +27,7 @@ export function Auth({ busy, error, onSubmit }: AuthProps) {
     <div className="center">
       <form className="card auth" onSubmit={submit}>
         <h1>tracker</h1>
-        <p className="muted">Direct-to-SurrealDB, schema shared via surreal-zod.</p>
+        <p className="muted">Direct-to-SurrealDB, schema shared via Schemic.</p>
 
         <div className="tabs">
           <button

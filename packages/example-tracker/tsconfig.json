@@ -4,6 +4,9 @@
     "target": "ESNext",
     "module": "Preserve",
     "moduleResolution": "bundler",
+    // Resolve @schemic/* via its "bun" export condition (-> src/*.ts) so the example
+    // typechecks against source directly — no `bun run build` of the lib required.
+    "customConditions": ["bun"],
     "moduleDetection": "force",
     "jsx": "react-jsx",
     "allowImportingTsExtensions": true,

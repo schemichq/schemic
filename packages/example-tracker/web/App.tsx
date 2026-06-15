@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { type Surreal, surql } from "surrealdb";
-import type { App as AppType } from "surreal-zod";
+import type { App as AppType } from "@schemic/core";
 import { connect, signIn, signUp } from "../src/db";
 import { User } from "../src/schema";
 import { Auth, type AuthFields, type AuthMode } from "./components/Auth";

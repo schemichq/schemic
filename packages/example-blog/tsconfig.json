@@ -11,6 +11,9 @@
 
     // Bundler mode
     "moduleResolution": "bundler",
+    // Resolve @schemic/* via its "bun" export condition (-> src/*.ts) so the example
+    // typechecks against source directly — no `bun run build` of the lib required.
+    "customConditions": ["bun"],
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
@@ -19,7 +22,9 @@
     "strict": true,
     "skipLibCheck": true,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedIndexedAccess": true,
+    // Off: with customConditions resolving @schemic/* to source, this flag would otherwise
+    // be applied to the lib's source too (which doesn't enforce it on itself).
+    "noUncheckedIndexedAccess": false,
     "noImplicitOverride": true,
 
     // Some stricter flags (disabled by default)
