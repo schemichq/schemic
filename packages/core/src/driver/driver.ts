@@ -14,6 +14,8 @@
 
 import type { ResolvedConfig } from "../cli/config";
 import type { Diff } from "../cli/diff";
+import type { Filter } from "../cli/filter";
+import type { PullPlan } from "../cli/merge";
 import type { PortableDb } from "./portable-ir";
 
 /**
@@ -193,6 +195,62 @@ export interface Driver<
   readonly shadow?: ShadowCapability<Conn>;
   /** Apply-time migration bookkeeping. Absent -> this driver can't run migrations (diff/gen still do). */
   readonly migrations?: MigrationStore<Conn>;
+
+  // --- optional COMMAND capabilities ---------------------------------------------------------
+  // The dialect-agnostic CLI routes each schema-syncing command through one of these. A driver that
+  // omits a capability makes that command unavailable on it — the CLI never hardcodes `if surreal`.
+
+  /**
+   * Diff the LIVE database against the loaded schema into executable up/down DDL. Owns every
+   * dialect-specific normalization and apply-time fixup (Surreal: a shadow-DB round-trip to cancel
+   * formatting noise, the redacted-access-key swap, and the implicit-wildcard OVERWRITE re-mark), so
+   * the result is safe to apply as-is. Backs `diff --live`, `push`, and the baseline reconcile.
+   */
+  diffLive?(conn: Conn, config: ResolvedConfig, filter: Filter): Promise<Diff>;
+  /** Reduce a live diff (from {@link diffLive}) to the statements `push` applies; `prune: false` keeps removals. */
+  syncPlan?(diff: Diff, prune?: boolean): string[];
+  /**
+   * Render a portable IR to per-file authoring source in THIS dialect's `s.*` syntax, filtered — the
+   * codegen behind the offline `diff --ts`. `single` (a file key) folds everything into one combined
+   * module; otherwise `fileFor` maps each object to its own file. Same renderer `pull` writes with.
+   */
+  renderSchema?(
+    db: PortableDb,
+    filter: Filter,
+    fileFor: (kind: string, name: string) => string,
+    single?: string,
+  ): Map<string, string>;
+  /**
+   * The two sides of `diff --ts --live` rendered to per-file source: the live DB (`current`) and the
+   * declared schema (`desired`), both normalized through the dialect so an unchanged schema yields
+   * identical files.
+   */
+  diffTsLive?(
+    conn: Conn,
+    config: ResolvedConfig,
+    filter: Filter,
+    fileFor: (kind: string, name: string) => string,
+    single?: string,
+  ): Promise<{ current: Map<string, string>; desired: Map<string, string> }>;
+  /**
+   * Replay every migration into a throwaway engine and diff the result against the schema (`check`).
+   * Owns ephemeral-engine selection + setup; `log` receives progress lines. Needs a {@link shadow}-
+   * class capability. An empty diff means the migrations reproduce the schema.
+   */
+  checkReplay?(
+    config: ResolvedConfig,
+    over: ConnectionOverrides,
+    filter: Filter,
+    log: (msg: string) => void,
+  ): Promise<Diff>;
+  /** Introspect the live DB and plan schema-file codegen (`pull`); writing is the neutral `applyPull`. */
+  planPull?(
+    conn: Conn,
+    config: ResolvedConfig,
+    opts: { filter: Filter; keepLocal?: boolean },
+  ): Promise<PullPlan>;
+  /** A human-readable server identity for `doctor` (e.g. "SurrealDB 3.1.3"); throws if unreachable. */
+  serverInfo?(conn: Conn): Promise<string>;
 }
 
 // --- Registry -----------------------------------------------------------------------------------

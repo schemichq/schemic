@@ -1,16 +1,16 @@
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join, relative } from "node:path";
 import { formatForAssert } from "@schemic/core";
 import type { Surreal } from "surrealdb";
 import type { ResolvedConfig } from "./config";
 import { type Filter, parseFilter } from "./filter";
-import { type LocalOnly, mergeUnits, type RenderedUnit } from "./merge";
+import {
+  type LocalOnly,
+  mergeUnits,
+  type PullFilePlan,
+  type PullPlan,
+  type RenderedUnit,
+} from "./merge";
 import { existingTables, scanLocalEntities } from "./schema";
 import {
   type DbStructured,
@@ -632,29 +632,6 @@ function topoSort<T extends { name: string; deps: string[] }>(items: T[]): T[] {
   return out;
 }
 
-/** What pulling would do to one schema file. */
-export interface PullFilePlan {
-  /** Path relative to the project root (for display). */
-  rel: string;
-  /** Absolute path on disk. */
-  abs: string;
-  /**
-   * `create` (new file), `update` (merged edits), `unchanged` (already matches the DB), or `delete`
-   * (a file that is purely local-only entities the DB doesn't have — removed when mirroring).
-   */
-  action: "create" | "update" | "unchanged" | "delete";
-  /** Current file contents (`""` for a new file). */
-  before: string;
-  /** Contents after the pull (the merged result). */
-  after: string;
-  /** Local-only content this file would drop when mirroring the DB. */
-  localOnly: LocalOnly;
-}
-
-export interface PullPlan {
-  files: PullFilePlan[];
-}
-
 const EMPTY_LOCAL: LocalOnly = { fields: [], objects: [] };
 
 /**
@@ -793,22 +770,6 @@ function planFile(
     after: content,
     localOnly,
   };
-}
-
-/** Apply a plan: write created/updated files, delete local-only files. Returns the paths touched. */
-export function applyPull(plan: PullPlan): string[] {
-  const touched: string[] = [];
-  for (const f of plan.files) {
-    if (f.action === "unchanged") continue;
-    if (f.action === "delete") {
-      rmSync(f.abs, { force: true });
-    } else {
-      mkdirSync(dirname(f.abs), { recursive: true });
-      writeFileSync(f.abs, f.after);
-    }
-    touched.push(f.rel);
-  }
-  return touched;
 }
 
 /** The rendered unit for one db-level function. */

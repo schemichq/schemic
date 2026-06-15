@@ -12,13 +12,28 @@ import type {
   ResolvedConfig,
 } from "../cli/config";
 import type { Diff } from "../cli/diff";
-import { applyStatements, shadowStructured } from "../cli/introspect";
+import {
+  connectEmbedded,
+  spawnEphemeralServer,
+  surrealBinaryAvailable,
+} from "../cli/engine";
+import {
+  applyStatements,
+  diffAgainstDb,
+  shadowStructured,
+  syncPlan,
+  tsStructsAgainstDb,
+  verifyMigrations,
+} from "../cli/introspect";
 import { schemaStruct } from "../cli/lower";
+import type { RenderedUnit } from "../cli/merge";
+import { planPull, renderPerFile, renderSchemaToTS } from "../cli/pull";
 import { deepEqual, normalizeDb } from "../cli/struct";
-import type { Snapshot } from "../cli/structure";
+import type { DbStructured, Snapshot } from "../cli/structure";
 import { introspectStructured, structuredSnapshot } from "../cli/structure";
 import { connect as surrealConnect } from "../cli/surreal-connect";
 import { diffSnapshots, renderMigration } from "../cli/surreal-diff";
+import { filterStructured } from "../cli/surreal-filter";
 import {
   type DefineStatement,
   overwriteStatement,
@@ -153,6 +168,23 @@ const migrations: MigrationStore<Surreal> = {
   },
 };
 
+/**
+ * Render a structured schema to per-file source: one combined module under `single`, else one file
+ * per object via `fileFor`. Shared by `renderSchema` (offline `diff --ts`) and `diffTsLive`.
+ */
+function renderFiles(
+  struct: DbStructured,
+  fileFor: (kind: string, name: string) => string,
+  single?: string,
+): Map<string, string> {
+  return single
+    ? new Map([[single, renderSchemaToTS(struct)]])
+    : renderPerFile(
+        struct,
+        fileFor as (kind: RenderedUnit["kind"], name: string) => string,
+      );
+}
+
 export const surrealDriver: Driver<
   Surreal,
   TableDef<string, Shape>,
@@ -242,6 +274,118 @@ export const surrealDriver: Driver<
 
   shadow,
   migrations,
+
+  // --- command capabilities (thin adapters over the existing surreal cli functions) ----------
+
+  diffLive: (conn, config, filter) => diffAgainstDb(conn, config, filter),
+  syncPlan: (diff, prune) => syncPlan(diff, prune),
+
+  // Offline `diff --ts`: lower the portable IR back to the string-kind struct, filter, render.
+  renderSchema(db, filter, fileFor, single) {
+    return renderFiles(filterStructured(lowerDb(db), filter), fileFor, single);
+  },
+
+  // Live `diff --ts`: both sides normalized through SurrealDB, then rendered per file.
+  async diffTsLive(conn, config, filter, fileFor, single) {
+    const { current, desired } = await tsStructsAgainstDb(conn, config, filter);
+    return {
+      current: renderFiles(current, fileFor, single),
+      desired: renderFiles(desired, fileFor, single),
+    };
+  },
+
+  planPull: (conn, config, opts) => planPull(conn, config, opts),
+
+  async serverInfo(conn) {
+    let v = "unknown";
+    try {
+      v = (await conn.version()).version;
+    } catch {
+      // server version unavailable
+    }
+    return `SurrealDB ${v}`;
+  },
+
+  // `check`: replay every migration into a throwaway engine and diff the result against the schema.
+  // Owns ephemeral-engine selection — an embedded @surrealdb/node instance, an ephemeral server from
+  // the local `surreal` binary, or a configured scratch server — and the replay never touches the
+  // real database. Progress lines go to `log`; the empty/non-empty diff is reported by the caller.
+  async checkReplay(config, over, filter, log) {
+    const engine = config.checkEngine;
+    const useBinary =
+      engine === "binary" ||
+      (engine === "auto" && surrealBinaryAvailable(config.checkBinary));
+    if (engine === "binary" && !useBinary) {
+      throw new Error(
+        'check.engine "binary" needs the `surreal` CLI on PATH (or set `check.binary`). Run `schemic check --schema` to skip the replay.',
+      );
+    }
+
+    let db: Surreal;
+    let checkCfg: ResolvedConfig;
+    let cleanup: () => Promise<void>;
+    if (typeof engine === "object") {
+      const embedded = await connectEmbedded(engine, "check", "check");
+      db = embedded.db;
+      checkCfg = {
+        ...config,
+        db: {
+          url: embedded.url,
+          namespace: "check",
+          database: "check",
+          authLevel: "root",
+        },
+      };
+      cleanup = embedded.stop;
+      log(
+        `  replaying on an ${embedded.url} SurrealDB (@surrealdb/node) — no server, your data untouched`,
+      );
+    } else if (useBinary) {
+      const server = await spawnEphemeralServer(config.checkBinary);
+      checkCfg = {
+        ...config,
+        db: {
+          url: server.url,
+          namespace: "check",
+          database: "check",
+          username: server.username,
+          password: server.password,
+          authLevel: "root",
+        },
+      };
+      db = await surrealConnect(checkCfg, {});
+      cleanup = async () => {
+        await db.close().catch(() => {});
+        await server.stop();
+      };
+      log(
+        "  replaying on an ephemeral in-memory SurrealDB (local `surreal` binary) — your server is untouched",
+      );
+    } else {
+      checkCfg = { ...config, db: config.checkDb };
+      try {
+        db = await surrealConnect(checkCfg, over as CfgOverrides);
+      } catch (e) {
+        throw new Error(
+          `${e instanceof Error ? e.message : String(e)}\n  (run \`schemic check --schema\` to skip the replay, install the \`surreal\` CLI for an in-memory engine, or set \`check.db\` to point the replay at a scratch server)`,
+        );
+      }
+      cleanup = async () => {
+        await db.close().catch(() => {});
+      };
+      log(
+        `  replaying on ${config.checkDb.url} (${config.checkDb.namespace}) — isolated scratch databases; your data is untouched`,
+      );
+    }
+
+    try {
+      return await verifyMigrations(db, checkCfg, filter, (tag) =>
+        log(`  ${tag}`),
+      );
+    } finally {
+      await cleanup();
+    }
+  },
 };
 
 registerDriver(surrealDriver as Driver<unknown>);

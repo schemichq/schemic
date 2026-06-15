@@ -34,7 +34,14 @@ import {
   verifyMigrations,
 } from "./introspect";
 import { schemaStruct } from "./lower";
-import { actionLabel, lineDiff, unifiedDiff } from "./merge";
+import {
+  actionLabel,
+  applyPull,
+  lineDiff,
+  type PullFilePlan,
+  type PullPlan,
+  unifiedDiff,
+} from "./merge";
 import {
   EMPTY_STORED,
   listMigrations,
@@ -57,14 +64,7 @@ import {
 } from "./migrate";
 import { pipeThroughPager, resolvePager } from "./pager";
 import { portableDiff } from "./portable-diff";
-import {
-  applyPull,
-  type PullFilePlan,
-  type PullPlan,
-  planPull,
-  renderPerFile,
-  renderSchemaToTS,
-} from "./pull";
+import { planPull, renderPerFile, renderSchemaToTS } from "./pull";
 import {
   duplicateTables,
   existingTables,

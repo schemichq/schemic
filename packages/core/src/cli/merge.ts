@@ -4,6 +4,8 @@
 // object/field it defines; the only thing at risk is LOCAL-ONLY content (a field or whole const
 // that exists in your files but not in the DB), which the caller resolves via keep/drop.
 
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { generateCode, parseModule } from "magicast";
 import { colorEnabled, style } from "./style";
 
@@ -39,6 +41,46 @@ export interface MergeOptions {
   keepLocalFields: boolean;
   /** Keep local-only consts (objects the DB no longer has). */
   keepLocalObjects: boolean;
+}
+
+/** What pulling would do to one schema file. */
+export interface PullFilePlan {
+  /** Path relative to the project root (for display). */
+  rel: string;
+  /** Absolute path on disk. */
+  abs: string;
+  /**
+   * `create` (new file), `update` (merged edits), `unchanged` (already matches the DB), or `delete`
+   * (a file that is purely local-only entities the DB doesn't have — removed when mirroring).
+   */
+  action: "create" | "update" | "unchanged" | "delete";
+  /** Current file contents (`""` for a new file). */
+  before: string;
+  /** Contents after the pull (the merged result). */
+  after: string;
+  /** Local-only content this file would drop when mirroring the DB. */
+  localOnly: LocalOnly;
+}
+
+/** A driver's introspection rendered into a per-file write plan (see a driver's `planPull`). */
+export interface PullPlan {
+  files: PullFilePlan[];
+}
+
+/** Apply a plan: write created/updated files, delete local-only files. Returns the paths touched. */
+export function applyPull(plan: PullPlan): string[] {
+  const touched: string[] = [];
+  for (const f of plan.files) {
+    if (f.action === "unchanged") continue;
+    if (f.action === "delete") {
+      rmSync(f.abs, { force: true });
+    } else {
+      mkdirSync(dirname(f.abs), { recursive: true });
+      writeFileSync(f.abs, f.after);
+    }
+    touched.push(f.rel);
+  }
+  return touched;
 }
 
 // --- AST helpers ------------------------------------------------------------------------------
