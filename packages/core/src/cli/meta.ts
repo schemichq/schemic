@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import type { DefineStatement } from "@schemic/core";
+import { liftDb, type PortableDb } from "../driver/portable-ir";
 import type { DbStructured } from "./structure";
 
 /** A snapshot statement: the emitted DDL plus the source file it came from (for `diff` annotations). */
@@ -16,7 +17,11 @@ export type SnapshotStatement = DefineStatement & {
   file?: string;
 };
 
-/** Canonical schema state used to diff against the next `generate`. */
+/**
+ * The legacy STATEMENT snapshot (canonical SurrealQL DDL keyed by `kind:table:name`, + optional
+ * Struct). No longer the stored form — it is the Surreal driver's INTERNAL diff data model
+ * (`diffSnapshots`/`buildSnapshot`/`structuredSnapshot`), derived on demand from the portable IR.
+ */
 export interface Snapshot {
   version: 1;
   statements: Record<string, SnapshotStatement>;
@@ -24,6 +29,27 @@ export interface Snapshot {
    * The normalized Struct-IR of the same schema (added by `gen`/`baseline`). Used to render the
    * schema as TypeScript for `diff --ts`; absent in older snapshots (re-`gen` to populate it).
    */
+  struct?: DbStructured;
+}
+
+/**
+ * The STORED snapshot (`_snapshot.json`): the canonical **portable IR** is the single source of
+ * truth; DDL is derived via the driver (`driver.emit`/`driver.diff`). Diffed against the next
+ * `generate`. `files` maps each object's table/db-level name to its project-root-relative source
+ * file (display-only; attached to diff items by the CLI). A v1 snapshot on disk is upgraded on read.
+ */
+export interface StoredSnapshot {
+  version: 2;
+  /** The driver that authored this snapshot ("surreal", "postgres", …). */
+  driver: string;
+  portable: PortableDb;
+  files?: Record<string, string>;
+}
+
+/** A pre-portable (v1) snapshot still on disk, for read-compat. */
+interface LegacySnapshotV1 {
+  version: 1;
+  statements: Record<string, SnapshotStatement>;
   struct?: DbStructured;
 }
 
@@ -35,22 +61,53 @@ export interface Migration {
   file: string;
 }
 
+/** The empty STATEMENT snapshot — the Surreal engine's "nothing yet" sentinel (e.g. baseline diff). */
 export const EMPTY_SNAPSHOT: Snapshot = { version: 1, statements: {} };
 
 const SNAPSHOT_FILE = "_snapshot.json";
 const MIGRATION_EXT = ".surql";
 
-function readJson<T>(path: string, fallback: T): T {
-  if (!existsSync(path)) return fallback;
-  return JSON.parse(readFileSync(path, "utf8")) as T;
+/** A fresh empty STORED snapshot. Fresh each call so callers can't alias shared empty state. */
+function emptyStored(): StoredSnapshot {
+  return {
+    version: 2,
+    driver: "surreal",
+    portable: { tables: [], functions: [], accesses: [] },
+    files: {},
+  };
 }
 
-export function readSnapshot(metaDir: string): Snapshot {
-  // Fresh fallback each call — callers may mutate the result.
-  return readJson(join(metaDir, SNAPSHOT_FILE), { version: 1, statements: {} });
+/** The empty STORED snapshot — used as `prev` for a `--baseline` generate (diff against nothing). */
+export const EMPTY_STORED: StoredSnapshot = emptyStored();
+
+/** Read the stored snapshot, upgrading a legacy v1 (statement) snapshot to the portable form. */
+export function readSnapshot(metaDir: string): StoredSnapshot {
+  const path = join(metaDir, SNAPSHOT_FILE);
+  if (!existsSync(path)) return emptyStored();
+  const raw = JSON.parse(readFileSync(path, "utf8")) as
+    | StoredSnapshot
+    | LegacySnapshotV1;
+  if (raw.version === 2) return { files: {}, ...raw };
+  return upgradeV1(raw);
 }
 
-export function writeSnapshot(metaDir: string, snapshot: Snapshot): void {
+/** Lift a v1 statement snapshot into the portable form (Surreal-only — v1 predates multi-driver). */
+function upgradeV1(v1: LegacySnapshotV1): StoredSnapshot {
+  if (v1.struct)
+    return {
+      version: 2,
+      driver: "surreal",
+      portable: liftDb(v1.struct),
+      files: {},
+    };
+  if (Object.keys(v1.statements ?? {}).length === 0) return emptyStored();
+  throw new Error(
+    "The migration snapshot predates the portable format and has no recorded Struct. " +
+      "Run `schemic snapshot reset` then `schemic gen --baseline` to regenerate it.",
+  );
+}
+
+export function writeSnapshot(metaDir: string, snapshot: StoredSnapshot): void {
   mkdirSync(metaDir, { recursive: true });
   writeFileSync(
     join(metaDir, SNAPSHOT_FILE),

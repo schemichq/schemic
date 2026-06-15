@@ -5,37 +5,71 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { escapeIdent, type Surreal } from "surrealdb";
+import { type Driver, getDriver } from "../driver";
+import type { Shape, StandaloneDef, TableDef } from "../pure";
 import type { ResolvedConfig } from "./config";
 import { makeJiti } from "./config";
-import {
-  buildSnapshot,
-  type Diff,
-  diffSnapshots,
-  isEmptyDiff,
-  renderMigration,
-} from "./diff";
+import { type Diff, isEmptyDiff, renderMigration } from "./diff";
 import {
   type Filter,
-  filterSnapshot,
-  included,
-  mergeSnapshot,
+  filterPortable,
+  intersectPortable,
+  mergeStored,
   parseFilter,
 } from "./filter";
-import { introspect } from "./introspect";
 import {
   checksum,
-  EMPTY_SNAPSHOT,
+  EMPTY_STORED,
   listMigrations,
   type Migration,
   readSnapshot,
-  type Snapshot,
+  type StoredSnapshot,
   slug,
   timestamp,
   writeSnapshot,
 } from "./meta";
-import { loadDefs } from "./schema";
+import { type AnyTable, loadDefs } from "./schema";
+
+/**
+ * Build the canonical STORED snapshot from the authored schema: lower to the portable IR via the
+ * driver, plus a name->source-file map (display-only; attached to diff items by `attachFiles`).
+ */
+function buildStored(
+  driver: Driver,
+  tables: AnyTable[],
+  defs: StandaloneDef[],
+  opts: { fileOf?: Map<unknown, string>; root?: string } = {},
+): StoredSnapshot {
+  const portable = driver.lower(
+    tables as unknown as TableDef<string, Shape>[],
+    defs,
+  );
+  const files: Record<string, string> = {};
+  const rel = (abs: string) => (opts.root ? relative(opts.root, abs) : abs);
+  for (const t of tables) {
+    const abs = opts.fileOf?.get(t);
+    if (abs) files[t.name] = rel(abs);
+  }
+  for (const d of defs) {
+    const abs = opts.fileOf?.get(d);
+    if (abs) files[d.kind === "event" ? d.table : d.name] = rel(abs);
+  }
+  return { version: 2, driver: driver.name, portable, files };
+}
+
+/** Decorate diff items with their source file (from the snapshot `files` maps; driver leaves it unset). */
+function attachFiles(
+  diff: Diff,
+  prevFiles: Record<string, string>,
+  nextFiles: Record<string, string>,
+): void {
+  for (const it of diff.items ?? []) {
+    const primary = it.op === "remove" ? prevFiles : nextFiles;
+    it.file = primary[it.table] ?? nextFiles[it.table] ?? prevFiles[it.table];
+  }
+}
 
 export type Direction = "up" | "down";
 
@@ -49,7 +83,7 @@ export interface GenerateResult {
 
 export interface MigrationPlan {
   diff: Diff;
-  next: Snapshot;
+  next: StoredSnapshot;
 }
 
 /**
@@ -63,18 +97,16 @@ export async function planMigration(
   opts: { baseline?: boolean } = {},
 ): Promise<MigrationPlan> {
   const { tables, defs, fileOf } = await loadDefs(config.schemaPath);
-  const next = buildSnapshot(tables, defs, {
-    fileOf,
-    root: config.root,
-    withStruct: true,
-  });
-  const prev = opts.baseline ? EMPTY_SNAPSHOT : readSnapshot(config.metaDir);
-  const diff = diffSnapshots(
-    filterSnapshot(prev, filter),
-    filterSnapshot(next, filter),
+  const driver = getDriver(config.driver ?? "surreal");
+  const next = buildStored(driver, tables, defs, { fileOf, root: config.root });
+  const prev = opts.baseline ? EMPTY_STORED : readSnapshot(config.metaDir);
+  const diff = driver.diff(
+    filterPortable(prev.portable, filter),
+    filterPortable(next.portable, filter),
   );
+  attachFiles(diff, prev.files ?? {}, next.files ?? {});
   // Persist only the generated kinds; excluded kinds (e.g. access) keep their prior snapshot state.
-  return { diff, next: mergeSnapshot(prev, next, filter) };
+  return { diff, next: mergeStored(prev, next, filter) };
 }
 
 /**
@@ -98,7 +130,7 @@ export interface PreparedMigration {
   file: string;
   /** The rendered `.surql` program (what will be written to disk). */
   content: string;
-  next: Snapshot;
+  next: StoredSnapshot;
   up: number;
   down: number;
 }
@@ -193,35 +225,41 @@ export async function baseline(
   config: ResolvedConfig,
   filter: Filter = parseFilter({}),
 ): Promise<GenerateResult> {
-  // What actually exists in the live DB (canonical INFO snapshot), used ONLY to scope the baseline:
-  // the keys tell us which objects the DB really has, so hand-written schema not yet in the DB stays
-  // pending for the next `schemic gen` instead of being silently marked applied.
-  const live = filterSnapshot(
-    await introspect(
+  const driver = getDriver(config.driver ?? "surreal");
+  // What actually exists in the live DB (canonical portable IR), used ONLY to scope the baseline:
+  // hand-written schema not yet in the DB stays pending for the next `schemic gen` rather than being
+  // silently marked applied.
+  const live = driver.normalize(
+    await driver.introspect(
       db,
       new Set([config.migrationsTable, `${config.migrationsTable}_lock`]),
     ),
-    filter,
   );
-  const liveKeys = new Set(Object.keys(live.statements));
-  // The snapshot stores GENERATOR-form DDL (what `schemic gen`/`schemic diff` compare against offline), NOT the
-  // INFO form — the two canonical forms differ (e.g. default `PERMISSIONS`, `ON TABLE`), so mixing
-  // them would make every later offline diff phantom. We take the just-pulled disk schema and keep
-  // only the objects that are present in the DB.
+  // The snapshot stores GENERATOR-form schema (what `schemic gen`/`schemic diff` compare against
+  // offline). We take the just-pulled disk schema and keep only the objects present in the DB —
+  // intersecting by name so the stored form stays the canonical (generator) one, not the INFO form.
   const { tables, defs, fileOf } = await loadDefs(config.schemaPath);
-  const disk = buildSnapshot(tables, defs, {
+  const disk = buildStored(driver, tables, defs, {
     fileOf,
     root: config.root,
-    withStruct: true,
   });
-  const pulled: Snapshot = { version: 1, statements: {} };
-  for (const [k, s] of Object.entries(disk.statements))
-    if (liveKeys.has(k) && included(filter, s)) pulled.statements[k] = s;
+  const pulledPortable = intersectPortable(disk.portable, live, filter);
+  const pulled: StoredSnapshot = {
+    version: 2,
+    driver: driver.name,
+    portable: pulledPortable,
+    files: disk.files,
+  };
 
   const prev = readSnapshot(config.metaDir);
+  const diff = driver.diff(
+    filterPortable(prev.portable, filter),
+    pulledPortable,
+  );
+  attachFiles(diff, prev.files ?? {}, pulled.files ?? {});
   const plan: MigrationPlan = {
-    diff: diffSnapshots(filterSnapshot(prev, filter), pulled),
-    next: mergeSnapshot(prev, pulled, filter),
+    diff,
+    next: mergeStored(prev, pulled, filter),
   };
   const prepared = prepareMigration(config, plan, "baseline");
   if (!prepared) {

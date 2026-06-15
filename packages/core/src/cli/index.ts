@@ -3,6 +3,7 @@ import { join, relative } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { Command, Help, Option } from "commander";
 import type { Surreal } from "surrealdb";
+import { lowerDb } from "../driver/portable-ir";
 import {
   type ConnectionOverrides,
   connect,
@@ -41,7 +42,7 @@ import {
 import { schemaStruct } from "./lower";
 import { actionLabel, lineDiff, unifiedDiff } from "./merge";
 import {
-  EMPTY_SNAPSHOT,
+  EMPTY_STORED,
   listMigrations,
   readSnapshot,
   writeSnapshot,
@@ -507,20 +508,26 @@ kindFlags(
                 if (!persistent) await db.close();
               }
             } else {
-              // Offline: the snapshot's recorded Struct vs the current schema's Struct.
+              // Offline: the snapshot's recorded schema (Struct derived from the portable IR) vs the
+              // current schema's Struct.
               const prev = readSnapshot(config.metaDir);
-              if (!prev.struct)
+              const prevStruct = lowerDb(prev.portable);
+              if (
+                !prevStruct.tables.length &&
+                !prevStruct.functions.length &&
+                !prevStruct.accesses.length
+              )
                 throw new Error(
-                  "offline diff --ts needs a Struct snapshot — run `schemic gen` (or `schemic pull --write`) to record one, or pass --live.",
+                  "offline diff --ts needs a snapshot — run `schemic gen` (or `schemic pull --write`) to record one, or pass --live.",
                 );
               const { tables, defs } = await loadDefs(config.schemaPath);
               const desired = schemaStruct(
-                // Bridge the lib/src TableDef duality (see buildSnapshot).
+                // Bridge the lib/src TableDef duality (see buildStored).
                 tables as unknown as Parameters<typeof schemaStruct>[0],
                 defs as unknown as Parameters<typeof schemaStruct>[1],
               );
               await showTsDiff(
-                filterStructured(prev.struct, filter),
+                filterStructured(prevStruct, filter),
                 filterStructured(desired, filter),
                 "Schema matches the snapshot.",
               );
@@ -676,7 +683,7 @@ configFlag(
 ).action((opts: CommonOpts) => {
   run(async () => {
     const config = await loadConfig({ config: opts.config });
-    writeSnapshot(config.metaDir, EMPTY_SNAPSHOT);
+    writeSnapshot(config.metaDir, EMPTY_STORED);
     console.log(ok("Snapshot cleared."));
     const existing = listMigrations(config.migrationsDir);
     if (existing.length) {

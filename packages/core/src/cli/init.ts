@@ -53,7 +53,16 @@ SURREAL_PASS=root
 SURREAL_AUTH_LEVEL=root
 `;
 
-const INITIAL_SNAPSHOT = `${JSON.stringify({ version: 1, statements: {} }, null, 2)}\n`;
+const INITIAL_SNAPSHOT = `${JSON.stringify(
+  {
+    version: 2,
+    driver: "surreal",
+    portable: { tables: [], functions: [], accesses: [] },
+    files: {},
+  },
+  null,
+  2,
+)}\n`;
 
 export interface InitResult {
   created: string[];
