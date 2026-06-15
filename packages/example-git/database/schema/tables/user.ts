@@ -1,4 +1,4 @@
-import { s, surql, defineTable } from "@schemic/core";
+import { s, surql, defineTable } from "@schemic/surreal";
 
 export const User = defineTable("user", {
   id: s.string(),

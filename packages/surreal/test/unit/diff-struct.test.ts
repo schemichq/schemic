@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isEmptyDiff } from "../../src/cli/diff";
+import { isEmptyDiff } from "@schemic/core";
 import { buildSnapshot, diffSnapshots } from "../../src/cli/surreal-diff";
 import { defineTable, s } from "../../src/pure";
 

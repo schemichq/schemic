@@ -6,12 +6,23 @@
 // portable IR the diff core and every other driver speak. In the eventual package split this file
 // becomes `@surreal-zod/surreal`; for now it lives in core, clearly marked.
 
-import { escapeIdent, type Surreal } from "surrealdb";
 import type {
+  ApplyOptions,
   ConnectionOverrides as CfgOverrides,
+  ConnectionOverrides,
+  Diff,
+  Driver,
+  EmitOptions,
+  MigrationRecord,
+  MigrationStore,
+  PortableDb,
+  RenderedUnit,
   ResolvedConfig,
+  ShadowCapability,
+  Statement,
 } from "@schemic/core";
-import type { Diff } from "@schemic/core";
+import { keyOf, registerDriver } from "@schemic/core";
+import { escapeIdent, type Surreal } from "surrealdb";
 import {
   connectEmbedded,
   spawnEphemeralServer,
@@ -26,7 +37,6 @@ import {
   verifyMigrations,
 } from "../cli/introspect";
 import { schemaStruct } from "../cli/lower";
-import type { RenderedUnit } from "@schemic/core";
 import { planPull, renderPerFile, renderSchemaToTS } from "../cli/pull";
 import { deepEqual, normalizeDb } from "../cli/struct";
 import type { DbStructured, Snapshot } from "../cli/structure";
@@ -40,19 +50,6 @@ import {
   removeStatement,
 } from "../ddl";
 import type { Shape, StandaloneDef, TableDef } from "../pure";
-import type {
-  ApplyOptions,
-  ConnectionOverrides,
-  Driver,
-  EmitOptions,
-  MigrationRecord,
-  MigrationStore,
-  ShadowCapability,
-  Statement,
-} from "@schemic/core";
-import { registerDriver } from "@schemic/core";
-import { keyOf } from "@schemic/core";
-import type { PortableDb } from "@schemic/core";
 import { liftDb, lowerDb } from "./surreal-ir";
 
 /**

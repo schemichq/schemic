@@ -1,30 +1,38 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 // Registers the "postgres" driver (now a separate package) for the `diff --driver postgres` test.
 import "@schemic/postgres";
-import type { ResolvedConfig } from "../../src/cli/config";
+import type { ResolvedConfig } from "@schemic/core";
+import { defineTable, s, surrealDriver } from "@schemic/surreal";
 import {
   diffPortable,
   planPortable,
   portableDiff,
 } from "../../src/cli/portable-diff";
-import { surrealDriver } from "../../src/driver/surreal";
-import { defineTable, s } from "../../src/pure";
 
 // CLI driver-parametric path (multi-DB spike): `sz diff --driver postgres` authors from sz.*,
 // connects to a real Postgres engine (PGlite), introspects, and reports the gap — all through the
 // CLI's portable-diff function. Mirrors the e2e symlink-farm so a jiti-loaded schema fixture can
 // `import "surreal-zod"` and resolve to this package's source.
 
-const CORE = join(import.meta.dir, "..", "..");
+const PKGS = join(import.meta.dir, "..", "..", ".."); // packages/
+const CLI_NM = join(import.meta.dir, "..", "..", "node_modules");
 const ROOT = join(import.meta.dir, "..", ".tmp-portable-diff");
 const SCHEMA = join(ROOT, "database", "schema", "tables");
 
 function makeConfig(): ResolvedConfig {
-  // Only the fields portableDiff reads need to be real; the rest are filler.
+  // Only the fields portableDiff reads need to be real; the rest are filler. `driver` is the
+  // AUTHORING driver (the schema imports `s` from @schemic/surreal); the postgres TARGET is the
+  // `driverName` arg to portableDiff. So authoring lowers via surreal, the gap is computed vs pg.
   return {
-    driver: "postgres",
+    driver: "surreal",
     db: { url: "" }, // embedded in-memory PGlite
     schemaPath: join(ROOT, "database", "schema"),
     root: ROOT,
@@ -41,12 +49,21 @@ function makeConfig(): ResolvedConfig {
 beforeAll(() => {
   rmSync(ROOT, { recursive: true, force: true });
   mkdirSync(SCHEMA, { recursive: true });
-  mkdirSync(join(ROOT, "node_modules", "@schemic"), { recursive: true });
-  // Symlink so the fixture's `import "@schemic/core"` resolves to this package (bun -> src export).
-  symlinkSync(CORE, join(ROOT, "node_modules", "@schemic", "core"), "dir");
+  // Symlink farm so the jiti-loaded fixture's `import "@schemic/surreal"` resolves to THIS source
+  // (bun -> src export → same module instance as the test's surrealDriver), plus its peer deps.
+  const scope = join(ROOT, "node_modules", "@schemic");
+  mkdirSync(scope, { recursive: true });
+  symlinkSync(join(PKGS, "surreal"), join(scope, "surreal"), "dir");
+  symlinkSync(join(PKGS, "core"), join(scope, "core"), "dir");
+  for (const dep of ["surrealdb", "zod"])
+    symlinkSync(
+      realpathSync(join(CLI_NM, dep)),
+      join(ROOT, "node_modules", dep),
+      "dir",
+    );
   writeFileSync(
     join(SCHEMA, "user.ts"),
-    `import { defineTable, s } from "@schemic/core";
+    `import { defineTable, s } from "@schemic/surreal";
 export const user = defineTable("user", {
   name: s.string(),
   age: s.int().optional(),

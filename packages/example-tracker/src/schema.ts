@@ -6,7 +6,7 @@ import {
   surql,
   s,
   type Wire,
-} from "@schemic/core";
+} from "@schemic/surreal";
 
 /**
  * Shared, isomorphic data model for the project/task tracker. Imported by the

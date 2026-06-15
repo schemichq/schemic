@@ -8,12 +8,16 @@
 // replace the full snapshot/migration-file pipeline (that stays Surreal-only until the engine-wide
 // kind->PortableType swap graduates from spike to implementation).
 
-import { getDriver } from "@schemic/core";
-import type { PortableDb } from "@schemic/core";
-import type { ResolvedConfig } from "@schemic/core";
-import { type DiffItem, formatItems } from "@schemic/core";
-import { loadDefs } from "@schemic/core";
-import { ok, plural, style } from "@schemic/core";
+import type { PortableDb, ResolvedConfig } from "@schemic/core";
+import {
+  type DiffItem,
+  formatItems,
+  getDriver,
+  loadDefs,
+  ok,
+  plural,
+  style,
+} from "@schemic/core";
 
 // The dialect-free diff engine lives in the driver layer; re-export so existing CLI/test imports
 // (`diffPortable`/`planPortable`) keep resolving here.
@@ -36,7 +40,10 @@ export async function portableDiff(
 
   // Desired = the declared schema, authored with sz.* and lifted to the portable IR.
   const { tables, defs } = await loadDefs(config.schemaPath);
-  const desired: PortableDb = getDriver(config.driver ?? "surreal").lower(tables, defs);
+  const desired: PortableDb = getDriver(config.driver ?? "surreal").lower(
+    tables,
+    defs,
+  );
 
   // Live = the target database, introspected through its own driver, then both sides normalized by
   // the target (which PROJECTS the portable IR onto what that DB can represent).

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { DefineStatement } from "@schemic/core";
-import { type Filter, parseFilter } from "../../src/cli/filter";
+import { type Filter, parseFilter } from "@schemic/core";
+import type { DefineStatement } from "@schemic/surreal";
 import {
   filterSnapshot,
   included,

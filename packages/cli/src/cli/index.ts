@@ -1,38 +1,46 @@
 import { watch as fsWatch } from "node:fs";
 import { join, relative } from "node:path";
 import { createInterface } from "node:readline/promises";
-import { Command, Help, Option } from "commander";
-import { type Driver, driverNames, getDriver } from "@schemic/core";
-import {
-  type ConnectionOverrides,
-  loadConfig as coreLoadConfig,
-  type ResolvedConfig,
-} from "@schemic/core";
-import {
-  type Diff,
-  type DiffItem,
-  formatDiff,
-  formatItems,
-  formatPatch,
-  isEmptyDiff,
-  summarizeKinds,
-} from "@schemic/core";
-import { type FilterOpts, kindFlags, parseFilter } from "@schemic/core";
-import { init } from "./init";
 import {
   actionLabel,
   applyPull,
+  type ConnectionOverrides,
+  loadConfig as coreLoadConfig,
+  type Diff,
+  type DiffItem,
+  type Driver,
+  driverNames,
+  duplicateTables,
+  EMPTY_STORED,
+  existingTables,
+  type FilterOpts,
+  fail,
+  formatDiff,
+  formatItems,
+  formatPatch,
+  getDriver,
+  isEmptyDiff,
+  kindFlags,
   lineDiff,
+  listMigrations,
+  loadDefs,
+  loadSchemas,
+  ok,
   type PullFilePlan,
   type PullPlan,
-  unifiedDiff,
-} from "@schemic/core";
-import {
-  EMPTY_STORED,
-  listMigrations,
+  parseFilter,
+  pipeThroughPager,
+  plural,
+  type ResolvedConfig,
   readSnapshot,
+  resolvePager,
+  style,
+  summarizeKinds,
+  unifiedDiff,
   writeSnapshot,
 } from "@schemic/core";
+import { Command, Help, Option } from "commander";
+import { init } from "./init";
 import {
   baseline,
   clearMigrationFiles,
@@ -47,15 +55,7 @@ import {
   status,
   unlock,
 } from "./migrate";
-import { pipeThroughPager, resolvePager } from "@schemic/core";
 import { portableDiff } from "./portable-diff";
-import {
-  duplicateTables,
-  existingTables,
-  loadDefs,
-  loadSchemas,
-} from "@schemic/core";
-import { fail, ok, plural, style } from "@schemic/core";
 
 /**
  * Dynamically load + register a database driver by name. Drivers are separate packages

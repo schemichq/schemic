@@ -186,4 +186,6 @@ export function emitSurqlType(p: PortableType): string {
     case "native":
       return p.name;
   }
+  // Unreachable: the switch is exhaustive over PortableType["t"].
+  throw new Error(`unhandled portable type: ${(p as { t: string }).t}`);
 }

@@ -11,7 +11,7 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Duration, RecordId, Surreal, surql } from "surrealdb";
-import type { App } from "@schemic/core";
+import type { App } from "@schemic/surreal";
 import { type DbConfig, DB, signIn, signUp } from "../src/db";
 import { Comment, Member, Project, Task, User } from "../src/schema";
 import { migrate } from "../setup";

@@ -1,14 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { getDriver, nullable, option, scalar } from "@schemic/core";
 import { schemaStruct } from "../../src/cli/lower";
 import { emitStatements } from "../../src/ddl";
-import {
-  getDriver,
-  liftDb,
-  nullable,
-  option,
-  scalar,
-  surrealDriver,
-} from "../../src/driver";
+import { surrealDriver } from "../../src/driver/surreal";
+import { liftDb } from "../../src/driver/surreal-ir";
 import { defineFunction, defineTable, s } from "../../src/pure";
 
 // Milestone 1: prove the Driver seam is real and behavior-preserving — the Surreal driver's pure ops

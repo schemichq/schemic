@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { formatPatch, summarizeKinds, tokenDiff } from "@schemic/core";
 // Import `s`/`table` by package name (like the CLI does) so the table types line up with the
 // `@schemic/core`-typed signatures in cli/diff (avoids src-vs-lib duplicate-declaration errors).
 import {
@@ -10,14 +11,13 @@ import {
   emitTable,
   s,
   surql,
-} from "@schemic/core";
-import { formatPatch, summarizeKinds, tokenDiff } from "../../src/cli/diff";
+} from "@schemic/surreal";
+import { EMPTY_SNAPSHOT } from "../../src/cli/structure";
 import {
   buildSnapshot,
   diffSnapshots,
   renderMigration,
 } from "../../src/cli/surreal-diff";
-import { EMPTY_SNAPSHOT } from "../../src/cli/structure";
 
 const User = defineTable("user", { id: s.string(), name: s.string() });
 

@@ -1,9 +1,14 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import {
+  filterPortable,
+  mergeStored,
+  parseFilter,
+  readSnapshot,
+  type StoredSnapshot,
+} from "@schemic/core";
 import { buildSnapshot } from "../../src/cli/surreal-diff";
-import { filterPortable, mergeStored, parseFilter } from "../../src/cli/filter";
-import { readSnapshot, type StoredSnapshot } from "../../src/cli/meta";
 import { surrealDriver } from "../../src/driver/surreal";
 import { defineTable, s } from "../../src/pure";
 

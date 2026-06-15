@@ -1,12 +1,14 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { type DefineStatement, overwriteStatement } from "../ddl";
+import type { Diff, ResolvedConfig } from "@schemic/core";
+import {
+  type Filter,
+  listMigrations,
+  loadDefs,
+  parseFilter,
+} from "@schemic/core";
 import { escapeIdent, type Surreal } from "surrealdb";
-import type { ResolvedConfig } from "@schemic/core";
-import type { Diff } from "@schemic/core";
-import { type Filter, parseFilter } from "@schemic/core";
-import { listMigrations } from "@schemic/core";
-import { loadDefs } from "@schemic/core";
+import { type DefineStatement, overwriteStatement } from "../ddl";
 import { normalizeDb } from "./struct";
 import {
   type DbStructured,

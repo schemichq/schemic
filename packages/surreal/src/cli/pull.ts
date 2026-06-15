@@ -1,17 +1,19 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { formatForAssert } from "../pure";
-import type { Surreal } from "surrealdb";
 import type { ResolvedConfig } from "@schemic/core";
-import { type Filter, parseFilter } from "@schemic/core";
 import {
+  existingTables,
+  type Filter,
   type LocalOnly,
   mergeUnits,
   type PullFilePlan,
   type PullPlan,
+  parseFilter,
   type RenderedUnit,
+  scanLocalEntities,
 } from "@schemic/core";
-import { existingTables, scanLocalEntities } from "@schemic/core";
+import type { Surreal } from "surrealdb";
+import { formatForAssert } from "../pure";
 import {
   type DbStructured,
   introspectStructured,
@@ -848,7 +850,11 @@ function mergeImports(units: RenderedUnit[]): string[] {
     }
   // @schemic/surreal first, then the relative cross-file imports (sorted).
   order.sort((a, b) =>
-    a === "@schemic/surreal" ? -1 : b === "@schemic/surreal" ? 1 : a.localeCompare(b),
+    a === "@schemic/surreal"
+      ? -1
+      : b === "@schemic/surreal"
+        ? 1
+        : a.localeCompare(b),
   );
   return order.map(
     (src) =>

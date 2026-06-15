@@ -1,4 +1,4 @@
-import { defineTable, s, surql } from "@schemic/core";
+import { defineTable, s, surql } from "@schemic/surreal";
 import { Post } from "./post";
 import { User } from "./user";
 

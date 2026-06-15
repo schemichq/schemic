@@ -5,6 +5,10 @@
 // dialect's whole tree into every consumer); the internal barrel (driver/index.ts) keeps those for
 // core-internal relative imports.
 
+// Types a driver's ops reference (Driver.connect/diff) — re-exported so a driver imports them from
+// the one SDK entry rather than reaching into core's cli/* internals.
+export type { ResolvedConfig } from "../cli/config";
+export type { Diff, DiffItem } from "../cli/diff";
 export type {
   ApplyOptions,
   Authored,
@@ -20,7 +24,15 @@ export type {
 } from "./driver";
 export { driverNames, getDriver, registerDriver } from "./driver";
 export type { GeometryKind, PortableType, ScalarName } from "./portable";
-export { array, literal, nullable, option, record, scalar, union } from "./portable";
+export {
+  array,
+  literal,
+  nullable,
+  option,
+  record,
+  scalar,
+  union,
+} from "./portable";
 export type {
   PortableAccess,
   PortableDb,
@@ -32,7 +44,3 @@ export type {
   PortableTable,
   PortableTableKind,
 } from "./portable-ir";
-// Types a driver's ops reference (Driver.connect/diff) — re-exported so a driver imports them from
-// the one SDK entry rather than reaching into core's cli/* internals.
-export type { ResolvedConfig } from "../cli/config";
-export type { Diff, DiffItem } from "../cli/diff";

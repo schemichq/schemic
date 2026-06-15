@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { formatItems } from "../../src/cli/diff";
-import { buildSnapshot, diffSnapshots } from "../../src/cli/surreal-diff";
+import { formatItems } from "@schemic/core";
 import { EMPTY_SNAPSHOT } from "../../src/cli/structure";
+import { buildSnapshot, diffSnapshots } from "../../src/cli/surreal-diff";
 import { defineTable, s } from "../../src/pure";
 
 describe("diff file annotations", () => {

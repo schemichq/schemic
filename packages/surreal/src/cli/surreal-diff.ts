@@ -5,8 +5,8 @@
 // split this module moves to `@schemic/surreal` (see docs/AUTHORING-SPLIT.md / MULTI-DB-SPIKE.md).
 
 import { relative } from "node:path";
+import type { AnyTable, AuthoredDef, Diff, DiffItem } from "@schemic/core";
 import type { DefineStatement } from "../ddl";
-import type { StandaloneDef } from "../pure";
 import {
   alterField,
   alterTable,
@@ -15,9 +15,7 @@ import {
   overwriteStatement,
   removeStatement,
 } from "../ddl";
-import type { Diff, DiffItem } from "@schemic/core";
 import { schemaStruct } from "./lower";
-import type { AnyTable } from "@schemic/core";
 import { deepEqual } from "./struct";
 import type { DbStructured, Snapshot, SnapshotStatement } from "./structure";
 
@@ -52,7 +50,7 @@ function structIndex(db: DbStructured): Map<string, unknown> {
  */
 export function buildSnapshot(
   tables: AnyTable[],
-  defs: StandaloneDef[] = [],
+  defs: AuthoredDef[] = [],
   opts: {
     fileOf?: Map<unknown, string>;
     root?: string;
@@ -69,7 +67,9 @@ export function buildSnapshot(
   for (const t of tables) {
     const file = fileFor(t);
     try {
-      for (const s of emitStatements(t))
+      for (const s of emitStatements(
+        t as unknown as Parameters<typeof emitStatements>[0],
+      ))
         statements[keyOf(s)] = file ? { ...s, file } : s;
     } catch (e) {
       // Pin an emit failure (e.g. a non-Surreal field type) to the source file.
@@ -78,7 +78,9 @@ export function buildSnapshot(
     }
   }
   for (const d of defs) {
-    const s = emitDefStatement(d);
+    const s = emitDefStatement(
+      d as unknown as Parameters<typeof emitDefStatement>[0],
+    );
     const file = fileFor(d);
     statements[keyOf(s)] = file ? { ...s, file } : s;
   }

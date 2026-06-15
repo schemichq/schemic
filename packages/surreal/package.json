@@ -41,6 +41,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.11",
+    "@schemic/cli": "workspace:*",
     "@types/bun": "latest",
     "surrealdb": "^2.0.3",
     "tsup": "^8",

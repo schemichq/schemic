@@ -2,9 +2,9 @@
 // (config types + loadConfig only). This is the Surreal driver's `connect` implementation; it imports
 // the surrealdb SDK and belongs to @schemic/surreal at the physical split.
 
+import type { ConnectionOverrides, ResolvedConfig } from "@schemic/core";
 import type { AuthLevel } from "@schemic/core/config";
 import { escapeIdent, Surreal } from "surrealdb";
-import type { ConnectionOverrides, ResolvedConfig } from "@schemic/core";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -41,7 +41,9 @@ export async function connect(
   const database = over.database ?? config.db.database;
   const username = over.username ?? config.db.username;
   const password = over.password ?? config.db.password;
-  const level: AuthLevel = over.authLevel ?? config.db.authLevel ?? "root";
+  const level: AuthLevel = (over.authLevel ??
+    config.db.authLevel ??
+    "root") as AuthLevel;
 
   const db = new Surreal();
   // On ANY failure, close the handle before throwing — otherwise the SDK's reconnect timer

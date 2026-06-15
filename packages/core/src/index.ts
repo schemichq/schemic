@@ -7,52 +7,6 @@
  * build on the surface re-exported below.
  */
 
-// --- driver contract + registry ---------------------------------------------------------------
-export {
-  type ApplyOptions,
-  type Authored,
-  type AuthoredDef,
-  type ConnectionOverrides,
-  type Driver,
-  driverNames,
-  type EmitOptions,
-  getDriver,
-  type MigrationDirection,
-  type MigrationRecord,
-  type MigrationStore,
-  registerDriver,
-  type ShadowCapability,
-  type Statement,
-} from "./driver/driver";
-// --- portable schema IR -----------------------------------------------------------------------
-export {
-  array,
-  literal,
-  nullable,
-  option,
-  type PortableType,
-  record,
-  scalar,
-  type ScalarName,
-  union,
-} from "./driver/portable";
-export type {
-  PortableAccess,
-  PortableDb,
-  PortableEvent,
-  PortableField,
-  PortableFunction,
-  PortableIndex,
-  PortablePermissions,
-  PortableTable,
-  PortableTableKind,
-} from "./driver/portable-ir";
-export {
-  diffPortable,
-  keyOf,
-  planPortable,
-  type PortableDiffItem,
-} from "./driver/portable-diff";
 // --- neutral config ---------------------------------------------------------------------------
 export { loadConfig, makeJiti, type ResolvedConfig } from "./cli/config";
 // --- neutral diff display ---------------------------------------------------------------------
@@ -81,11 +35,11 @@ export {
 export {
   actionLabel,
   applyPull,
-  lineDiff,
   type LocalOnly,
-  mergeUnits,
+  lineDiff,
   type MergeOptions,
   type MergeResult,
+  mergeUnits,
   type PullFilePlan,
   type PullPlan,
   type RenderedUnit,
@@ -98,14 +52,13 @@ export {
   listMigrations,
   type Migration,
   readSnapshot,
-  slug,
   type StoredSnapshot,
+  slug,
   timestamp,
   writeSnapshot,
 } from "./cli/meta";
 // --- pager + style ----------------------------------------------------------------------------
 export { pipeThroughPager, resolvePager } from "./cli/pager";
-export { colorEnabled, fail, ok, plural, style } from "./cli/style";
 // --- jiti schema loader (loads a project's authored schema files agnostically) ----------------
 export {
   type AnyTable,
@@ -115,3 +68,50 @@ export {
   loadSchemas,
   scanLocalEntities,
 } from "./cli/schema";
+export { colorEnabled, fail, ok, plural, style } from "./cli/style";
+// --- driver contract + registry ---------------------------------------------------------------
+export {
+  type ApplyOptions,
+  type Authored,
+  type AuthoredDef,
+  type ConnectionOverrides,
+  type Driver,
+  driverNames,
+  type EmitOptions,
+  getDriver,
+  type MigrationDirection,
+  type MigrationRecord,
+  type MigrationStore,
+  registerDriver,
+  type ShadowCapability,
+  type Statement,
+} from "./driver/driver";
+// --- portable schema IR -----------------------------------------------------------------------
+export {
+  array,
+  literal,
+  nullable,
+  option,
+  type PortableType,
+  record,
+  type ScalarName,
+  scalar,
+  union,
+} from "./driver/portable";
+export {
+  diffPortable,
+  keyOf,
+  type PortableDiffItem,
+  planPortable,
+} from "./driver/portable-diff";
+export type {
+  PortableAccess,
+  PortableDb,
+  PortableEvent,
+  PortableField,
+  PortableFunction,
+  PortableIndex,
+  PortablePermissions,
+  PortableTable,
+  PortableTableKind,
+} from "./driver/portable-ir";

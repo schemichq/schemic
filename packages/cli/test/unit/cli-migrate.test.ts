@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ResolvedConfig } from "../../src/cli/config";
-import { listMigrations } from "../../src/cli/meta";
+import type { ResolvedConfig } from "@schemic/core";
+import { listMigrations } from "@schemic/core";
 import { newMigration } from "../../src/cli/migrate";
 
 function tmpConfig(): ResolvedConfig {

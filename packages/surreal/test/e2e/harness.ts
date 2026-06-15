@@ -22,9 +22,12 @@ import {
   surrealBinaryAvailable,
 } from "../../src/cli/engine";
 
-/** packages/core — the @schemic/core package root (this file is test/e2e/harness.ts). */
-export const CORE = resolve(import.meta.dir, "../..");
-const CLI = join(CORE, "src/cli/index.ts");
+/** packages/surreal — this package's root (this file is test/e2e/harness.ts). */
+export const SURREAL_PKG = resolve(import.meta.dir, "../..");
+/** packages/ — the workspace packages dir. */
+const PKGS = resolve(import.meta.dir, "../../..");
+/** The `schemic` CLI entry — the CLI lives in its own @schemic/cli package now. */
+const CLI = join(PKGS, "cli", "src/cli/index.ts");
 
 /** Whether the e2e suite can run (needs the local `surreal` binary for the in-memory server). */
 export const E2E_ENABLED = surrealBinaryAvailable();
@@ -65,13 +68,21 @@ export interface Harness {
   cleanup(): Promise<void>;
 }
 
-/** Build the node_modules symlink farm (@schemic/core -> core, plus surrealdb + zod). */
+/**
+ * Build the node_modules symlink farm so a scaffolded project's `import "@schemic/surreal"` resolves
+ * to THIS workspace source (bun -> src export, one module instance), along with its @schemic/core +
+ * surrealdb + zod deps.
+ */
 function linkDeps(root: string): void {
   const nm = join(root, "node_modules");
   mkdirSync(join(nm, "@schemic"), { recursive: true }); // scoped pkg needs its scope dir
-  symlinkSync(CORE, join(nm, "@schemic", "core"));
+  symlinkSync(join(PKGS, "surreal"), join(nm, "@schemic", "surreal"));
+  symlinkSync(join(PKGS, "core"), join(nm, "@schemic", "core"));
   for (const dep of ["surrealdb", "zod"]) {
-    symlinkSync(realpathSync(join(CORE, "node_modules", dep)), join(nm, dep));
+    symlinkSync(
+      realpathSync(join(SURREAL_PKG, "node_modules", dep)),
+      join(nm, dep),
+    );
   }
 }
 
@@ -145,7 +156,7 @@ export function tableFile(body: string): string {
 /** The `user` table the sample schema ships with, optionally with extra field lines spliced in. */
 export function userSchema(extraFields = ""): string {
   return `import { surql } from "surrealdb";
-import { s, defineTable } from "@schemic/core";
+import { s, defineTable } from "@schemic/surreal";
 
 export const User = defineTable("user", {
   id: s.string(),

@@ -11,7 +11,6 @@ import "./driver/surreal";
 
 /** Re-exported from the SDK: author SurrealQL expressions (event/permission bodies, asserts). */
 export { surql } from "surrealdb";
-export { surrealDriver } from "./driver/surreal";
 export type { DefineOptions, DefineStatement, FieldInfo } from "./ddl";
 export {
   alterField,
@@ -30,6 +29,7 @@ export {
   overwriteStatement,
   removeStatement,
 } from "./ddl";
+export { surrealDriver } from "./driver/surreal";
 export type {
   App,
   Create,
@@ -56,9 +56,9 @@ export {
   objectFieldsRegistry,
   RecordIdField,
   RelationDef,
-  s,
   SField,
-  surrealTypeRegistry,
   SystemView,
+  s,
+  surrealTypeRegistry,
   TableDef,
 } from "./pure";

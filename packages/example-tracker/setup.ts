@@ -21,7 +21,7 @@
  * `migrate()` is exported so the integration tests can reuse it against a scratch DB.
  */
 import { Surreal } from "surrealdb";
-import { emitDefStatement, emitTable } from "@schemic/core";
+import { emitDefStatement, emitTable } from "@schemic/surreal";
 import { DB } from "./src/db";
 import { account, tables } from "./src/schema";
 

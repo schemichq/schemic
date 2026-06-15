@@ -5,6 +5,13 @@
 // types) and belongs to @schemic/surreal at the physical split — it is NOT part of the neutral IR.
 
 import type {
+  PortableDb,
+  PortableField,
+  PortableIndex,
+  PortableTable,
+  PortableTableKind,
+} from "@schemic/core";
+import type {
   DbStructured,
   StructAccess,
   StructEvent,
@@ -14,13 +21,6 @@ import type {
   StructTable,
   StructTableKind,
 } from "../cli/structure";
-import type {
-  PortableDb,
-  PortableField,
-  PortableIndex,
-  PortableTable,
-  PortableTableKind,
-} from "@schemic/core";
 import { emitSurqlType, parseSurqlType } from "./surql-type";
 
 /** Lift a Surreal string-kind `DbStructured` into the portable IR. */

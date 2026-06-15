@@ -6,35 +6,32 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join, relative, resolve } from "node:path";
+import type { ResolvedConfig } from "@schemic/core";
 import {
   type Authored,
   type AuthoredDef,
+  checksum,
+  type Diff,
   type Driver,
-  getDriver,
-  type MigrationStore,
-} from "@schemic/core";
-import type { ResolvedConfig } from "@schemic/core";
-import { makeJiti } from "@schemic/core";
-import { type Diff, isEmptyDiff } from "@schemic/core";
-import {
+  EMPTY_STORED,
   type Filter,
   filterPortable,
+  getDriver,
   intersectPortable,
+  isEmptyDiff,
+  listMigrations,
+  loadDefs,
+  type Migration,
+  type MigrationStore,
+  makeJiti,
   mergeStored,
   parseFilter,
-} from "@schemic/core";
-import {
-  checksum,
-  EMPTY_STORED,
-  listMigrations,
-  type Migration,
   readSnapshot,
   type StoredSnapshot,
   slug,
   timestamp,
   writeSnapshot,
 } from "@schemic/core";
-import { loadDefs } from "@schemic/core";
 
 /**
  * Build the canonical STORED snapshot from the authored schema: lower to the portable IR via the

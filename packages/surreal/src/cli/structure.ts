@@ -1,5 +1,5 @@
-import type { DefineStatement } from "../ddl";
 import { escapeIdent, type Surreal } from "surrealdb";
+import type { DefineStatement } from "../ddl";
 
 /** A snapshot statement: the emitted DDL plus the source file it came from (for `diff` annotations). */
 export type SnapshotStatement = DefineStatement & {

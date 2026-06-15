@@ -18,8 +18,8 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { Surreal, surql } from "surrealdb";
 import { z } from "zod";
-import { buildSnapshot } from "../../src/cli/surreal-diff";
 import { introspect } from "../../src/cli/introspect";
+import { buildSnapshot } from "../../src/cli/surreal-diff";
 import { emitDefStatement, emitTable } from "../../src/ddl";
 import { defineFunction, defineRelation, defineTable, s } from "../../src/pure";
 
