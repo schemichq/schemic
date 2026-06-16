@@ -1,4 +1,10 @@
 {
-  "version": 1,
-  "statements": {}
+  "version": 2,
+  "driver": "surrealdb",
+  "portable": {
+    "tables": [],
+    "functions": [],
+    "accesses": []
+  },
+  "files": {}
 }
