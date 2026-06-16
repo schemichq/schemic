@@ -80,7 +80,9 @@ describe("postgresConnection factory", () => {
 describe("Driver.query (named -> positional, passthrough)", () => {
   test("named $vars are bound positionally against a real PGlite engine", async () => {
     const driver = getDriver("postgres");
-    const conn = (await driver.connect({ db: { url: "" } } as never)) as PgConn;
+    const conn = (await driver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
     try {
       await conn.exec(
         `CREATE TABLE "user" ("id" text PRIMARY KEY, "name" text);
@@ -99,7 +101,9 @@ describe("Driver.query (named -> positional, passthrough)", () => {
 
   test("a pgSql bound query runs via the raw connection (positional params)", async () => {
     const driver = getDriver("postgres");
-    const conn = (await driver.connect({ db: { url: "" } } as never)) as PgConn;
+    const conn = (await driver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
     try {
       await conn.exec(
         `CREATE TABLE "user" ("id" text PRIMARY KEY, "name" text);
@@ -115,7 +119,9 @@ describe("Driver.query (named -> positional, passthrough)", () => {
 
   test("a missing binding throws a clear error", async () => {
     const driver = getDriver("postgres");
-    const conn = (await driver.connect({ db: { url: "" } } as never)) as PgConn;
+    const conn = (await driver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
     try {
       expect(
         driver.query?.(conn, `SELECT $missing`, { other: 1 }),

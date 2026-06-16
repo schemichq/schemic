@@ -41,6 +41,11 @@ import {
   nullable,
   registerDriver,
 } from "@schemic/core/driver";
+import type { PgTableDef } from "./authoring";
+import { pgLower } from "./lower";
+
+// The pg-native authoring surface (`s.*`, defineTable, PgField, $postgres escape hatch, …).
+export * from "./authoring";
 
 // A minimal structural view of a PGlite/node-postgres connection (so core needs no hard pg dep).
 export interface PgConn {
@@ -65,25 +70,6 @@ const SCALAR_TO_PG: Partial<Record<ScalarName, string>> = {
   uuid: "uuid",
   bytes: "bytea",
   duration: "interval",
-};
-
-// information_schema.data_type -> portable scalar.
-const PG_TO_SCALAR: Record<string, ScalarName> = {
-  text: "string",
-  "character varying": "string",
-  character: "string",
-  integer: "int",
-  bigint: "int",
-  smallint: "int",
-  "double precision": "float",
-  real: "float",
-  numeric: "decimal",
-  boolean: "bool",
-  "timestamp with time zone": "datetime",
-  "timestamp without time zone": "datetime",
-  uuid: "uuid",
-  bytea: "bytes",
-  interval: "duration",
 };
 
 const escId = (name: string) => `"${name.replace(/"/g, '""')}"`;
@@ -151,7 +137,13 @@ function pgColumn(type: PortableType): PgColumn {
         `postgres: native type "${type.name}" belongs to driver "${type.db}"`,
       );
     }
-    return { sql: type.name, nullable: false };
+    // params are order-significant: varchar -> (n), numeric -> (p[, s]).
+    const params = type.params as (string | number)[] | undefined;
+    const sql =
+      params && params.length > 0
+        ? `${type.name}(${params.join(", ")})`
+        : type.name;
+    return { sql, nullable: false };
   }
   throw new Error(`postgres: cannot emit type ${JSON.stringify(type)}`);
 }
@@ -179,25 +171,51 @@ function pgCanonType(type: PortableType): PortableType {
   return type;
 }
 
+/**
+ * A field reduced to its EQUALITY-relevant shape: canonical type + the STRUCTURAL clauses Postgres
+ * round-trips (identity, FK referential actions). EXPRESSION clauses (`default`/`check`/`computed`/
+ * `comment`) are dropped here: Postgres rewrites them on read (`0` -> `0`, `'x'` -> `'x'::text`,
+ * `a>0` -> `(a > 0)`), so they emit faithfully but can't round-trip to an exact match — a documented
+ * capability gap, not an equality difference (see docs/COVERAGE.md).
+ */
+function canonField(f: PortableField, table: string): PortableField {
+  const out: PortableField = { name: f.name, table, type: pgCanonType(f.type) };
+  if (f.identity !== undefined) out.identity = f.identity;
+  if (f.reference) {
+    const ref: { on_delete?: string; on_update?: string } = {};
+    // Uppercase actions so authored `cascade` matches introspected `CASCADE`; omit NO ACTION (default).
+    const norm = (a?: string) => {
+      const u = a?.toUpperCase();
+      return u && u !== "NO ACTION" ? u : undefined;
+    };
+    const od = norm(f.reference.on_delete);
+    const ou = norm(f.reference.on_update);
+    if (od) ref.on_delete = od;
+    if (ou) ref.on_update = ou;
+    if (ref.on_delete !== undefined || ref.on_update !== undefined)
+      out.reference = ref;
+  }
+  return out;
+}
+
 function pgNormalizeTable(t: PortableTable): PortableTable {
-  // Drop dotted sub-fields (folded into their jsonb parent) and Surreal-only field clauses; keep
-  // only what a Postgres column carries: name, (canonical) type, nullability via the type.
+  // Drop dotted sub-fields (folded into their jsonb parent); keep the equality-relevant per-field
+  // shape (canonField) + the structural table objects that round-trip (composite PK).
   const fields = t.fields
     .filter((f) => !f.name.includes("."))
-    .map<PortableField>((f) => ({
-      name: f.name,
-      table: t.name,
-      type: pgCanonType(f.type),
-    }))
+    .map((f) => canonField(f, t.name))
     .sort((a, b) => a.name.localeCompare(b.name));
-  return {
+  const out: PortableTable = {
     name: t.name,
     kind: { kind: "NORMAL" }, // Postgres has no relation/any table kinds.
     schemafull: true,
     fields,
-    indexes: [],
+    indexes: [], // secondary/unique indexes emit but aren't introspected back yet (capability gap)
     events: [],
   };
+  if (t.primaryKey && t.primaryKey.length > 0)
+    out.primaryKey = [...t.primaryKey];
+  return out;
 }
 
 function pgNormalize(db: PortableDb): PortableDb {
@@ -212,34 +230,87 @@ function pgNormalize(db: PortableDb): PortableDb {
 
 // --- emit: portable IR -> CREATE TABLE ----------------------------------------------------------
 
+/** Fields ready for emit: drop dotted sub-fields, canonicalize the type, KEEP all DDL clauses, sort. */
+function pgEmitFields(t: PortableTable): PortableField[] {
+  return t.fields
+    .filter((f) => !f.name.includes("."))
+    .map((f) => ({ ...f, table: t.name, type: pgCanonType(f.type) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** `ON DELETE …`/`ON UPDATE …` suffix for a FK constraint (empty when no actions). */
+function fkActions(ref?: { on_delete?: string; on_update?: string }): string {
+  let s = "";
+  if (ref?.on_delete) s += ` ON DELETE ${ref.on_delete}`;
+  if (ref?.on_update) s += ` ON UPDATE ${ref.on_update}`;
+  return s;
+}
+
+/** A column body for CREATE TABLE: type + NOT NULL + identity/default/generated/check clauses. */
+function fieldColumnDdl(f: PortableField): string {
+  const col = pgColumn(f.type);
+  let s = `${escId(f.name)} ${col.sql}`;
+  if (!col.nullable) s += " NOT NULL";
+  if (f.identity)
+    s += ` GENERATED ${f.identity === "always" ? "ALWAYS" : "BY DEFAULT"} AS IDENTITY`;
+  if (f.default !== undefined) s += ` DEFAULT ${f.default}`;
+  if (f.computed !== undefined)
+    s += ` GENERATED ALWAYS AS (${f.computed}) STORED`;
+  if (f.check !== undefined) s += ` CHECK (${f.check})`;
+  return s;
+}
+
 function emitTable(t: PortableTable): Statement[] {
-  const norm = pgNormalizeTable(t);
-  const cols: string[] = [`${escId("id")} text PRIMARY KEY`]; // implicit id (mirrors Surreal).
-  const fks: Statement[] = [];
-  for (const f of norm.fields) {
-    const col = pgColumn(f.type);
-    cols.push(`${escId(f.name)} ${col.sql}${col.nullable ? "" : " NOT NULL"}`);
-    if (col.references) {
-      fks.push({
-        kind: "index", // reuse a structured kind for ordering; FK applied after all tables exist.
-        name: `${t.name}_${f.name}_fkey`,
-        table: t.name,
-        ddl: `ALTER TABLE ${escId(t.name)} ADD CONSTRAINT ${escId(
-          `${t.name}_${f.name}_fkey`,
-        )} FOREIGN KEY (${escId(f.name)}) REFERENCES ${escId(col.references)} (${escId("id")});`,
-      });
-    }
-  }
+  const fields = pgEmitFields(t);
+  const custom = !!(t.primaryKey && t.primaryKey.length > 0);
+  const cols: string[] = [];
+  if (!custom) cols.push(`${escId("id")} text PRIMARY KEY`); // implicit id (mirrors Surreal).
+  for (const f of fields) cols.push(fieldColumnDdl(f));
+  if (custom) cols.push(`PRIMARY KEY (${t.primaryKey?.map(escId).join(", ")})`);
+  for (const c of t.checks ?? []) cols.push(`CHECK (${c})`);
+
   const create: Statement = {
     kind: "table",
     name: t.name,
     ddl: `CREATE TABLE ${escId(t.name)} (\n  ${cols.join(",\n  ")}\n);`,
   };
-  return [create, ...fks];
+
+  const fks: Statement[] = [];
+  const idx: Statement[] = [];
+  const comments: Statement[] = [];
+  for (const f of fields) {
+    const col = pgColumn(f.type);
+    if (col.references) {
+      fks.push({
+        kind: "index", // FK applied after all tables exist (ordered via the RANK below).
+        name: fkName(t.name, f.name),
+        table: t.name,
+        ddl: `ALTER TABLE ${escId(t.name)} ADD CONSTRAINT ${escId(fkName(t.name, f.name))} FOREIGN KEY (${escId(f.name)}) REFERENCES ${escId(col.references)} (${escId("id")})${fkActions(f.reference)};`,
+      });
+    }
+    if (f.comment !== undefined) {
+      comments.push({
+        kind: "comment",
+        name: `${t.name}.${f.name}`,
+        table: t.name,
+        ddl: `COMMENT ON COLUMN ${escId(t.name)}.${escId(f.name)} IS '${f.comment.replace(/'/g, "''")}';`,
+      });
+    }
+  }
+  for (const ix of t.indexes) {
+    if (ix.spec !== "UNIQUE") continue; // only UNIQUE indexes in this pass
+    idx.push({
+      kind: "index",
+      name: ix.name,
+      table: t.name,
+      ddl: `CREATE UNIQUE INDEX ${escId(ix.name)} ON ${escId(t.name)} (${ix.cols.map(escId).join(", ")});`,
+    });
+  }
+  return [create, ...fks, ...idx, ...comments];
 }
 
 function pgEmit(db: PortableDb, _opts?: EmitOptions): Statement[] {
-  // All CREATE TABLEs first, then all FK constraints (so referenced tables already exist).
+  // All CREATE TABLEs first, then FK constraints + indexes, then comments.
   const tables = [...db.tables].sort((a, b) => a.name.localeCompare(b.name));
   const stmts = tables.flatMap(emitTable);
   const RANK: Record<string, number> = {
@@ -249,12 +320,17 @@ function pgEmit(db: PortableDb, _opts?: EmitOptions): Statement[] {
     event: 3,
     function: 4,
     access: 5,
+    comment: 6,
   };
   return [...stmts].sort((a, b) => (RANK[a.kind] ?? 9) - (RANK[b.kind] ?? 9));
 }
 
 /** DROP DDL for one Postgres object. (Postgres emits per-table, so objects are tables + FK constraints.) */
 function pgRemove(s: Statement): string {
+  if (s.kind === "comment" && s.table) {
+    const col = s.name.slice(s.table.length + 1);
+    return `COMMENT ON COLUMN ${escId(s.table)}.${escId(col)} IS NULL;`;
+  }
   if (s.kind === "index" && s.table) {
     // The FK-constraint statements pgEmit produces (ALTER TABLE … ADD CONSTRAINT).
     return `ALTER TABLE ${escId(s.table)} DROP CONSTRAINT IF EXISTS ${escId(s.name)};`;
@@ -485,39 +561,83 @@ interface ColRow {
   data_type: string;
   udt_name: string;
   is_nullable: string;
+  is_identity: string;
+  identity_generation: string | null;
+  character_maximum_length: number | null;
+  numeric_precision: number | null;
+  numeric_scale: number | null;
 }
 interface FkRow {
   table_name: string;
   column_name: string;
   foreign_table_name: string;
+  delete_rule: string;
+  update_rule: string;
+}
+interface PkRow {
+  table_name: string;
+  column_name: string;
 }
 
-function scalarFromPg(dataType: string, udtName: string): PortableType {
-  if (dataType === "ARRAY") {
+const nativeT = (name: string, params?: (string | number)[]): PortableType =>
+  params && params.length > 0
+    ? { t: "native", db: "postgres", name, params }
+    : { t: "native", db: "postgres", name };
+const scalarT = (name: ScalarName): PortableType => ({ t: "scalar", name });
+
+/** information_schema data_type -> the CANONICAL portable scalar (mirrors lower's CANON, reversed). */
+const DATATYPE_TO_SCALAR: Record<string, ScalarName> = {
+  text: "string",
+  integer: "int",
+  "double precision": "float",
+  boolean: "bool",
+  uuid: "uuid",
+  bytea: "bytes",
+  interval: "duration",
+};
+/** data_type spellings that differ from our pg-type token (so a native node matches what lower made). */
+const DATATYPE_TO_NATIVE: Record<string, string> = {
+  "time without time zone": "time",
+  "time with time zone": "timetz",
+};
+
+/** A column row -> portable type, INVERSE of lower's token->portable (canonical -> scalar, else native+params). */
+function introspectType(c: ColRow): PortableType {
+  const dt = c.data_type;
+  if (dt === "ARRAY") {
     // udt_name is the element type prefixed with `_` (e.g. `_int4`, `_text`).
-    const elem = pgScalarFromUdt(udtName.replace(/^_/, ""));
-    return { t: "array", elem };
+    return { t: "array", elem: pgScalarFromUdt(c.udt_name.replace(/^_/, "")) };
   }
-  if (dataType === "jsonb" || dataType === "json") {
-    return { t: "object", fields: {} };
-  }
-  const name = PG_TO_SCALAR[dataType];
-  if (!name) return { t: "native", db: "postgres", name: dataType };
-  return { t: "scalar", name };
+  if (dt === "jsonb") return { t: "object", fields: {} };
+  if (dt === "json") return nativeT("json");
+  if (dt === "character varying")
+    return c.character_maximum_length != null
+      ? nativeT("varchar", [c.character_maximum_length])
+      : nativeT("varchar");
+  if (dt === "character")
+    return c.character_maximum_length != null
+      ? nativeT("char", [c.character_maximum_length])
+      : nativeT("char");
+  if (dt === "numeric")
+    return c.numeric_precision != null
+      ? nativeT("numeric", [c.numeric_precision, c.numeric_scale ?? 0])
+      : scalarT("decimal");
+  if (dt === "timestamp without time zone") return nativeT("timestamp");
+  if (dt === "timestamp with time zone") return scalarT("datetime");
+  const sc = DATATYPE_TO_SCALAR[dt];
+  if (sc) return scalarT(sc);
+  return nativeT(DATATYPE_TO_NATIVE[dt] ?? dt);
 }
 
+// Array element udt -> portable scalar (CANONICAL only; non-canonical elements ride as native, which
+// may not match lower's type name -> arrays of native types are a documented round-trip gap).
 const UDT_TO_SCALAR: Record<string, ScalarName> = {
   text: "string",
-  varchar: "string",
   int4: "int",
-  int8: "int",
-  int2: "int",
   float8: "float",
-  float4: "float",
   numeric: "decimal",
   bool: "bool",
   timestamptz: "datetime",
-  timestamp: "datetime",
   uuid: "uuid",
   bytea: "bytes",
   interval: "duration",
@@ -534,51 +654,96 @@ async function pgIntrospect(
   exclude: Set<string> = new Set(),
 ): Promise<PortableDb> {
   const { rows: cols } = await conn.query<ColRow>(
-    `SELECT table_name, column_name, data_type, udt_name, is_nullable
+    `SELECT table_name, column_name, data_type, udt_name, is_nullable,
+            is_identity, identity_generation,
+            character_maximum_length, numeric_precision, numeric_scale
        FROM information_schema.columns
       WHERE table_schema = 'public'
       ORDER BY table_name, ordinal_position`,
   );
   const { rows: fks } = await conn.query<FkRow>(
-    `SELECT tc.table_name, kcu.column_name, ccu.table_name AS foreign_table_name
+    `SELECT tc.table_name, kcu.column_name, ccu.table_name AS foreign_table_name,
+            rc.delete_rule, rc.update_rule
        FROM information_schema.table_constraints tc
        JOIN information_schema.key_column_usage kcu
          ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
        JOIN information_schema.constraint_column_usage ccu
          ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
+       JOIN information_schema.referential_constraints rc
+         ON rc.constraint_name = tc.constraint_name AND rc.constraint_schema = tc.table_schema
       WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'`,
   );
-  const fkBy = new Map<string, string>(); // `table.col` -> foreign table
-  for (const f of fks)
-    fkBy.set(`${f.table_name}.${f.column_name}`, f.foreign_table_name);
+  const { rows: pks } = await conn.query<PkRow>(
+    `SELECT tc.table_name, kcu.column_name
+       FROM information_schema.table_constraints tc
+       JOIN information_schema.key_column_usage kcu
+         ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+      WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = 'public'
+      ORDER BY kcu.ordinal_position`,
+  );
 
+  const fkBy = new Map<string, FkRow>();
+  for (const f of fks) fkBy.set(`${f.table_name}.${f.column_name}`, f);
+  const pkBy = new Map<string, string[]>();
+  for (const p of pks) {
+    const list = pkBy.get(p.table_name) ?? [];
+    list.push(p.column_name);
+    pkBy.set(p.table_name, list);
+  }
+  // The implicit key is the lone `id text` PK pgEmit adds; a custom/composite PK is anything else.
+  const isImplicit = (table: string) => {
+    const pk = pkBy.get(table);
+    return pk?.length === 1 && pk[0] === "id";
+  };
+
+  const seen = new Set<string>();
   const byTable = new Map<string, PortableField[]>();
   for (const c of cols) {
     if (exclude.has(c.table_name)) continue;
-    if (c.column_name === "id") continue; // implicit PK, not part of the portable IR.
-    let type: PortableType;
-    const fkTarget = fkBy.get(`${c.table_name}.${c.column_name}`);
-    if (fkTarget) {
-      type = { t: "record", tables: [fkTarget] };
-    } else {
-      type = scalarFromPg(c.data_type, c.udt_name);
-    }
+    seen.add(c.table_name);
+    if (c.column_name === "id" && isImplicit(c.table_name)) continue;
+    const fk = fkBy.get(`${c.table_name}.${c.column_name}`);
+    let type: PortableType = fk
+      ? { t: "record", tables: [fk.foreign_table_name] }
+      : introspectType(c);
     if (c.is_nullable === "YES") type = nullable(type);
+    const pf: PortableField = {
+      name: c.column_name,
+      table: c.table_name,
+      type,
+    };
+    if (c.is_identity === "YES")
+      pf.identity =
+        c.identity_generation === "ALWAYS" ? "always" : "by-default";
+    if (fk) {
+      const ref: { on_delete?: string; on_update?: string } = {};
+      if (fk.delete_rule && fk.delete_rule !== "NO ACTION")
+        ref.on_delete = fk.delete_rule;
+      if (fk.update_rule && fk.update_rule !== "NO ACTION")
+        ref.on_update = fk.update_rule;
+      if (ref.on_delete !== undefined || ref.on_update !== undefined)
+        pf.reference = ref;
+    }
     const list = byTable.get(c.table_name) ?? [];
-    list.push({ name: c.column_name, table: c.table_name, type });
+    list.push(pf);
     byTable.set(c.table_name, list);
   }
 
-  const tables: PortableTable[] = [...byTable.entries()].map(
-    ([name, fields]) => ({
+  const tables: PortableTable[] = [...seen].map((name) => {
+    const t: PortableTable = {
       name,
       kind: { kind: "NORMAL" },
       schemafull: true,
-      fields,
+      fields: byTable.get(name) ?? [],
       indexes: [],
       events: [],
-    }),
-  );
+    };
+    if (!isImplicit(name)) {
+      const pk = pkBy.get(name);
+      if (pk && pk.length > 0) t.primaryKey = pk;
+    }
+    return t;
+  });
   return { tables, functions: [], accesses: [] };
 }
 
@@ -728,13 +893,9 @@ export function postgresConnection(
 export const postgresDriver: Driver<PgConn> = {
   name: "postgres",
 
-  // Postgres authoring (a pg-native `sz`) is future work; for now `lower` is unused (the spike
-  // authors with the Surreal surface and targets pg via the portable IR). Throw a clear error.
-  lower() {
-    throw new Error(
-      "postgres: native authoring (sz.pg.*) is not part of the spike — author via the portable IR.",
-    );
-  },
+  // Lower the pg-native `s.*` authoring objects to the portable IR (see ./lower.ts). The authored
+  // tables are this driver's own `PgTableDef` (a structural `Authored`); core hands them back opaquely.
+  lower: (tables) => pgLower(tables as unknown as PgTableDef[]),
 
   emit: pgEmit,
   remove: pgRemove,
@@ -778,8 +939,10 @@ export const postgresDriver: Driver<PgConn> = {
     config: ResolvedConfig,
     _over?: ConnectionOverrides,
   ): Promise<PgConn> {
-    // PGlite is embedded; treat a `file:`/path url as a data dir, else in-memory.
-    const url = config.db?.url ?? "";
+    // The neutral ResolvedConfig carries the driver-specific connection bag in `params` (our
+    // PostgresConnectionConfig minus the neutral schema/migrations/key). PGlite is embedded; treat a
+    // `file:`/path url as a data dir, else in-memory.
+    const url = typeof config.params.url === "string" ? config.params.url : "";
     const dir = url.startsWith("file:") ? url.slice("file:".length) : undefined;
     return newPglite(dir);
   },

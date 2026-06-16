@@ -74,7 +74,9 @@ describe("@schemic/postgres: emit", () => {
 describe("@schemic/postgres: real round-trip via PGlite", () => {
   test("apply -> introspect -> diff is empty (the migration reproduces the schema)", async () => {
     const driver = getDriver("postgres");
-    const conn = (await driver.connect({ db: { url: "" } } as never)) as PgConn;
+    const conn = (await driver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
     try {
       await driver.apply(
         conn,
@@ -110,7 +112,9 @@ describe("@schemic/postgres: real round-trip via PGlite", () => {
 
   test("a changed schema is detected as not-equal (no false negative)", async () => {
     const driver = getDriver("postgres");
-    const conn = (await driver.connect({ db: { url: "" } } as never)) as PgConn;
+    const conn = (await driver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
     try {
       await driver.apply(
         conn,
@@ -173,7 +177,9 @@ describe("@schemic/postgres: field-level diff", () => {
 
   test("adding a column via diff is non-destructive (existing rows survive)", async () => {
     const driver = getDriver("postgres");
-    const conn = (await driver.connect({ db: { url: "" } } as never)) as PgConn;
+    const conn = (await driver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
     try {
       const base = db({ user: { name: scalar("string") } });
       await driver.apply(

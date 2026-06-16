@@ -27,7 +27,8 @@
     "lint": "biome check ."
   },
   "dependencies": {
-    "@schemic/core": "workspace:*"
+    "@schemic/core": "workspace:*",
+    "zod": "^4.3.5"
   },
   "peerDependencies": {
     "@electric-sql/pglite": "^0.5.2"
