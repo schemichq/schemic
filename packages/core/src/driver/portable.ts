@@ -70,8 +70,10 @@ export type PortableType =
   /**
    * An escape hatch for a DB-specific type with no portable meaning (PG `tsvector`, etc.). Carries
    * the owning driver `db` so a schema authored for one DB can't silently typecheck against another.
+   * `params` carries the type's parameters for parameterized natives — `numeric(p,s)`, `varchar(n)`,
+   * `timestamp(p)` — so a driver round-trips `numeric(10,2)` exactly. Order matters; ignored when empty.
    */
-  | { t: "native"; db: string; name: string; params?: unknown };
+  | { t: "native"; db: string; name: string; params?: (string | number)[] };
 
 export type GeometryKind =
   | "feature"
