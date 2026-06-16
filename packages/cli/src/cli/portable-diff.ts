@@ -50,7 +50,12 @@ export async function portableDiff(
   const conn = (await driver.connect(config)) as Conn;
   let live: PortableDb;
   try {
-    live = await driver.introspect(conn as never);
+    // Exclude the migration bookkeeping tables (and their `_lock` companion) — they're CLI-owned, not
+    // schema, so `diff` must not report them as "to remove". Same scoping as migrate's baseline read.
+    live = await driver.introspect(
+      conn as never,
+      new Set([config.migrationsTable, `${config.migrationsTable}_lock`]),
+    );
   } finally {
     await closeQuietly(conn);
   }
