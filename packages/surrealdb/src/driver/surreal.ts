@@ -269,6 +269,22 @@ export const surrealDriver: Driver<
     await conn.close();
   },
 
+  /**
+   * Raw READ query -> rows, for connection resolvers (`ctx.connections.<name>.query(...)`) and seed.
+   * SurrealQL returns one result per statement; we hand back the LAST statement's rows (the payload of
+   * a `… ; SELECT …` resolver), wrapping a scalar/`RETURN` result and treating none as an empty set.
+   */
+  async query<T = unknown>(
+    conn: Surreal,
+    sql: string,
+    vars?: Record<string, unknown>,
+  ): Promise<T[]> {
+    const results = (await conn.query(sql, vars)) as unknown[];
+    if (!results.length) return [];
+    const last = results[results.length - 1];
+    return (Array.isArray(last) ? last : last == null ? [] : [last]) as T[];
+  },
+
   shadow,
   migrations,
 

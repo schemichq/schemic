@@ -9,6 +9,10 @@
 // Side-effect: register `surrealDriver` with the core registry on import.
 import "./driver/surreal";
 
+/** Multi-connection factory: `defineConfig({ connections: { db: surrealConnection({ … }) } })`. */
+export { surrealConnection } from "./connection";
+export type { SurrealAuthLevel, SurrealConnectionConfig } from "./connection";
+
 /** Re-exported from the SDK: author SurrealQL expressions (event/permission bodies, asserts). */
 export { surql } from "surrealdb";
 export type { DefineOptions, DefineStatement, FieldInfo } from "./ddl";
