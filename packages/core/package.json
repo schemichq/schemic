@@ -38,6 +38,13 @@
         "default": "./lib/authoring.js"
       }
     },
+    "./testing": {
+      "bun": "./src/testing.ts",
+      "import": {
+        "types": "./lib/testing.d.ts",
+        "default": "./lib/testing.js"
+      }
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
