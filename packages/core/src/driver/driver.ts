@@ -261,6 +261,14 @@ export interface Driver<
     sql: string,
     vars?: Record<string, unknown>,
   ): Promise<T[]>;
+  /**
+   * The dialect-specific files `schemic init` scaffolds, keyed by project-relative path: a
+   * connections-only `schemic.config.ts` (using this driver's `<driver>Connection` factory), a sample
+   * schema module in this dialect's `s.*`, a seed stub, a `.env.example`, … The CLI writes them
+   * verbatim (never overwriting) alongside the dialect-neutral migration snapshot it records itself.
+   * Absent -> `schemic init` can't scaffold a project for this driver.
+   */
+  initScaffold?(): Record<string, string>;
 }
 
 // --- Registry -----------------------------------------------------------------------------------
