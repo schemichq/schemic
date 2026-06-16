@@ -67,7 +67,7 @@ describe("@schemic/postgres: emit", () => {
     expect(all).toContain('"author" text NOT NULL');
     expect(all).toContain("FOREIGN KEY");
     const kinds = postgresDriver.emit(desired).map((s) => s.kind);
-    expect(kinds.indexOf("index")).toBeGreaterThan(kinds.lastIndexOf("table"));
+    expect(kinds.indexOf("fk")).toBeGreaterThan(kinds.lastIndexOf("table"));
   });
 });
 

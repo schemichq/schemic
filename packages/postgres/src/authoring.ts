@@ -275,6 +275,14 @@ export class PgTableDef<
       indexes: [...(this.config.indexes ?? []), { cols, ...(opts ?? {}) }],
     });
   }
+
+  /**
+   * A foreign-key field referencing THIS table (for use in another table's shape):
+   * `author: user.record({ onDelete: "cascade" })`. Also satisfies the CLI's structural table check.
+   */
+  record(opts?: { onDelete?: string; onUpdate?: string }): PgField {
+    return s.references(this.name, opts);
+  }
 }
 
 /** Declare a Postgres table: `export const user = defineTable("user", { name: s.text(), age: s.integer().optional() })`. */

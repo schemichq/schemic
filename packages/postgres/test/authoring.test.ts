@@ -87,6 +87,19 @@ describe("lower: pg s.* -> portable IR", () => {
     });
   });
 
+  test("tables satisfy the CLI loader duck-type (name/fields/config/record)", () => {
+    // The shared loader (core/cli/schema isTableDef) recognizes tables structurally.
+    const t = defineTable("x", { a: s.text() });
+    expect(typeof t.name).toBe("string");
+    expect(typeof t.fields).toBe("object");
+    expect(typeof t.config).toBe("object");
+    expect(typeof t.record).toBe("function");
+    expect(t.record({ onDelete: "cascade" }).native.references).toEqual({
+      table: "x",
+      onDelete: "cascade",
+    });
+  });
+
   test("table-level composite PK + field clauses", () => {
     const t = defineTable("member", {
       org: s.text(),

@@ -26,6 +26,9 @@ import type {
   DiffItem,
   Driver,
   EmitOptions,
+  MigrationDirection,
+  MigrationRecord,
+  MigrationStore,
   PortableDb,
   PortableField,
   PortableTable,
@@ -282,7 +285,7 @@ function emitTable(t: PortableTable): Statement[] {
     const col = pgColumn(f.type);
     if (col.references) {
       fks.push({
-        kind: "index", // FK applied after all tables exist (ordered via the RANK below).
+        kind: "fk", // FK applied after all tables exist (ordered via the RANK below).
         name: fkName(t.name, f.name),
         table: t.name,
         ddl: `ALTER TABLE ${escId(t.name)} ADD CONSTRAINT ${escId(fkName(t.name, f.name))} FOREIGN KEY (${escId(f.name)}) REFERENCES ${escId(col.references)} (${escId("id")})${fkActions(f.reference)};`,
@@ -316,6 +319,7 @@ function pgEmit(db: PortableDb, _opts?: EmitOptions): Statement[] {
   const RANK: Record<string, number> = {
     table: 0,
     field: 1,
+    fk: 2,
     index: 2,
     event: 3,
     function: 4,
@@ -331,9 +335,13 @@ function pgRemove(s: Statement): string {
     const col = s.name.slice(s.table.length + 1);
     return `COMMENT ON COLUMN ${escId(s.table)}.${escId(col)} IS NULL;`;
   }
-  if (s.kind === "index" && s.table) {
-    // The FK-constraint statements pgEmit produces (ALTER TABLE … ADD CONSTRAINT).
+  if (s.kind === "fk" && s.table) {
+    // FK constraints (ALTER TABLE … ADD CONSTRAINT) are dropped as constraints.
     return `ALTER TABLE ${escId(s.table)} DROP CONSTRAINT IF EXISTS ${escId(s.name)};`;
+  }
+  if (s.kind === "index") {
+    // CREATE [UNIQUE] INDEX … is dropped as an index.
+    return `DROP INDEX IF EXISTS ${escId(s.name)};`;
   }
   return `DROP TABLE IF EXISTS ${escId(s.name)} CASCADE;`;
 }
@@ -361,8 +369,6 @@ const dropColSql = (table: string, field: string) =>
   `ALTER TABLE ${escId(table)} DROP COLUMN IF EXISTS ${escId(field)};`;
 const addFkSql = (table: string, field: string, ref: string) =>
   `ALTER TABLE ${escId(table)} ADD CONSTRAINT ${escId(fkName(table, field))} FOREIGN KEY (${escId(field)}) REFERENCES ${escId(ref)} (${escId("id")});`;
-const dropFkSql = (table: string, field: string) =>
-  `ALTER TABLE ${escId(table)} DROP CONSTRAINT IF EXISTS ${escId(fkName(table, field))};`;
 const dropTableSql = (table: string) =>
   `DROP TABLE IF EXISTS ${escId(table)} CASCADE;`;
 
@@ -387,16 +393,23 @@ function pgDiff(prev: PortableDb, next: PortableDb): Diff {
   const prevT = new Map(a.tables.map((t) => [t.name, t]));
   const nextT = new Map(b.tables.map((t) => [t.name, t]));
   const refOf = (f: PortableField) => pgColumn(f.type).references;
+  // RAW (un-normalized) tables carry the full clauses (default/check/identity/PK/FK actions/…) — emit
+  // new/removed tables from these so generated migrations reproduce the authored schema exactly.
+  const prevRaw = new Map(prev.tables.map((t) => [t.name, t]));
+  const nextRaw = new Map(next.tables.map((t) => [t.name, t]));
 
   const ops: PgOp[] = [];
   const add = (op: PgOp) => ops.push(op);
 
-  // 1) New tables: CREATE first (all of them), then their FKs — so a cross-table FK finds its target.
+  // 1) New tables: full CREATE (composite PK, identity, defaults, …) first, then their FKs/indexes/
+  //    comments — so a cross-table FK finds its target. `down` is a DROP CASCADE (handles all of it).
   const newTables = b.tables.filter((t) => !prevT.has(t.name));
   for (const t of newTables) {
-    const create = `CREATE TABLE ${escId(t.name)} (\n  ${[`${escId("id")} text PRIMARY KEY`, ...t.fields.map((f) => colDef(f))].join(",\n  ")}\n);`;
+    const raw = nextRaw.get(t.name);
+    const create = raw && emitTable(raw).find((s) => s.kind === "table");
+    if (!create) continue;
     add({
-      up: [create],
+      up: [create.ddl],
       down: [dropTableSql(t.name)],
       items: [
         {
@@ -404,25 +417,25 @@ function pgDiff(prev: PortableDb, next: PortableDb): Diff {
           key: `table:${t.name}:${t.name}`,
           kind: "table",
           table: t.name,
-          ddl: create,
+          ddl: create.ddl,
         },
       ],
     });
   }
   for (const t of newTables) {
-    for (const f of t.fields) {
-      const ref = refOf(f);
-      if (!ref) continue;
+    const raw = nextRaw.get(t.name);
+    if (!raw) continue;
+    for (const stmt of emitTable(raw).filter((s) => s.kind !== "table")) {
       add({
-        up: [addFkSql(t.name, f.name, ref)],
-        down: [dropFkSql(t.name, f.name)],
+        up: [stmt.ddl],
+        down: [pgRemove(stmt)],
         items: [
           {
             op: "add",
-            key: `index:${t.name}:${fkName(t.name, f.name)}`,
-            kind: "index",
+            key: `${stmt.kind}:${t.name}:${stmt.name}`,
+            kind: stmt.kind,
             table: t.name,
-            ddl: addFkSql(t.name, f.name, ref),
+            ddl: stmt.ddl,
           },
         ],
       });
@@ -522,17 +535,14 @@ function pgDiff(prev: PortableDb, next: PortableDb): Diff {
     }
   }
 
-  // 3) Removed tables: DROP CASCADE up / recreate (table then FKs) down.
+  // 3) Removed tables: DROP CASCADE up / full recreate (table then FKs/indexes/comments) down.
   for (const t of a.tables) {
     if (nextT.has(t.name)) continue;
-    const create = `CREATE TABLE ${escId(t.name)} (\n  ${[`${escId("id")} text PRIMARY KEY`, ...t.fields.map((f) => colDef(f))].join(",\n  ")}\n);`;
-    const fks = t.fields
-      .map((f) => ({ f, ref: refOf(f) }))
-      .filter((x) => x.ref)
-      .map((x) => addFkSql(t.name, x.f.name, x.ref as string));
+    const raw = prevRaw.get(t.name);
+    const recreate = raw ? emitTable(raw).map((s) => s.ddl) : [];
     add({
       up: [dropTableSql(t.name)],
-      down: [create, ...fks],
+      down: recreate,
       items: [
         {
           op: "remove",
@@ -540,7 +550,7 @@ function pgDiff(prev: PortableDb, next: PortableDb): Diff {
           kind: "table",
           table: t.name,
           ddl: dropTableSql(t.name),
-          old: create,
+          old: recreate.join("\n"),
         },
       ],
     });
@@ -653,6 +663,9 @@ async function pgIntrospect(
   conn: PgConn,
   exclude: Set<string> = new Set(),
 ): Promise<PortableDb> {
+  // Also skip the companion lock table this driver creates for any excluded (bookkeeping) table.
+  const skip = new Set(exclude);
+  for (const t of exclude) skip.add(`${t}_lock`);
   const { rows: cols } = await conn.query<ColRow>(
     `SELECT table_name, column_name, data_type, udt_name, is_nullable,
             is_identity, identity_generation,
@@ -699,7 +712,7 @@ async function pgIntrospect(
   const seen = new Set<string>();
   const byTable = new Map<string, PortableField[]>();
   for (const c of cols) {
-    if (exclude.has(c.table_name)) continue;
+    if (skip.has(c.table_name)) continue;
     seen.add(c.table_name);
     if (c.column_name === "id" && isImplicit(c.table_name)) continue;
     const fk = fkBy.get(`${c.table_name}.${c.column_name}`);
@@ -890,6 +903,98 @@ export function postgresConnection(
   return connectionEntry("postgres", input);
 }
 
+// --- migration bookkeeping (apply-time SQL behind migrate/rollback/status) ----------------------
+
+const MIG_UP = "-- schemic:up";
+const MIG_DOWN = "-- schemic:down";
+
+/** Render a diff to a Postgres migration file: marker-delimited `up` and `down` DDL sections. */
+function renderMigration(_tag: string, diff: Diff): string {
+  return `${MIG_UP}\n${diff.up.join("\n")}\n\n${MIG_DOWN}\n${diff.down.join("\n")}\n`;
+}
+
+/** Extract the `up` or `down` DDL section from a migration file body. */
+function migSection(content: string, direction: MigrationDirection): string {
+  const up = content.indexOf(MIG_UP);
+  const down = content.indexOf(MIG_DOWN);
+  if (up === -1 || down === -1) return direction === "up" ? content : "";
+  return direction === "up"
+    ? content.slice(up + MIG_UP.length, down)
+    : content.slice(down + MIG_DOWN.length);
+}
+
+const sqlStr = (v: string) => `'${v.replace(/'/g, "''")}'`;
+const lockTableOf = (table: string) => `${table}_lock`;
+
+async function ensureMigTable(conn: PgConn, table: string): Promise<void> {
+  await conn.exec(
+    `CREATE TABLE IF NOT EXISTS ${escId(table)} (
+  ${escId("tag")} text PRIMARY KEY,
+  ${escId("file")} text NOT NULL,
+  ${escId("checksum")} text NOT NULL,
+  ${escId("applied_at")} timestamptz NOT NULL DEFAULT now()
+);`,
+  );
+}
+
+const recordInsert = (table: string, r: MigrationRecord) =>
+  `INSERT INTO ${escId(table)} (${escId("tag")}, ${escId("file")}, ${escId("checksum")}) VALUES (${sqlStr(r.tag)}, ${sqlStr(r.file)}, ${sqlStr(r.checksum)});`;
+
+const migrations: MigrationStore<PgConn> = {
+  render: renderMigration,
+  ensure: ensureMigTable,
+
+  async applied(conn, table) {
+    const { rows } = await conn.query<{ tag: string; checksum: string }>(
+      `SELECT ${escId("tag")}, ${escId("checksum")} FROM ${escId(table)};`,
+    );
+    return new Map(rows.map((r) => [r.tag, r.checksum]));
+  },
+
+  // Postgres runs DDL inside a transaction, so the migration's section + its bookkeeping write commit
+  // atomically — the record lands iff the DDL applied.
+  async apply(conn, table, { content, direction, record }) {
+    const ddl = migSection(content, direction).trim();
+    const book =
+      direction === "up"
+        ? recordInsert(table, record)
+        : `DELETE FROM ${escId(table)} WHERE ${escId("tag")} = ${sqlStr(record.tag)};`;
+    await conn.exec(`BEGIN;\n${ddl ? `${ddl}\n` : ""}${book}\nCOMMIT;`);
+  },
+
+  async record(conn, table, record) {
+    await ensureMigTable(conn, table);
+    await conn.exec(recordInsert(table, record));
+  },
+
+  async clear(conn, table) {
+    await conn.exec(`DELETE FROM ${escId(table)};`);
+  },
+
+  // A persisted lock ROW (survives across separate CLI runs on a file-based PGlite, unlike a session
+  // advisory lock). The PK collision on a held lock is the "already locked" signal.
+  async lock(conn, table) {
+    const lt = lockTableOf(table);
+    await conn.exec(
+      `CREATE TABLE IF NOT EXISTS ${escId(lt)} (${escId("id")} int PRIMARY KEY);`,
+    );
+    try {
+      await conn.exec(`INSERT INTO ${escId(lt)} (${escId("id")}) VALUES (1);`);
+    } catch {
+      throw new Error(
+        "Migrations are locked — another run is in progress. If it's stale, run `schemic unlock`.",
+      );
+    }
+  },
+
+  async unlock(conn, table) {
+    const lt = lockTableOf(table);
+    await conn.exec(
+      `CREATE TABLE IF NOT EXISTS ${escId(lt)} (${escId("id")} int PRIMARY KEY);\nDELETE FROM ${escId(lt)} WHERE ${escId("id")} = 1;`,
+    );
+  },
+};
+
 export const postgresDriver: Driver<PgConn> = {
   name: "postgres",
 
@@ -965,8 +1070,59 @@ export const postgresDriver: Driver<PgConn> = {
     return conn.close();
   },
 
+  // Apply-time migration bookkeeping (the `_migrations` table SQL behind migrate/rollback/status).
+  migrations,
+
+  // `schemic init --driver postgres` scaffolds a real connections-only pg project from these files
+  // (the CLI adds the neutral migration snapshot).
+  initScaffold: () => ({
+    "schemic.config.ts": INIT_CONFIG_TS,
+    "database/schema/tables.ts": INIT_SCHEMA_TS,
+    "database/seed.ts": INIT_SEED_TS,
+    ".env.example": INIT_ENV,
+  }),
+
   shadow,
 };
+
+// --- `schemic init` scaffold templates ----------------------------------------------------------
+
+const INIT_CONFIG_TS = `import { defineConfig } from "@schemic/core/config";
+import { postgresConnection } from "@schemic/postgres";
+
+// Connections-only config: a map of named connections, each from a driver factory. Values are
+// explicit — read env yourself (no magic env vars).
+export default defineConfig({
+  connections: {
+    default: postgresConnection({
+      schema: "./database/schema",
+      // PGlite (embedded): \`file:<dir>\` is a persistent data dir; "" is in-memory. Point
+      // DATABASE_URL at a real server (\`postgres://…\`) once the node-postgres client lands.
+      url: process.env.DATABASE_URL ?? "file:./.pgdata",
+    }),
+  },
+});
+`;
+
+const INIT_SCHEMA_TS = `import { defineTable, s, sqlExpr } from "@schemic/postgres";
+
+export const user = defineTable("user", {
+  email: s.varchar(255).$unique(),
+  name: s.text(),
+  age: s.smallint().optional(),
+  createdAt: s.timestamptz().$default(sqlExpr("now()")),
+});
+`;
+
+const INIT_SEED_TS = `// Seed script — run with \`schemic seed\`. Receives the live connection(s).
+export default async function seed() {
+  // await conn.query("INSERT INTO ...");
+}
+`;
+
+const INIT_ENV = `# A real Postgres server (uncomment to use instead of embedded PGlite):
+# DATABASE_URL=postgres://user:pass@localhost:5432/app
+`;
 
 /** A small structural deep-equal (the portable IR is plain JSON). */
 function deepEqualJson(a: unknown, b: unknown): boolean {
