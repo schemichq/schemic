@@ -9,6 +9,14 @@
 // the one SDK entry rather than reaching into core's cli/* internals.
 export type { ResolvedConfig } from "../cli/config";
 export type { Diff, DiffItem } from "../cli/diff";
+// Multi-connection: the primitive each driver wraps in its typed `<driver>Connection(...)` factory.
+export {
+  type ConnectionConfigBase,
+  type ConnectionEntry,
+  type ConnectionInput,
+  connectionEntry,
+  type ResolveContext,
+} from "../connection";
 export type {
   ApplyOptions,
   Authored,

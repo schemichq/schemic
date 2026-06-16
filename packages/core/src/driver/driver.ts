@@ -251,6 +251,16 @@ export interface Driver<
   ): Promise<PullPlan>;
   /** A human-readable server identity for `doctor` (e.g. "SurrealDB 3.1.3"); throws if unreachable. */
   serverInfo?(conn: Conn): Promise<string>;
+  /**
+   * Run a raw READ query and return rows — for connection RESOLVERS (a multi-connection resolver's
+   * `ctx.connections.<name>.query(...)`) and `seed`. The `sql` is this dialect's query language; the
+   * orchestration treats the rows opaquely. Absent -> a resolver can't read from this connection.
+   */
+  query?<T = unknown>(
+    conn: Conn,
+    sql: string,
+    vars?: Record<string, unknown>,
+  ): Promise<T[]>;
 }
 
 // --- Registry -----------------------------------------------------------------------------------

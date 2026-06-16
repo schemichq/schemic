@@ -69,6 +69,16 @@ export {
   scanLocalEntities,
 } from "./cli/schema";
 export { colorEnabled, fail, ok, plural, style } from "./cli/style";
+// --- multi-connection contract (docs/MULTI-CONNECTION.md) -------------------------------------
+export {
+  type ConnectionConfigBase,
+  type ConnectionEntry,
+  type ConnectionInput,
+  connectionEntry,
+  isConnectionEntry,
+  type ResolveContext,
+  type ResolvedConnectionHandle,
+} from "./connection";
 // --- driver contract + registry ---------------------------------------------------------------
 export {
   type ApplyOptions,
