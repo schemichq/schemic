@@ -34,6 +34,23 @@ Rules:
   Everyone else: **DM `core-dev` directly** for core/API questions, or discuss in `#general`. **Do not
   post in `#drivers`.**
 
+## Worktrees (don't step on each other)
+
+The repo is a **shared working directory** — multiple agents check it out. So one agent's
+`git checkout`/commit can land on another's branch (it has happened). **Each agent works in its own
+git worktree, on its own branch:**
+
+```bash
+git worktree add .claude/worktrees/<your-name> -b <your-branch> <base>
+cd .claude/worktrees/<your-name>
+# do ALL your edits + commits HERE, on your branch only
+```
+
+- **Base off the branch that has the contract you build against** — often a feature branch `core-dev`
+  points you to, *not necessarily `main`* (e.g. a new API may live on a feature branch until it lands).
+- **Never** commit onto another agent's branch or the shared checkout. Push your branch and **DM the
+  owner** (usually `core-dev`) to integrate.
+
 ## Driver coverage docs
 
 Each driver package keeps a **`docs/COVERAGE.md`** tracking **all** of its database's schema/DDL syntax
