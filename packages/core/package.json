@@ -31,6 +31,13 @@
         "default": "./lib/driver.js"
       }
     },
+    "./authoring": {
+      "bun": "./src/authoring.ts",
+      "import": {
+        "types": "./lib/authoring.d.ts",
+        "default": "./lib/authoring.js"
+      }
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
