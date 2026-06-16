@@ -20,7 +20,12 @@
  *
  * Connection fields fall back to env (`SURREAL_URL`/`SURREAL_NAMESPACE`/`SURREAL_DATABASE`/
  * `SURREAL_USER`/`SURREAL_PASS`) and can be overridden by CLI flags at run time.
+ *
+ * For MULTIPLE databases in one project, use `connections` with per-driver factories instead of `db`
+ * — see `@schemic/core` docs/MULTI-CONNECTION.md.
  */
+import type { ConnectionEntry } from "./connection";
+
 /** Which level to authenticate at — mirrors `surreal sql --auth-level`. */
 export type AuthLevel = "root" | "namespace" | "database";
 
@@ -110,20 +115,35 @@ export interface SurrealZodCheck {
 
 export interface SurrealZodConfig {
   /**
-   * Target database driver. Default `"surrealdb"`. The multi-DB spike adds `"postgres"` (see
-   * docs/MULTI-DB-SPIKE.md) — a non-surreal driver routes diff/connect/introspect through the
-   * portable-IR driver layer instead of the SurrealQL pipeline.
+   * Target database driver for the SINGLE-connection (`db`) path. Default `"surrealdb"`. (Multi-
+   * connection projects name the driver per connection via the `<driver>Connection(...)` factory.)
    */
   driver?: string;
   /**
    * Directory (or single file) holding your schema modules, loaded recursively — so you can organize
-   * by kind (`tables/`, `functions/`, `access/`, …). Default `./database/schema`.
+   * by kind (`tables/`, `functions/`, `access/`, …). Default `./database/schema`. (Single-connection
+   * default; a multi-connection entry carries its own `schema`.)
    */
   schema?: string;
-  /** Directory holding `.surql` migrations + their `meta/` snapshot. Default `./database/migrations`. */
+  /** Directory holding the migrations + their `meta/` snapshot. Default `./database/migrations`. */
   migrations?: string;
-  /** SurrealDB connection. Individual fields fall back to env / CLI flags. */
-  db: SurrealZodConnection;
+  /**
+   * SINGLE-connection sugar — equivalent to one connection named `default`. Individual fields fall
+   * back to env / CLI flags. **Mutually exclusive with `connections`.**
+   */
+  db?: SurrealZodConnection;
+  /**
+   * MULTI-connection: a map of named connections, each produced by a per-driver
+   * `<driver>Connection(...)` factory (from `@schemic/<driver>`). One project, many databases
+   * (multi-tenant / heterogeneous / DB-per-user). **Mutually exclusive with `db`.** A connection may
+   * be a static config or a resolver (incl. an array → a collection). See docs/MULTI-CONNECTION.md.
+   */
+  connections?: Record<string, ConnectionEntry>;
+  /**
+   * With >1 connection, the connection a bare command targets. Must name a single static connection.
+   * Absent + ambiguous → a live command errors asking for `--connection`.
+   */
+  defaultConnection?: string;
   /** Table that records applied migrations. Defaults to `_migrations`. */
   migrationsTable?: string;
   /** Optional seed script run by `schemic seed`. */
