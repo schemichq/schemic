@@ -32,17 +32,15 @@ function makeConfig(): ResolvedConfig {
   // AUTHORING driver (the schema imports `s` from @schemic/surrealdb); the postgres TARGET is the
   // `driverName` arg to portableDiff. So authoring lowers via surreal, the gap is computed vs pg.
   return {
+    connection: "default",
     driver: "surrealdb",
-    db: { url: "" }, // embedded in-memory PGlite
     schemaPath: join(ROOT, "database", "schema"),
     root: ROOT,
     schemaIsFile: false,
     migrationsDir: join(ROOT, "database", "migrations"),
     metaDir: join(ROOT, "database", "migrations", "meta"),
     migrationsTable: "_migrations",
-    checkDb: { url: "" },
-    checkEngine: "auto",
-    checkBinary: "surreal",
+    params: {}, // embedded in-memory PGlite — connection params unused by portableDiff
   } as ResolvedConfig;
 }
 
