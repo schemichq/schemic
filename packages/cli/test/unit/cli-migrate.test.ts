@@ -10,18 +10,15 @@ function tmpConfig(): ResolvedConfig {
   const root = mkdtempSync(join(tmpdir(), "s-"));
   const migrationsDir = join(root, "migrations");
   return {
-    schema: "schemas",
-    migrations: "migrations",
-    db: { url: "", namespace: "", database: "" },
-    checkDb: { url: "", namespace: "", database: "" },
-    checkEngine: "auto",
-    checkBinary: "surreal",
+    connection: "default",
+    driver: "surrealdb",
     root,
     schemaPath: join(root, "schemas"),
     schemaIsFile: false,
     migrationsDir,
     metaDir: join(migrationsDir, "meta"),
     migrationsTable: "_migrations",
+    params: {},
   };
 }
 

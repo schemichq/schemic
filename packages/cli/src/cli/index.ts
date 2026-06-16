@@ -244,7 +244,9 @@ function watchLoop(
       },
     );
     console.log(
-      style.dim(`Watching ${config.schema} for changes — ctrl-c to stop.`),
+      style.dim(
+        `Watching ${relative(config.root, config.schemaPath)} for changes — ctrl-c to stop.`,
+      ),
     );
     void fire();
     const stop = () => {
@@ -461,7 +463,7 @@ kindFlags(
             };
             // Single-file layout → one combined module key; directory layout → one file per object.
             const single = config.schemaIsFile
-              ? (config.schema ?? "schema")
+              ? relative(config.root, config.schemaPath)
               : undefined;
 
             // cur = the baseline (live DB or snapshot) rendered to source, des = the declared schema.
@@ -602,14 +604,15 @@ const genAction = (
     if (opts.baseline) {
       const existing = listMigrations(config.migrationsDir);
       if (existing.length) {
+        const migDir = relative(config.root, config.migrationsDir);
         const proceed =
           opts.force ||
           (await confirmPrompt(
-            `Replace ${plural(existing.length, "migration")} in ${config.migrations} with a single baseline?`,
+            `Replace ${plural(existing.length, "migration")} in ${migDir} with a single baseline?`,
           ));
         if (!proceed) {
           throw new Error(
-            `${plural(existing.length, "migration")} already exist in ${config.migrations} — a baseline would re-define objects they already created.\n  Re-run \`schemic gen --baseline --force\` to replace them with one fresh baseline.`,
+            `${plural(existing.length, "migration")} already exist in ${migDir} — a baseline would re-define objects they already created.\n  Re-run \`schemic gen --baseline --force\` to replace them with one fresh baseline.`,
           );
         }
         squashed = clearMigrationFiles(config);
@@ -867,16 +870,16 @@ dbFlags(
 ).action((opts: CommonOpts) => {
   run(async () => {
     const config = await loadConfig({ config: opts.config });
-    const d = config.db;
     const row = (k: string, v: string) =>
       console.log(style.dim(`  ${k.padEnd(11)} ${v}`));
     console.log(style.bold("Project"));
     row("root", config.root);
-    row("migrations", config.migrations ?? "");
+    row("connection", `${config.connection} (${config.driver})`);
+    row("migrations", relative(config.root, config.migrationsDir));
     console.log(style.bold("\nSchema"));
     row(
       "source",
-      `${config.schema} (${config.schemaIsFile ? "file" : "directory"})`,
+      `${relative(config.root, config.schemaPath)} (${config.schemaIsFile ? "file" : "directory"})`,
     );
     try {
       const defs = await loadSchemas(config.schemaPath);
@@ -896,14 +899,17 @@ dbFlags(
     } catch (e) {
       console.log(`  ${fail(e instanceof Error ? e.message : String(e))}`);
     }
+    // The connection params are driver-specific + opaque to the CLI — print them generically,
+    // redacting anything secret-looking (password/secret/token/key). The driver names the params.
     console.log(style.bold("\nConnection"));
-    row("url", d.url);
-    row("namespace", d.namespace);
-    row("database", d.database);
-    row(
-      "auth",
-      d.username ? `${d.username} (${d.authLevel ?? "root"} access)` : "(none)",
-    );
+    const secret = /pass|secret|token|key/i;
+    const params = Object.entries(config.params);
+    if (params.length) {
+      for (const [k, v] of params)
+        row(k, secret.test(k) ? "***" : String(v ?? ""));
+    } else {
+      row("params", "(none)");
+    }
     console.log(style.bold("\nVersions"));
     row("@schemic/core", program.version() ?? "?");
     row("node", process.version);
