@@ -123,12 +123,27 @@ Everything *object-kind-specific* moves to the drivers.
 
 ## 7. Hard parts / open questions
 
-1. **Cross-kind dependency ordering.** The single biggest one. Today the engine orders objects
-   (table before its FK, analyzer before its search index, function before the event that calls it). A
-   generic kind loop needs a **dependency model across kinds** — hence `dependsOn(portable): string[]`
-   on `KindEngine`, feeding a topo-sort over the *flattened* object set (not per-kind). This is also the
-   backlog's "edge-aware dependency topo-sort across definable types" — the registry forces us to solve
-   it properly.
+1. **Cross-kind dependency ordering.** The single biggest one — worked out in
+   [`poc/kind-ordering.poc.ts`](./poc/kind-ordering.poc.ts) (compiles + runs).
+   - **A per-kind ordinal is NOT enough.** "Tables, then indexes, then functions" breaks the moment a
+     table's **event calls a function** — that function must be emitted *before* the table, i.e. a
+     FUNCTION before a TABLE, which a tables-first ordinal gets exactly wrong. Dependencies don't respect
+     kind layers. (Same with intra-kind deps: a graph-edge table referencing its in/out tables, a
+     function calling another function.)
+   - **Use a dependency GRAPH + topological sort.** Each kind engine declares, per object,
+     `deps(portable): Ref[]` — the specific objects it must come after (a field/index → its table; an
+     edge table → its in/out tables; an event → its table + any function it calls; a search index → its
+     analyzer). Flatten all objects across kinds, topo-sort (DFS post-order); a cycle is a named error.
+   - **The ordinal survives only as a TIE-BREAK** among objects with *no* dependency relation — so
+     independent objects come out stable and layered (readability), but it never overrides the graph.
+   - **Drops reverse the order** (drop the FK side before the table; drop a table's event before the
+     function it calls). One sort serves both directions.
+   - **Grouping (`DEFINE INDEX` right after its `DEFINE TABLE`) is a separate READABILITY pass**, not
+     correctness. Model it with an optional `owner(portable): Ref` (a field/index/event's table) and
+     cluster owned objects next to their owner *within* what the topo order permits — but correctness can
+     force a function ahead of a table (the event case), so grouping yields to the graph.
+   - This is also the backlog's "edge-aware dependency topo-sort across definable types" — the registry
+     forces us to finally solve it properly, once, for every kind.
 2. **Snapshot format v2 → v3.** `PortableDb` fixed slots → `{ kinds: Record<string, PortableObject[]> }`.
    A read-compat upgrade (like the v1→v2 we already did via `Driver.upgradeSnapshot`).
 3. **Type-erasure boundary.** The registry holds `KindEngine<any, any>` (heterogeneous kinds erase at the
