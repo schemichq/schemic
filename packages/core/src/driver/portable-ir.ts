@@ -69,8 +69,20 @@ export interface PortableField {
   value?: string;
   computed?: string;
   assert?: string;
+  /**
+   * A field-level CHECK constraint (dialect boolean expression, carried verbatim). DISTINCT from
+   * `assert`: that is Surreal's `ASSERT`; this is the SQL `CHECK` a driver like Postgres emits. A
+   * driver maps whichever of the two it supports and surfaces the other as a capability gap.
+   */
+  check?: string;
   comment?: string;
-  reference?: { on_delete?: string };
+  /** Referential action(s) on a foreign reference. A driver honors the actions it supports. */
+  reference?: { on_delete?: string; on_update?: string };
+  /**
+   * Auto-generated identity column — `GENERATED ALWAYS`/`BY DEFAULT AS IDENTITY`; a `serial`/
+   * auto-increment column maps here too. Absent → an ordinary column. Drivers without identity ignore it.
+   */
+  identity?: "always" | "by-default";
   permissions?: PortablePermissions;
   table: string;
 }
@@ -84,13 +96,34 @@ export interface PortableTable {
   /** Change-data-capture window (dialect feature; a driver without it drops it). */
   changefeed?: { expiry: string; original: boolean };
   permissions?: PortablePermissions;
+  /**
+   * Custom/composite PRIMARY KEY column(s). Absent → the driver's implicit key (e.g. Surreal's `id`).
+   * A driver without composite keys honors a single-column value and surfaces multi-column as a gap.
+   */
+  primaryKey?: string[];
+  /** Table-level CHECK constraints (dialect boolean expressions, carried verbatim). */
+  checks?: string[];
   fields: PortableField[];
   indexes: PortableIndex[];
   events: PortableEvent[];
+}
+
+/**
+ * A db-level dialect-native object that has NO portable structure — a Postgres ENUM/DOMAIN
+ * (`CREATE TYPE`), an EXTENSION (`CREATE EXTENSION`), and the like. Neutral identity (`kind` + `name`)
+ * plus an OPAQUE `native` payload the owning driver round-trips, exactly like {@link PortableFunction}/
+ * {@link PortableAccess}. A driver with no such objects omits them.
+ */
+export interface PortableNative {
+  kind: string;
+  name: string;
+  native: unknown;
 }
 
 export interface PortableDb {
   tables: PortableTable[];
   functions: PortableFunction[];
   accesses: PortableAccess[];
+  /** Db-level dialect-native objects (Postgres ENUM/DOMAIN/EXTENSION, …). Optional; a driver without them omits it. */
+  natives?: PortableNative[];
 }
