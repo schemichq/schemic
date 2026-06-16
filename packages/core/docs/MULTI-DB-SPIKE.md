@@ -83,7 +83,7 @@ type PortableType =
 
 ```ts
 interface Driver {
-  readonly name: string;                              // "surreal" | "postgres"
+  readonly name: string;                              // "surrealdb" | "postgres"
 
   lower(def: TableDef | StandaloneDef): Struct;        // authoring → IR   (shared walk + driver type-infer)
   emit(struct: Struct): Statement[];                   // IR → DDL         (the dialect)

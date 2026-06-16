@@ -27,7 +27,7 @@ export default defineConfig({
 `;
 
 const SAMPLE_SCHEMA = `import { surql } from "surrealdb";
-import { s, defineTable } from "@schemic/surreal";
+import { s, defineTable } from "@schemic/surrealdb";
 
 export const User = defineTable("user", {
   id: s.string(),
@@ -56,7 +56,7 @@ SURREAL_AUTH_LEVEL=root
 const INITIAL_SNAPSHOT = `${JSON.stringify(
   {
     version: 2,
-    driver: "surreal",
+    driver: "surrealdb",
     portable: { tables: [], functions: [], accesses: [] },
     files: {},
   },

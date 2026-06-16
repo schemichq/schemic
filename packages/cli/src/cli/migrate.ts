@@ -61,7 +61,7 @@ function buildStored(
 
 /** The driver's apply-time migration bookkeeping (the dialect SQL behind `migrate`/`rollback`/…). */
 function migStore(config: ResolvedConfig): MigrationStore<unknown> {
-  const driver = getDriver(config.driver ?? "surreal");
+  const driver = getDriver(config.driver ?? "surrealdb");
   if (!driver.migrations)
     throw new Error(
       `The "${driver.name}" driver does not support running migrations.`,
@@ -107,7 +107,7 @@ export async function planMigration(
   opts: { baseline?: boolean } = {},
 ): Promise<MigrationPlan> {
   const { tables, defs, fileOf } = await loadDefs(config.schemaPath);
-  const driver = getDriver(config.driver ?? "surreal");
+  const driver = getDriver(config.driver ?? "surrealdb");
   const next = buildStored(driver, tables, defs, { fileOf, root: config.root });
   const prev = opts.baseline
     ? EMPTY_STORED
@@ -232,7 +232,7 @@ export async function baseline(
   config: ResolvedConfig,
   filter: Filter = parseFilter({}),
 ): Promise<GenerateResult> {
-  const driver = getDriver(config.driver ?? "surreal");
+  const driver = getDriver(config.driver ?? "surrealdb");
   // What actually exists in the live DB (canonical portable IR), used ONLY to scope the baseline:
   // hand-written schema not yet in the DB stays pending for the next `schemic gen` rather than being
   // silently marked applied.

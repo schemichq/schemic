@@ -533,13 +533,13 @@ function unitModule(u: RenderedUnit): string {
 /** The rendered unit (const statement + the imports it needs) for one table/relation. */
 function tableUnit(t: StructTable, ctx: RenderCtx): RenderedUnit {
   const { code, factory } = renderTableConst(t, ctx);
-  const imports = [`import { s, ${factory} } from "@schemic/surreal";`];
+  const imports = [`import { s, ${factory} } from "@schemic/surrealdb";`];
   // Cross-table value imports (one per referenced table, sorted, self excluded).
   for (const dep of [...ctx.imports].filter((d) => d !== t.name).sort()) {
     imports.push(`import { ${ctx.constOf(dep)} } from "./${dep}";`);
   }
   // `surql` lives in surrealdb (where hand-authored files import it from) — a separate line, never
-  // folded into the @schemic/surreal import (which would reprint/reorder that import on every pull).
+  // folded into the @schemic/surrealdb import (which would reprint/reorder that import on every pull).
   if (code.includes("surql`"))
     imports.push(`import { surql } from "surrealdb";`);
   return {
@@ -778,7 +778,7 @@ function planFile(
 function functionUnit(fn: StructFunction): RenderedUnit {
   const code = renderFunctionConst(fn);
   const names = ["defineFunction", ...(code.includes("s.") ? ["s"] : [])];
-  const imports = [`import { ${names.join(", ")} } from "@schemic/surreal";`];
+  const imports = [`import { ${names.join(", ")} } from "@schemic/surrealdb";`];
   // `surql` from surrealdb on its own line (see tableUnit) — a function body is always a surql expr.
   if (code.includes("surql`"))
     imports.push(`import { surql } from "surrealdb";`);
@@ -794,7 +794,7 @@ function functionUnit(fn: StructFunction): RenderedUnit {
 /** The rendered unit for one db-level access def. */
 function accessUnit(a: StructAccess): RenderedUnit {
   const code = renderAccessConst(a);
-  const imports = [`import { defineAccess } from "@schemic/surreal";`];
+  const imports = [`import { defineAccess } from "@schemic/surrealdb";`];
   if (code.includes("surql`"))
     imports.push(`import { surql } from "surrealdb";`);
   return {
@@ -848,11 +848,11 @@ function mergeImports(units: RenderedUnit[]): string[] {
         .filter(Boolean))
         set.add(s);
     }
-  // @schemic/surreal first, then the relative cross-file imports (sorted).
+  // @schemic/surrealdb first, then the relative cross-file imports (sorted).
   order.sort((a, b) =>
-    a === "@schemic/surreal"
+    a === "@schemic/surrealdb"
       ? -1
-      : b === "@schemic/surreal"
+      : b === "@schemic/surrealdb"
         ? 1
         : a.localeCompare(b),
   );
@@ -925,8 +925,8 @@ function assembleCombined(
     accesses.length > 0 ||
     ordered.some((r) => r.usesSurql);
   const names = ["s", ...factories];
-  const imports = [`import { ${names.join(", ")} } from "@schemic/surreal";`];
-  // `surql` from surrealdb on its own line (see tableUnit), kept out of the @schemic/surreal import.
+  const imports = [`import { ${names.join(", ")} } from "@schemic/surrealdb";`];
+  // `surql` from surrealdb on its own line (see tableUnit), kept out of the @schemic/surrealdb import.
   if (usesSurql) imports.push(`import { surql } from "surrealdb";`);
   const body = [...ordered.map((r) => r.code), ...fnCode, ...accessCode].join(
     "\n\n",

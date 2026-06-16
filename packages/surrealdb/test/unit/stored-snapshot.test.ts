@@ -30,7 +30,7 @@ const lower = (tables: unknown[] = [User]) =>
 
 const stored = (tables: unknown[] = [User]): StoredSnapshot => ({
   version: 2,
-  driver: "surreal",
+  driver: "surrealdb",
   portable: lower(tables),
   files: {},
 });
@@ -43,7 +43,7 @@ describe("readSnapshot v1 -> v2 read-compat", () => {
     // v1 -> v2 upgrade is driver-owned now (only the driver can lift its legacy struct).
     const out = readSnapshot(META, surrealDriver);
     expect(out.version).toBe(2);
-    expect(out.driver).toBe("surreal");
+    expect(out.driver).toBe("surrealdb");
     expect(out.portable.tables.map((t) => t.name)).toEqual(["user"]);
   });
 

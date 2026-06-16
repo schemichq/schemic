@@ -1,6 +1,6 @@
 // SurrealDB connection runtime — split out of cli/config.ts so that module stays dialect-neutral
 // (config types + loadConfig only). This is the Surreal driver's `connect` implementation; it imports
-// the surrealdb SDK and belongs to @schemic/surreal at the physical split.
+// the surrealdb SDK and belongs to @schemic/surrealdb at the physical split.
 
 import type { ConnectionOverrides, ResolvedConfig } from "@schemic/core";
 import type { AuthLevel } from "@schemic/core/config";

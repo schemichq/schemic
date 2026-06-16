@@ -79,13 +79,13 @@ async function ensureDriver(name: string): Promise<void> {
 /** Load config AND ensure its driver package is loaded/registered — every command starts here. */
 async function loadConfig(opts: { config?: string }): Promise<ResolvedConfig> {
   const config = await coreLoadConfig(opts);
-  await ensureDriver(config.driver ?? "surreal");
+  await ensureDriver(config.driver ?? "surrealdb");
   return config;
 }
 
 /** The driver configured for this project (the `driver` field, defaulting to surreal). */
 const activeDriver = (config: ResolvedConfig): Driver<unknown> =>
-  getDriver(config.driver ?? "surreal");
+  getDriver(config.driver ?? "surrealdb");
 
 interface CommonOpts extends ConnectionOverrides {
   config?: string;
@@ -101,7 +101,7 @@ async function withDb(
   fn: (db: unknown, config: ResolvedConfig) => Promise<void>,
 ): Promise<void> {
   const config = await loadConfig({ config: opts.config });
-  const driver = getDriver(config.driver ?? "surreal");
+  const driver = getDriver(config.driver ?? "surrealdb");
   const db = await driver.connect(config, opts);
   try {
     await fn(db, config);
@@ -394,7 +394,7 @@ kindFlags(
     ) => {
       run(async () => {
         const config = await loadConfig({ config: opts.config });
-        const driverName = opts.driver ?? config.driver ?? "surreal";
+        const driverName = opts.driver ?? config.driver ?? "surrealdb";
         await ensureDriver(driverName);
         const driver = getDriver(driverName);
         // A driver without the rich live/snapshot diff capability routes through the portable-IR
@@ -652,7 +652,7 @@ const genAction = (
         const diffLive = driver.diffLive;
         if (!diffLive)
           throw new Error(
-            `the "${config.driver ?? "surreal"}" driver does not support live reconcile`,
+            `the "${config.driver ?? "surrealdb"}" driver does not support live reconcile`,
           );
         const db = await driver.connect(config, opts);
         try {
@@ -839,7 +839,7 @@ dbFlags(
     //    real database. A driver without the capability can only `check --schema`.
     if (!driver.checkReplay) {
       throw new Error(
-        `the "${config.driver ?? "surreal"}" driver does not support migration replay — run \`schemic check --schema\` to validate the schema only.`,
+        `the "${config.driver ?? "surrealdb"}" driver does not support migration replay — run \`schemic check --schema\` to validate the schema only.`,
       );
     }
     const diff = await driver.checkReplay(config, opts, parseFilter({}), (m) =>
@@ -913,7 +913,7 @@ dbFlags(
       const db = await driver.connect(config, opts);
       const info = driver.serverInfo
         ? await driver.serverInfo(db)
-        : (config.driver ?? "surreal");
+        : (config.driver ?? "surrealdb");
       console.log(`  ${ok(`connected — ${info}`)}`);
       await driver.close(db);
     } catch (e) {
@@ -1001,7 +1001,7 @@ kindFlags(
       const syncPlan = driver.syncPlan;
       if (!diffLive || !syncPlan)
         throw new Error(
-          `the "${config.driver ?? "surreal"}" driver does not support \`push\`.`,
+          `the "${config.driver ?? "surrealdb"}" driver does not support \`push\`.`,
         );
       const once = async (db: unknown) => {
         const diff = await diffLive(db, config, filter);
@@ -1117,7 +1117,7 @@ kindFlags(
         const driver = activeDriver(config);
         if (!driver.planPull)
           throw new Error(
-            `the "${config.driver ?? "surreal"}" driver does not support \`pull\`.`,
+            `the "${config.driver ?? "surrealdb"}" driver does not support \`pull\`.`,
           );
         const plan = await driver.planPull(db, config, {
           filter: parseFilter(opts),

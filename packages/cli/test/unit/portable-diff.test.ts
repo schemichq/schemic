@@ -10,7 +10,7 @@ import { join } from "node:path";
 // Registers the "postgres" driver (now a separate package) for the `diff --driver postgres` test.
 import "@schemic/postgres";
 import type { ResolvedConfig } from "@schemic/core";
-import { defineTable, s, surrealDriver } from "@schemic/surreal";
+import { defineTable, s, surrealDriver } from "@schemic/surrealdb";
 import {
   diffPortable,
   planPortable,
@@ -29,10 +29,10 @@ const SCHEMA = join(ROOT, "database", "schema", "tables");
 
 function makeConfig(): ResolvedConfig {
   // Only the fields portableDiff reads need to be real; the rest are filler. `driver` is the
-  // AUTHORING driver (the schema imports `s` from @schemic/surreal); the postgres TARGET is the
+  // AUTHORING driver (the schema imports `s` from @schemic/surrealdb); the postgres TARGET is the
   // `driverName` arg to portableDiff. So authoring lowers via surreal, the gap is computed vs pg.
   return {
-    driver: "surreal",
+    driver: "surrealdb",
     db: { url: "" }, // embedded in-memory PGlite
     schemaPath: join(ROOT, "database", "schema"),
     root: ROOT,
@@ -49,11 +49,11 @@ function makeConfig(): ResolvedConfig {
 beforeAll(() => {
   rmSync(ROOT, { recursive: true, force: true });
   mkdirSync(SCHEMA, { recursive: true });
-  // Symlink farm so the jiti-loaded fixture's `import "@schemic/surreal"` resolves to THIS source
+  // Symlink farm so the jiti-loaded fixture's `import "@schemic/surrealdb"` resolves to THIS source
   // (bun -> src export → same module instance as the test's surrealDriver), plus its peer deps.
   const scope = join(ROOT, "node_modules", "@schemic");
   mkdirSync(scope, { recursive: true });
-  symlinkSync(join(PKGS, "surreal"), join(scope, "surreal"), "dir");
+  symlinkSync(join(PKGS, "surrealdb"), join(scope, "surrealdb"), "dir");
   symlinkSync(join(PKGS, "core"), join(scope, "core"), "dir");
   for (const dep of ["surrealdb", "zod"])
     symlinkSync(
@@ -63,7 +63,7 @@ beforeAll(() => {
     );
   writeFileSync(
     join(SCHEMA, "user.ts"),
-    `import { defineTable, s } from "@schemic/surreal";
+    `import { defineTable, s } from "@schemic/surrealdb";
 export const user = defineTable("user", {
   name: s.string(),
   age: s.int().optional(),

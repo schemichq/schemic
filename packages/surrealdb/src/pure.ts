@@ -521,7 +521,7 @@ export abstract class SFieldBase<
  * The SurrealDB field — the dialect extension of {@link SFieldBase}. Adds SurrealDB-native authoring
  * (the `$`-methods over `SurrealMeta`: DEFAULT/VALUE/ASSERT/PERMISSIONS/REFERENCE/…) and re-types the
  * inherited portable Zod wrappers so a chain stays a `SField`. `s.*` produces these. In the package
- * split this class moves to `@schemic/surreal` (see docs/AUTHORING-SPLIT.md).
+ * split this class moves to `@schemic/surrealdb` (see docs/AUTHORING-SPLIT.md).
  */
 export class SField<
   S extends z.ZodType = z.ZodType,

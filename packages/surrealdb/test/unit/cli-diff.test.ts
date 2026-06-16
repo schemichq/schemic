@@ -11,7 +11,7 @@ import {
   emitTable,
   s,
   surql,
-} from "@schemic/surreal";
+} from "@schemic/surrealdb";
 import { EMPTY_SNAPSHOT } from "../../src/cli/structure";
 import {
   buildSnapshot,

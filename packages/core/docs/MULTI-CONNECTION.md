@@ -31,7 +31,7 @@ tenant fan-out.
 
 Each driver package exports a typed `<driver>Connection` factory; `defineConfig` accepts a neutral,
 branded `ConnectionEntry` (the factory's output) and stays fully driver-agnostic. **This is chosen over a
-discriminated-union `{ driver: "surreal", … }` config** (decided 2026-06-15): a factory's parameter is
+discriminated-union `{ driver: "surrealdb", … }` config** (decided 2026-06-15): a factory's parameter is
 *exactly* that driver's connection type, so inference + errors are precise — especially inside resolvers
 and array returns, where union narrowing leaks; there's no module-augmentation footgun (a missing driver
 import can't silently degrade `driver` to `string`); and **the import is the driver dependency**, consistent
@@ -39,7 +39,7 @@ with "the installed driver owns connection". The factory injects the driver tag,
 `driver: "…"` string.
 
 ```ts
-import { surrealConnection } from "@schemic/surreal";
+import { surrealConnection } from "@schemic/surrealdb";
 import { libsqlConnection } from "@schemic/libsql";
 
 defineConfig({
@@ -80,7 +80,7 @@ interface ResolveContext {
   env: NodeJS.ProcessEnv;
 }
 
-// e.g. @schemic/surreal ships these overloads (C = the surreal connection type, with ns/authLevel/…):
+// e.g. @schemic/surrealdb ships these overloads (C = the surreal connection type, with ns/authLevel/…):
 //   function surrealConnection(config: C): ConnectionEntry;                                       // single, static
 //   function surrealConnection(resolve: (ctx: ResolveContext) => C | Promise<C>): ConnectionEntry; // single, dynamic
 //   function surrealConnection(                                                                    // a COLLECTION

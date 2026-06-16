@@ -22,7 +22,7 @@
         "@biomejs/biome": "^2.3.11",
         "@electric-sql/pglite": "^0.5.2",
         "@schemic/postgres": "workspace:*",
-        "@schemic/surreal": "workspace:*",
+        "@schemic/surrealdb": "workspace:*",
         "@types/bun": "latest",
         "surrealdb": "^2.0.3",
         "tsup": "^8",
@@ -76,8 +76,21 @@
       "name": "example-blog",
       "dependencies": {
         "@schemic/core": "workspace:*",
-        "@schemic/surreal": "workspace:*",
+        "@schemic/surrealdb": "workspace:*",
         "surrealdb": "^2.0.3",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+      },
+      "peerDependencies": {
+        "typescript": "^5",
+      },
+    },
+    "packages/example-credilisto": {
+      "name": "example-credilisto",
+      "dependencies": {
+        "@schemic/cli": "workspace:*",
+        "@schemic/core": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -90,7 +103,7 @@
       "name": "example-git",
       "dependencies": {
         "@schemic/core": "workspace:*",
-        "@schemic/surreal": "workspace:*",
+        "@schemic/surrealdb": "workspace:*",
         "surrealdb": "^2.0.3",
       },
       "devDependencies": {
@@ -106,7 +119,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@schemic/core": "workspace:*",
-        "@schemic/surreal": "workspace:*",
+        "@schemic/surrealdb": "workspace:*",
         "react": "^18.3.1",
         "react-dom": "^18.3.1",
         "surrealdb": "2.0.3",
@@ -141,8 +154,8 @@
         "@electric-sql/pglite",
       ],
     },
-    "packages/surreal": {
-      "name": "@schemic/surreal",
+    "packages/surrealdb": {
+      "name": "@schemic/surrealdb",
       "version": "0.1.0-alpha.0",
       "dependencies": {
         "@schemic/core": "workspace:*",
@@ -463,7 +476,7 @@
 
     "@schemic/postgres": ["@schemic/postgres@workspace:packages/postgres"],
 
-    "@schemic/surreal": ["@schemic/surreal@workspace:packages/surreal"],
+    "@schemic/surrealdb": ["@schemic/surrealdb@workspace:packages/surrealdb"],
 
     "@shikijs/core": ["@shikijs/core@4.2.0", "", { "dependencies": { "@shikijs/primitive": "4.2.0", "@shikijs/types": "4.2.0", "@shikijs/vscode-textmate": "^10.0.2", "@types/hast": "^3.0.4", "hast-util-to-html": "^9.0.5" } }, "sha512-Hc87Ab1Ld/vEbZRCbwx344I5v+4RU8CVToUTRkqXL1+TjbuOp9U5Xa0M23V4GEWHxVn+yO5otb+HkQVm3ptWQQ=="],
 
@@ -748,6 +761,8 @@
     "eventemitter3": ["eventemitter3@5.0.4", "", {}, "sha512-mlsTRyGaPBjPedk6Bvw+aqbsXDtoAyAzm5MO7JgU+yVRyMQ5O8bD4Kcci7BS85f93veegeCPkL8R4GLClnjLFw=="],
 
     "example-blog": ["example-blog@workspace:packages/example-blog"],
+
+    "example-credilisto": ["example-credilisto@workspace:packages/example-credilisto"],
 
     "example-git": ["example-git@workspace:packages/example-git"],
 

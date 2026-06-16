@@ -2,7 +2,7 @@
 // and diffs two snapshots into SurrealQL up/down (clause-level ALTER where possible). This is the
 // Surreal driver's internal diff strategy — invoked via `surrealDriver.diff` and the migrations
 // capability's `render`. The dialect-free diff DISPLAY + types live in `./diff`. In the package
-// split this module moves to `@schemic/surreal` (see docs/AUTHORING-SPLIT.md / MULTI-DB-SPIKE.md).
+// split this module moves to `@schemic/surrealdb` (see docs/AUTHORING-SPLIT.md / MULTI-DB-SPIKE.md).
 
 import { relative } from "node:path";
 import type { AnyTable, AuthoredDef, Diff, DiffItem } from "@schemic/core";

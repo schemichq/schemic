@@ -40,7 +40,7 @@ export async function portableDiff(
 
   // Desired = the declared schema, authored with sz.* and lifted to the portable IR.
   const { tables, defs } = await loadDefs(config.schemaPath);
-  const desired: PortableDb = getDriver(config.driver ?? "surreal").lower(
+  const desired: PortableDb = getDriver(config.driver ?? "surrealdb").lower(
     tables,
     defs,
   );

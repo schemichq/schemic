@@ -22,7 +22,7 @@ import type { PortableDb } from "../driver/portable-ir";
  */
 export interface StoredSnapshot {
   version: 2;
-  /** The driver that authored this snapshot ("surreal", "postgres", …). */
+  /** The driver that authored this snapshot ("surrealdb", "postgres", …). */
   driver: string;
   portable: PortableDb;
   files?: Record<string, string>;
@@ -51,7 +51,7 @@ const MIGRATION_EXT = ".surql";
 function emptyStored(): StoredSnapshot {
   return {
     version: 2,
-    driver: "surreal",
+    driver: "surrealdb",
     portable: { tables: [], functions: [], accesses: [] },
     files: {},
   };
@@ -90,7 +90,7 @@ function upgradeV1(
       );
     return {
       version: 2,
-      driver: driver.name ?? "surreal",
+      driver: driver.name ?? "surrealdb",
       portable: driver.upgradeSnapshot(v1.struct),
       files: {},
     };

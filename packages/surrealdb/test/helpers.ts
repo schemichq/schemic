@@ -20,7 +20,7 @@ export async function tryConnect(): Promise<Surreal | null> {
           password: process.env.SURREAL_PASS ?? "root",
         });
         await db.use({
-          namespace: process.env.SURREAL_NS ?? "@schemic/surreal",
+          namespace: process.env.SURREAL_NS ?? "@schemic/surrealdb",
           database: process.env.SURREAL_TEST_DB ?? "test",
         });
       })(),

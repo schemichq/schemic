@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@schemic/core": "workspace:*",
-    "@schemic/surreal": "workspace:*",
+    "@schemic/surrealdb": "workspace:*",
     "surrealdb": "^2.0.3"
   }
 }

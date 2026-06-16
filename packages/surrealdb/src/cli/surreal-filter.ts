@@ -1,7 +1,7 @@
 // The SurrealDB STATEMENT/STRUCT filters — the dialect halves of the per-kind object filter. They
 // operate on `DefineStatement`/`Snapshot` (the statement engine) and `DbStructured` (introspection).
 // The dialect-free `Filter` definition + the portable-IR filters live in `./filter`. In the package
-// split this module moves to `@schemic/surreal` (see docs/MULTI-DB-SPIKE.md).
+// split this module moves to `@schemic/surrealdb` (see docs/MULTI-DB-SPIKE.md).
 
 import { type Filter, inCat } from "@schemic/core";
 import type { DefineStatement } from "../ddl";

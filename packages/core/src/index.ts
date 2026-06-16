@@ -3,7 +3,7 @@
  *
  * The Driver contract + the portable schema IR + the neutral migration/diff/snapshot/CLI-support
  * engine. NO database dialect and NO authoring surface (`s.*`/`defineTable`) live here — those ship
- * in driver packages (`@schemic/surreal`, `@schemic/postgres`). `@schemic/cli` and the drivers all
+ * in driver packages (`@schemic/surrealdb`, `@schemic/postgres`). `@schemic/cli` and the drivers all
  * build on the surface re-exported below.
  */
 

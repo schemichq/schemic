@@ -4,7 +4,7 @@ import { mergeUnits, type RenderedUnit, unifiedDiff } from "@schemic/core";
 const tableUnit = (
   exportName: string,
   code: string,
-  imports = [`import { s, defineTable } from "@schemic/surreal";`],
+  imports = [`import { s, defineTable } from "@schemic/surrealdb";`],
 ): RenderedUnit => ({
   kind: "table",
   name: exportName.toLowerCase(),
@@ -23,7 +23,7 @@ const USER = `export const User = defineTable("user", {
   .schemaless();`;
 
 const fileWith = (...consts: string[]) =>
-  `import { s, defineTable } from "@schemic/surreal";\n\n${consts.join("\n\n")}\n`;
+  `import { s, defineTable } from "@schemic/surrealdb";\n\n${consts.join("\n\n")}\n`;
 
 describe("mergeUnits", () => {
   test("is idempotent when the DB matches the file (no churn)", () => {
@@ -95,7 +95,7 @@ describe("mergeUnits", () => {
   });
 
   test("preserves a user's leading comment above the const", () => {
-    const src = `import { s, defineTable } from "@schemic/surreal";\n\n// keep me\n${USER}\n`;
+    const src = `import { s, defineTable } from "@schemic/surrealdb";\n\n// keep me\n${USER}\n`;
     const { content } = mergeUnits(src, [tableUnit("User", USER)], MIRROR);
     expect(content).toContain("// keep me");
   });
@@ -144,7 +144,7 @@ describe("mergeUnits", () => {
       "  name: s.string(),\n  org: Org.record(),\n",
     );
     const unit = tableUnit("User", desired, [
-      `import { s, defineTable } from "@schemic/surreal";`,
+      `import { s, defineTable } from "@schemic/surrealdb";`,
       `import { Org } from "./org";`,
     ]);
     const { content } = mergeUnits(src, [unit], MIRROR);
@@ -153,7 +153,7 @@ describe("mergeUnits", () => {
   });
 
   test("replaces a whole function const (atomic, no field surgery)", () => {
-    const src = `import { defineFunction, s, surql } from "@schemic/surreal";
+    const src = `import { defineFunction, s, surql } from "@schemic/surrealdb";
 
 export const greet = defineFunction("greet", { name: s.string() })
   .body(surql\`RETURN "hi";\`);
@@ -166,7 +166,7 @@ export const greet = defineFunction("greet", { name: s.string() })
       name: "greet",
       exportName: "greet",
       code: desired,
-      imports: [`import { defineFunction, s, surql } from "@schemic/surreal";`],
+      imports: [`import { defineFunction, s, surql } from "@schemic/surrealdb";`],
     };
     const { content } = mergeUnits(src, [unit], MIRROR);
     expect(content).toContain(`RETURN "hello"`);

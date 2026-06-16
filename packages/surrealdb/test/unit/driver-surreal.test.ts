@@ -18,8 +18,8 @@ const greet = defineFunction("greet", { name: s.string() });
 
 describe("surrealDriver (Milestone 1 seam)", () => {
   test("is registered under its name", () => {
-    expect(getDriver("surreal")).toBe(surrealDriver);
-    expect(surrealDriver.name).toBe("surreal");
+    expect(getDriver("surrealdb")).toBe(surrealDriver);
+    expect(surrealDriver.name).toBe("surrealdb");
   });
 
   test("lower delegates to schemaStruct, lifted to the portable IR", () => {

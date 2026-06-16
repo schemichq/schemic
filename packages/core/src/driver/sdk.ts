@@ -1,4 +1,4 @@
-// The NEUTRAL driver SDK — the public surface a driver package (@schemic/surreal, @schemic/postgres,
+// The NEUTRAL driver SDK — the public surface a driver package (@schemic/surrealdb, @schemic/postgres,
 // …) consumes from `@schemic/core/driver`. It re-exports ONLY dialect-free building blocks: the
 // Driver contract + registry, the portable IR types + constructors, and the config/diff types a
 // driver's ops reference. It deliberately does NOT re-export any concrete driver (that would drag a

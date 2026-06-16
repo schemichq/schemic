@@ -8,7 +8,7 @@
  * types line up with the `@schemic/core`-typed diff-engine signatures.
  */
 import { afterAll, describe, expect, test } from "bun:test";
-import { defineTable, emitTable, s } from "@schemic/surreal";
+import { defineTable, emitTable, s } from "@schemic/surrealdb";
 import { Surreal } from "surrealdb";
 import { z } from "zod";
 import { buildSnapshot, diffSnapshots } from "../../src/cli/surreal-diff";

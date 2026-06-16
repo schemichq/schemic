@@ -1,5 +1,5 @@
 import { type RecordId, type Surreal, surql, Table } from "surrealdb";
-import type { App, Create, Update } from "@schemic/surreal";
+import type { App, Create, Update } from "@schemic/surrealdb";
 import { Comment, Project, Task } from "../src/schema";
 
 /**

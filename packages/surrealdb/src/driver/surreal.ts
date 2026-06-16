@@ -187,7 +187,7 @@ export const surrealDriver: Driver<
   TableDef<string, Shape>,
   StandaloneDef
 > = {
-  name: "surreal",
+  name: "surrealdb",
 
   // --- IR pipeline ---------------------------------------------------------------------------
 

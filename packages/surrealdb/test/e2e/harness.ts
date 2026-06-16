@@ -22,7 +22,7 @@ import {
   surrealBinaryAvailable,
 } from "../../src/cli/engine";
 
-/** packages/surreal — this package's root (this file is test/e2e/harness.ts). */
+/** packages/surrealdb — this package's root (this file is test/e2e/harness.ts). */
 export const SURREAL_PKG = resolve(import.meta.dir, "../..");
 /** packages/ — the workspace packages dir. */
 const PKGS = resolve(import.meta.dir, "../../..");
@@ -69,14 +69,14 @@ export interface Harness {
 }
 
 /**
- * Build the node_modules symlink farm so a scaffolded project's `import "@schemic/surreal"` resolves
+ * Build the node_modules symlink farm so a scaffolded project's `import "@schemic/surrealdb"` resolves
  * to THIS workspace source (bun -> src export, one module instance), along with its @schemic/core +
  * surrealdb + zod deps.
  */
 function linkDeps(root: string): void {
   const nm = join(root, "node_modules");
   mkdirSync(join(nm, "@schemic"), { recursive: true }); // scoped pkg needs its scope dir
-  symlinkSync(join(PKGS, "surreal"), join(nm, "@schemic", "surreal"));
+  symlinkSync(join(PKGS, "surrealdb"), join(nm, "@schemic", "surrealdb"));
   symlinkSync(join(PKGS, "core"), join(nm, "@schemic", "core"));
   for (const dep of ["surrealdb", "zod"]) {
     symlinkSync(
@@ -156,7 +156,7 @@ export function tableFile(body: string): string {
 /** The `user` table the sample schema ships with, optionally with extra field lines spliced in. */
 export function userSchema(extraFields = ""): string {
   return `import { surql } from "surrealdb";
-import { s, defineTable } from "@schemic/surreal";
+import { s, defineTable } from "@schemic/surrealdb";
 
 export const User = defineTable("user", {
   id: s.string(),

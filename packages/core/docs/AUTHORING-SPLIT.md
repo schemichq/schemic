@@ -41,7 +41,7 @@ standardized App-land, per-DB Wire/native layer**. Concretely:
   (`.optional()`, `.array()`, `.default()`, codecs) — lives in `@schemic/core`.
 - The **native** part — `SurrealMeta`, `RecordId`, the `string::is_*` format
   fields, every `$`-method (`$default`/`$assert`/`$computed`/`$permissions`/…) —
-  lives in `@schemic/surreal`, which extends the core base and re-exports a single
+  lives in `@schemic/surrealdb`, which extends the core base and re-exports a single
   `s` that is a drop-in superset.
 - A second driver (`@schemic/postgres`) plugs in by the **same mechanism**: its
   own field subclass + native metadata + native `$`-methods, re-exporting its own
@@ -122,7 +122,7 @@ export function portableBuilders<F extends SField<z.ZodType, never, unknown>>(
 ```
 
 ```ts
-// ========== @schemic/surreal: the dialect extension ==========
+// ========== @schemic/surrealdb: the dialect extension ==========
 export class SurrealField<S extends z.ZodType, Flags extends string = never>
   extends SField<S, Flags, SurrealMeta>
 {
@@ -252,7 +252,7 @@ in phase C.
   the revision note at the top); `s` is unchanged. Behavior identical; tests still
   `import { s, defineTable } from "@schemic/core"` and pass unchanged.
 - **C — physical extraction.** Move `SField` (the extension) + natives + `ddl.ts` +
-  the surreal `cli/*` modules to `@schemic/surreal`; have core publicly export the
+  the surreal `cli/*` modules to `@schemic/surrealdb`; have core publicly export the
   authoring contract (`SFieldBase`/`TableDef`/`Shape`/`StandaloneDef`) + `Driver`/
   portable types + `ResolvedConfig`; re-point examples/docs/tests. Add
   `@schemic/postgres` authoring as the parallel `PgField extends SFieldBase` subclass

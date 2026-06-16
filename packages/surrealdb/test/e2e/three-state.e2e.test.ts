@@ -18,7 +18,7 @@ afterAll(async () => {
 });
 
 const T = 60_000;
-const POST = `import { s, defineTable } from "@schemic/surreal";
+const POST = `import { s, defineTable } from "@schemic/surrealdb";
 
 export const Post = defineTable("post", {
   id: s.string(),
@@ -248,7 +248,7 @@ e2e("3-state divergence matrix", () => {
       H.write(
         root,
         "database/schema/tables/doc.ts",
-        `import { s, defineTable } from "@schemic/surreal";
+        `import { s, defineTable } from "@schemic/surrealdb";
 
 export const Doc = defineTable("doc", {
   id: s.string(),

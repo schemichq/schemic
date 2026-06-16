@@ -1,9 +1,9 @@
 /**
- * @schemic/surreal — author SurrealDB schemas with Zod, and the SurrealDB driver.
+ * @schemic/surrealdb — author SurrealDB schemas with Zod, and the SurrealDB driver.
  *
  * Define tables/relations with `s.*` (a drop-in for `z.*`), generate SurrealQL DDL, and map JS <-> DB
  * across Zod's two channels via codecs (`decode`/`encode`). Importing this package registers the
- * SurrealDB driver with `@schemic/core` (so the CLI's `getDriver("surreal")` resolves).
+ * SurrealDB driver with `@schemic/core` (so the CLI's `getDriver("surrealdb")` resolves).
  */
 
 // Side-effect: register `surrealDriver` with the core registry on import.

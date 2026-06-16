@@ -2,7 +2,7 @@
 // portable IR (src/driver/portable-ir.ts). Field kinds parse to/from a structured PortableType; the
 // dialect-specific objects (events/functions/accesses) ride in the portable `native` payload, so a
 // round-trip is lossless. This file is surreal-coupled (it imports `surql-type` + the `Struct*`
-// types) and belongs to @schemic/surreal at the physical split — it is NOT part of the neutral IR.
+// types) and belongs to @schemic/surrealdb at the physical split — it is NOT part of the neutral IR.
 
 import type {
   PortableDb,

@@ -1,4 +1,4 @@
-import { defineTable, s, surql } from "@schemic/surreal";
+import { defineTable, s, surql } from "@schemic/surrealdb";
 import { User } from "./user";
 
 export const Post = defineTable("post", {
