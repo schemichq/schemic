@@ -1,12 +1,8 @@
 import { existsSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import type {
-  AuthLevel,
-  SurrealZodCheckEmbedded,
-  SurrealZodConfig,
-  SurrealZodConnection,
-} from "@schemic/core/config";
+import type { SchemicConfig } from "@schemic/core/config";
 import { createJiti } from "jiti";
+import type { ConnectionConfigBase, ResolveContext } from "../connection";
 
 const CONFIG_NAMES = [
   "schemic.config.ts",
@@ -14,13 +10,11 @@ const CONFIG_NAMES = [
   "schemic.config.js",
 ];
 
-const DEFAULT_SCHEMA = "./database/schema";
 const DEFAULT_MIGRATIONS = "./database/migrations";
 
 /**
  * Is the schema path a single file (vs a directory of schema modules)? Determined by `stat` when
- * it exists, else inferred from a `.ts`/`.js`-ish extension (so a fresh `schema: "./src/x.ts"`
- * still resolves to file mode before any pull has written it).
+ * it exists, else inferred from a `.ts`/`.js`-ish extension.
  */
 function schemaIsFilePath(path: string): boolean {
   if (existsSync(path)) return statSync(path).isFile();
@@ -28,10 +22,9 @@ function schemaIsFilePath(path: string): boolean {
 }
 
 /**
- * Load `.env(.local)` from the project root into `process.env` so the config's
- * `process.env.SURREAL_*` reads resolve when run under node (bun loads `.env` itself).
- * `loadEnvFile` does not override already-set variables, so shell env still wins; load
- * `.env.local` first so it takes precedence over `.env`.
+ * Load `.env(.local)` from the project root into `process.env` so the config's own explicit
+ * `process.env.X` reads resolve when run under node (bun loads `.env` itself). Does not override
+ * already-set variables, so shell env still wins; load `.env.local` first so it beats `.env`.
  */
 function loadDotEnv(dir: string): void {
   const proc = process as typeof process & {
@@ -49,32 +42,37 @@ function loadDotEnv(dir: string): void {
   }
 }
 
-/** A loaded config with absolute paths resolved relative to the config file. */
-export interface ResolvedConfig extends SurrealZodConfig {
+/**
+ * A resolved, per-CONNECTION config — the dialect-NEUTRAL shape every command operates on (one
+ * connection at a time). `params` are the driver-specific connection params (opaque to core; the
+ * driver's `connect` reads them). Built by resolving one entry of `config.connections`.
+ */
+export interface ResolvedConfig {
+  /** Resolved connection name (e.g. `default`, or `tenants:abc` within a collection). */
+  connection: string;
+  /** The driver this connection uses (the package the CLI dynamically loads). */
+  driver: string;
   /** Project root (the directory containing the config file). */
   root: string;
   /** Absolute schema path — a single `.ts` module, or a directory of them. */
   schemaPath: string;
   /** Whether `schemaPath` is a single file (vs a directory of schema modules). */
   schemaIsFile: boolean;
-  /** Absolute migrations directory. */
+  /** Absolute migrations directory (per connection's schema). */
   migrationsDir: string;
   /** Absolute migration meta directory (the snapshot). */
   metaDir: string;
   /** Name of the table that records applied migrations. */
   migrationsTable: string;
-  /** Connection for `schemic check`'s remote-engine replay (`config.check.db` merged over `db`). */
-  checkDb: SurrealZodConnection;
-  /** Engine for `schemic check`'s migration replay. Default `"auto"`; an object → embedded engine. */
-  checkEngine: "auto" | "binary" | "remote" | SurrealZodCheckEmbedded;
-  /** Path to the `surreal` CLI for the auto/binary check engines. Default `"surreal"`. */
-  checkBinary: string;
+  /** Driver-specific connection params (url/namespace/… or whatever the driver defines). Opaque to core. */
+  params: Record<string, unknown>;
+  /** Optional seed script (project-level). */
+  seed?: string;
 }
 
 /**
- * A jiti instance for loading the project's TS/ESM modules. Caches are off so `--watch`
- * re-reads edited schema files instead of returning a stale cached module. (Bare deps like
- * `@schemic/core` are still native-imported, so its codec registries stay shared.)
+ * A jiti instance for loading the project's TS/ESM modules. Caches are off so `--watch` re-reads
+ * edited schema files. (Bare deps like `@schemic/core` are native-imported, so registries stay shared.)
  */
 export function makeJiti() {
   return createJiti(import.meta.url, {
@@ -84,11 +82,11 @@ export function makeJiti() {
   });
 }
 
-/** Find, load, and normalize `schemic.config.ts`, applying env overrides for `db`. */
-export async function loadConfig(opts?: {
+/** Find + load `schemic.config.ts` into the dialect-neutral {@link SchemicConfig}. */
+export async function loadProject(opts?: {
   config?: string;
   cwd?: string;
-}): Promise<ResolvedConfig> {
+}): Promise<{ config: SchemicConfig; root: string }> {
   const cwd = opts?.cwd ?? process.cwd();
   const path = opts?.config
     ? resolve(cwd, opts.config)
@@ -96,58 +94,86 @@ export async function loadConfig(opts?: {
   if (!path || !existsSync(path)) {
     throw new Error("No schemic.config.ts found — run `schemic init` first.");
   }
-
   const root = dirname(path);
-  loadDotEnv(root); // populate process.env before the config module reads it
-
-  const jiti = makeJiti();
-  const loaded = (await jiti.import(path)) as {
-    default?: SurrealZodConfig;
-  } & SurrealZodConfig;
+  loadDotEnv(root); // populate process.env before the config module's explicit reads
+  const loaded = (await makeJiti().import(path)) as {
+    default?: SchemicConfig;
+  } & SchemicConfig;
   const config = loaded.default ?? loaded;
-  if (!config?.db) {
-    throw new Error(`Invalid config at ${path}: expected a "db" connection.`);
+  if (!config?.connections || Object.keys(config.connections).length === 0) {
+    throw new Error(`Invalid config at ${path}: expected a "connections" map.`);
   }
+  return { config, root };
+}
 
-  const schema = config.schema ?? DEFAULT_SCHEMA;
+/**
+ * Build the {@link ResolvedConfig} for one connection of the project. `ctx` carries the lazy
+ * cross-connection proxy + CLI `--arg`s (the CLI provides the real one; a static connection ignores
+ * it). A resolver returning a COLLECTION yields one ResolvedConfig per keyed entry.
+ *
+ * NOTE (WIP — multi-connection): the full resolution engine (lazy proxy DAG, `--connection`/`--all`
+ * addressing, collection fan-out) lives in `@schemic/cli`; this builder handles a single resolved
+ * connection config. See docs/MULTI-CONNECTION.md.
+ */
+export function resolveConnectionConfig(
+  config: SchemicConfig,
+  connection: string,
+  conn: ConnectionConfigBase,
+  driver: string,
+  root: string,
+): ResolvedConfig {
+  const { schema, migrations, key, ...params } = conn;
   const schemaPath = resolve(root, schema);
-  const migrations = config.migrations ?? DEFAULT_MIGRATIONS;
-  const migrationsDir = resolve(root, migrations);
-  const db: SurrealZodConnection = {
-    url: process.env.SURREAL_URL ?? config.db.url,
-    namespace: process.env.SURREAL_NAMESPACE ?? config.db.namespace,
-    database: process.env.SURREAL_DATABASE ?? config.db.database,
-    username: process.env.SURREAL_USER ?? config.db.username,
-    password: process.env.SURREAL_PASS ?? config.db.password,
-    authLevel:
-      (process.env.SURREAL_AUTH_LEVEL as AuthLevel | undefined) ??
-      config.db.authLevel,
-  };
-  // `check.db` overrides only the fields it sets (e.g. just `url`/`namespace`), falling back to `db`.
-  const checkDb: SurrealZodConnection = { ...db, ...config.check?.db };
+  const migrationsDir = resolve(root, migrations ?? DEFAULT_MIGRATIONS);
   return {
-    ...config,
-    schema,
-    migrations,
-    db,
-    checkDb,
-    checkEngine: config.check?.engine ?? "auto",
-    checkBinary: config.check?.binary ?? "surreal",
+    connection: key ? `${connection}:${key}` : connection,
+    driver,
     root,
     schemaPath,
     schemaIsFile: schemaIsFilePath(schemaPath),
     migrationsDir,
     metaDir: resolve(migrationsDir, "meta"),
     migrationsTable: config.migrationsTable ?? "_migrations",
+    params: params as Record<string, unknown>,
+    seed: config.seed,
   };
 }
 
-/** Per-command connection flag overrides (CLI args beat env beat config). */
+/**
+ * Load the project and resolve the DEFAULT connection to a {@link ResolvedConfig} — the single-
+ * connection convenience path. (Multi-connection addressing + resolver context are added by the CLI;
+ * here a static default connection is resolved with an empty context.)
+ */
+export async function loadConfig(opts?: {
+  config?: string;
+  cwd?: string;
+}): Promise<ResolvedConfig> {
+  const { config, root } = await loadProject(opts);
+  const names = Object.keys(config.connections);
+  const name =
+    config.defaultConnection ?? (names.length === 1 ? names[0] : "default");
+  const entry = config.connections[name];
+  if (!entry) {
+    throw new Error(
+      `No connection named "${name}". Set "defaultConnection" or pass --connection. Known: ${names.join(", ")}.`,
+    );
+  }
+  const ctx: ResolveContext = { connections: {}, args: {}, env: process.env };
+  const resolved = await entry.resolve(ctx);
+  if (resolved.length !== 1) {
+    throw new Error(
+      `Connection "${name}" resolved to ${resolved.length} connections (a collection); pass --connection ${name}:<key>.`,
+    );
+  }
+  return resolveConnectionConfig(config, name, resolved[0], entry.driver, root);
+}
+
+/** Per-command connection flag overrides (CLI args, applied by the driver over `params`). */
 export interface ConnectionOverrides {
   url?: string;
   namespace?: string;
   database?: string;
   username?: string;
   password?: string;
-  authLevel?: AuthLevel;
+  authLevel?: string;
 }

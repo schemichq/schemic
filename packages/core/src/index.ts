@@ -8,7 +8,13 @@
  */
 
 // --- neutral config ---------------------------------------------------------------------------
-export { loadConfig, makeJiti, type ResolvedConfig } from "./cli/config";
+export {
+  loadConfig,
+  loadProject,
+  makeJiti,
+  type ResolvedConfig,
+  resolveConnectionConfig,
+} from "./cli/config";
 // --- neutral diff display ---------------------------------------------------------------------
 export {
   type Diff,
