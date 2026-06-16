@@ -11,12 +11,21 @@
 
 import * as z from "zod";
 
+// `SFieldBase` is INVARIANT in its native-metadata slot `N` (the protected `rebuild(native: N)` makes
+// N contravariant while `native`/`blank` make it covariant). So a dialect field — `SField` with
+// `N = SurrealMeta` — is NOT assignable to a fixed `N = unknown`, which would make `AnyField` reject
+// real dialect fields (e.g. `.or(s.int())`). At THIS cross-dialect boundary `N` is honestly "any
+// dialect's metadata": erase it to `any` (bivariant) so every driver's field is an `AnyField`. The
+// concrete `N` is preserved everywhere it matters — each driver's own field type keeps `N = <D>Meta`.
+
 /** Any field of ANY dialect — the base type the helpers + wrappers accept. */
-export type AnyField = SFieldBase<z.ZodType, string>;
+// biome-ignore lint/suspicious/noExplicitAny: cross-dialect erasure of the invariant native slot N.
+export type AnyField = SFieldBase<z.ZodType, string, any>;
 
 /** The Zod schema a field (or a raw Zod schema) carries. */
 export type SchemaOf<F> =
-  F extends SFieldBase<infer S, string, unknown>
+  // biome-ignore lint/suspicious/noExplicitAny: match a field of any dialect (N is invariant).
+  F extends SFieldBase<infer S, string, any>
     ? S
     : F extends z.ZodType
       ? F
@@ -24,7 +33,8 @@ export type SchemaOf<F> =
 
 /** The `Flags` channel a field carries (driver `$`-methods brand it; widens to `string` for `Shape`). */
 export type FlagsOf<F> =
-  F extends SFieldBase<z.ZodType, infer Fl, unknown> ? Fl : never;
+  // biome-ignore lint/suspicious/noExplicitAny: match a field of any dialect (N is invariant).
+  F extends SFieldBase<z.ZodType, infer Fl, any> ? Fl : never;
 
 /** The schema one wrapper down — what `unwrap()` returns. */
 export type InnerOf<S extends z.ZodType> =

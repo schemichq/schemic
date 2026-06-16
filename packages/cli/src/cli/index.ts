@@ -328,16 +328,24 @@ program.configureHelp({
 program
   .command("init")
   .description("Scaffold database/ (schemas + migrations) and a config file")
-  .action(() => {
-    const { created, skipped } = init(process.cwd());
-    for (const f of created) console.log(`  ${style.green("+")} ${f}`);
-    for (const f of skipped)
-      console.log(style.dim(`  · ${f} (exists, skipped)`));
-    console.log(
-      created.length
-        ? `\n${ok("Initialized. Edit database/schema, then run `schemic gen`.")}`
-        : "\nNothing to do — already initialized.",
-    );
+  .option(
+    "--driver <name>",
+    "database driver to scaffold for (default surrealdb)",
+  )
+  .action((opts: { driver?: string }) => {
+    run(async () => {
+      const name = opts.driver ?? "surrealdb";
+      await ensureDriver(name);
+      const { created, skipped } = init(process.cwd(), getDriver(name));
+      for (const f of created) console.log(`  ${style.green("+")} ${f}`);
+      for (const f of skipped)
+        console.log(style.dim(`  · ${f} (exists, skipped)`));
+      console.log(
+        created.length
+          ? `\n${ok("Initialized. Edit database/schema, then run `schemic gen`.")}`
+          : "\nNothing to do — already initialized.",
+      );
+    });
   });
 
 kindFlags(
