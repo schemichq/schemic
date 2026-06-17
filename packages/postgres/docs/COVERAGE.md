@@ -11,6 +11,45 @@ round-trip (author `s.*` → lower → emit → introspect → diff = 0) · `[n/
 
 ---
 
+## Kind inventory (registry migration)
+
+> Per the kind-registry contract (`packages/core/docs/kind-registry-contract.md`): core no longer
+> hard-codes object kinds — each driver **registers** its kinds on a per-driver `KindRegistry` and core
+> orchestrates generically. This table tracks **every** PostgreSQL object kind, its registration status,
+> and round-trip coverage, so gaps stay visible. **Option-A flip DONE:** the live `postgresDriver` IS
+> the registry — `{ registry, explode, introspectAll, connect/apply/close, … }`; the fixed-slot
+> `lower`/`emit`/`diff`/`normalize`/`equal`/`introspect` are gone, and core runs the generic spine
+> (`lowerSchema`/`buildKindDiff`/`emitKinds`) over the kinds. `explode = splitTables(pgLower(...))`,
+> `introspectAll = splitTables(pgIntrospect(...))` (one read, complete: table + index + FK), so a clean
+> apply round-trips to a zero diff (`test/{kinds,postgres,authoring}.test.ts`, real PGlite).
+>
+> `column` and the field-level clauses are **substrate** (shared `PortableField`/`PortableType`), nested
+> inside the `table` kind — **not a kind**. Inline FK/UNIQUE/index are **driver-side exploded** out of
+> the table by `splitTable` into their own kind objects (`deps`→table(s)) — this is what lets the
+> dependency graph break mutual-FK cycles.
+
+| kind | `createKind'd?` | emit | introspect | diff | notes |
+|---|---|---|---|---|---|
+| `table` | [x] | [x] | [x] | [x] | registered; columns nest as substrate; `overwrite` = clause-level column ALTER (type/null/default/comment), recreate-fallback for identity/generated/CHECK/PK; **`canonical` excludes DEFAULT/CHECK/GENERATED/COMMENT + table-CHECK from change-detection** (emit stays faithful; no phantom-diff vs introspect); **`displayItems` = per-field, grouped under the table** |
+| `column`* (substrate) | [n/a] | [x] | [x] | [x] | not a kind — `PortableField`/`PortableType` nested in `table`; substrate keeps `native{params}`+`check` |
+| `index` | [x] | [x] | [x] | [x] | registered; `deps`→table (no `owner`, rank-grouped); emits `CREATE [UNIQUE] INDEX`; change = drop+recreate. **UNIQUE indexes introspect (pg_index, excl. PK/expression) → full round-trip, no phantom** (real index add/drop diffs). Non-unique / partial / method indexes (gin/gist/…) not yet emitted or read |
+| `constraint` (FK; PK/UNIQUE/CHECK/EXCLUDE TBD) | [x] | [x] | [x] | [~] | FK registered; `deps`→[table, refTable] breaks mutual-FK cycles; change = drop+recreate; FK + actions introspect (canonicalized UPPERCASE, no phantom); PK is table substrate; UNIQUE rides `index`; CHECK/EXCLUDE TBD |
+| `view` | [ ] | [ ] | [ ] | [ ] | not implemented |
+| `materialized_view` | [ ] | [ ] | [ ] | [ ] | not implemented |
+| `sequence` (standalone) | [ ] | [ ] | [ ] | [ ] | identity-backed sequences are implicit today; standalone `CREATE SEQUENCE` not impl |
+| `type`/`enum`/`domain` (`CREATE TYPE`) | [ ] | [ ] | [ ] | [ ] | `PortableDb.natives[]` slot exists; `s.enum` projects to `text` App-side today; native `CREATE TYPE` not impl |
+| `extension` | [ ] | [ ] | [ ] | [ ] | needed for citext/postgis/pgvector; not impl |
+| `function` | [ ] | [ ] | [ ] | [ ] | opaque kind (no `overwrite`/`deps`); trivial once structured path proven; not impl |
+| `procedure` | [ ] | [ ] | [ ] | [ ] | opaque kind; not impl |
+| `trigger` | [ ] | [ ] | [ ] | [ ] | own kind, `deps`→table + any function it calls; not impl |
+| `schema` | [ ] | [ ] | [ ] | [ ] | hardcoded `public` today; not impl |
+| `role`/`grant` | [ ] | [ ] | [ ] | [ ] | out of scope for now |
+| `policy` (RLS) | [ ] | [ ] | [ ] | [ ] | own kind, `deps`→table; not impl |
+
+\* `column` is substrate nested in `table`, listed for completeness — it is never registered as a kind.
+
+---
+
 ### Authoring (`s.*`, pg-native)
 - [x] `PgField extends SFieldBase` — Zod drop-in + `PgMeta` side-channel; full Zod wrapper/passthrough chain, type-preserving
 - [x] `defineTable(name, { col: s.* })` → `PgTableDef` (an `Authored`); `.primaryKey(...)`, `.check(expr)`, `.index([...])`

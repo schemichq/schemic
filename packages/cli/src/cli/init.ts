@@ -8,15 +8,15 @@ export interface InitResult {
 }
 
 /**
- * The empty migration snapshot a fresh project starts from. Dialect-NEUTRAL (the portable IR shape is
- * core's), tagged with the driver so the snapshot reader knows who owns its `portable` payload.
+ * The empty migration snapshot a fresh project starts from. Dialect-NEUTRAL (the KindSnapshot shape is
+ * core's), tagged with the driver so the snapshot reader knows who owns its `schema` payload.
  */
 function initialSnapshot(driver: string): string {
   return `${JSON.stringify(
     {
-      version: 2,
+      version: 3,
       driver,
-      portable: { tables: [], functions: [], accesses: [] },
+      schema: { kinds: {} },
       files: {},
     },
     null,

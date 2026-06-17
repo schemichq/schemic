@@ -169,3 +169,63 @@ This is where the honesty lives — projections, redactions, and emit-but-don't-
 | Access/Auth (RECORD) | `[x]` |
 | Access/Auth (JWT, BEARER) | `[~]` — secrets redacted |
 | DB-level (param/sequence/analyzer/user/config/api/bucket/model) | `[ ]` |
+
+---
+
+## Kind inventory (core-v2 kind-registry migration)
+
+Tracks the migration of this driver's object kinds onto the `@schemic/core` **kind registry**
+(`packages/core/docs/kind-registry-contract.md`). Lists **every** kind SurrealDB has — including ones
+not registered yet — so the gaps stay visible. `field` is **substrate nested in `table`**, not a kind.
+
+A kind is `[x]` in a column only when that capability round-trips through the **registry path**
+(`KindEngine` on `src/kinds/`), independently of the still-live fixed-slot path.
+
+**Status: FLIPPED (Option-A).** The production `surrealDriver` IS the kind registry — the whole-DB
+`lower`/`emit`/`diff`/`introspect`/`normalize`/`equal` methods are GONE, replaced by
+`registry`/`explode`/`introspectAll` + the command capabilities. Core orchestrates schema ops
+(`lowerSchema`/`buildKindDiff`/`emitKinds`/`orderObjects`) generically over the registry; the Struct-IR
+(`DbStructured`) + `diffSnapshots` remain the driver's INTERNAL clause-level engine the kinds delegate
+to. Every kind SurrealDB emits — `table`, `index`, `event`, `function`, `access` — round-trips:
+- the kind engines stay byte-exact with the internal `diffSnapshots` engine (`test/unit/kind-parity.test.ts`);
+- `introspectAll` live round-trips on SurrealDB 3.1.3 (zero phantom diff, `test/parity/introspect-kinds.test.ts`);
+- per-field diff display via the table kind's `displayItems` (Manuel's call — field-level items grouped under their table);
+- `renderSchema` reconstructs `DbStructured` from the portable objects (the normalized struct rides on
+  them — `PTable.struct` + the opaque kinds' `native`), no DDL re-parse.
+
+Verified green on the flip base: typecheck 0, unit 354, live parity 61, live 11, e2e 19/19 (the real CLI
+through the generic registry path).
+
+Introspect is via the registry's reverse hook `introspectAll` (one `INFO … STRUCTURE` read fanned per
+kind, canonicalized through `structuredSnapshot` like `lower`), live-validated to round-trip on SurrealDB
+3.1.3 (`test/parity/introspect-kinds.test.ts`). It is not yet wired into the production `Driver.introspect`
+(that's the flip); the standalone hook round-trips today.
+
+| Kind | Registered | `emit` | `overwrite`/diff | `introspect` | Notes |
+|---|---|---|---|---|---|
+| `table` (NORMAL/ANY/RELATION) | `[x]` | `[x]` | `[x]` | `[x]` | fields nested; field+head ALTER inside `overwrite` (delegates to `diffSnapshots`); RELATION in/out + `fn::` → `deps` |
+| `field` *(substrate, nested in `table`)* | n/a | `[x]` | `[x]` | `[x]` | `PortableField` clauses carried verbatim; **not** its own kind |
+| `index` (plain/UNIQUE/composite/COUNT) | `[x]` | `[x]` | `[x]` | `[x]` | own kind; `deps`/`owner` → table; change = recreate (REMOVE + DEFINE) |
+| `event` | `[x]` | `[x]` | `[x]` | `[x]` | own kind; `deps`/`owner` → table + `fn::` callees; change = `DEFINE EVENT OVERWRITE` |
+| `function` (`fn::`) | `[x]` | `[x]` | `[x]` | `[x]` | opaque kind; `deps` = other `fn::` it calls; change = `DEFINE FUNCTION OVERWRITE` |
+| `access` (RECORD/JWT/BEARER) | `[x]` | `[x]` | `[x]` | `[~]` | opaque kind; `deps` = `fn::` in SIGNUP/SIGNIN/AUTHENTICATE; change = `DEFINE ACCESS OVERWRITE`; introspect partial (JWT/BEARER secrets redacted, as on the legacy path) |
+| `param` (`DEFINE PARAM`) | `[ ]` | `[ ]` | `[ ]` | `[ ]` | not yet in the driver at all |
+| `analyzer` (`DEFINE ANALYZER`) | `[ ]` | `[ ]` | `[ ]` | `[ ]` | needed for SEARCH indexes (`index` → `deps` → analyzer) |
+| `user` (`DEFINE USER`) | `[ ]` | `[ ]` | `[ ]` | `[ ]` | not yet in the driver |
+| `model` (`DEFINE MODEL`) | `[ ]` | `[ ]` | `[ ]` | `[ ]` | not yet in the driver |
+| `config` (`DEFINE CONFIG GRAPHQL/API`) | `[ ]` | `[ ]` | `[ ]` | `[ ]` | 3.x; not yet in the driver |
+| `api` / `bucket` (3.x) | `[ ]` | `[ ]` | `[ ]` | `[ ]` | not yet in the driver |
+
+**`natives`: N/A.** SurrealDB emits no `PortableNative` objects — the db-level long-tail
+(`param`/`analyzer`/`user`/`model`/`config`/`api`/`bucket`) isn't implemented in the driver yet, and
+`function`/`access` are their own kinds (above), not natives. So there is nothing in the `natives` slot
+to migrate; it's listed here only so the gap stays visible.
+
+**`fn::` dependency edges (done).** Field `VALUE`/`ASSERT`/`DEFAULT`/`COMPUTED`/`PERMISSIONS`, table
+`PERMISSIONS`, event `WHEN`/`THEN`, and access `SIGNUP`/`SIGNIN`/`AUTHENTICATE` are scanned for `fn::`
+references; each becomes a `deps → {kind:"function"}` so a called function emits **before** its caller
+(the function-before-table case the ordinal alone gets wrong). Asserted in the parity suite.
+
+**Deferred (tracked):** SEARCH `index` → `analyzer` dependency edges land when the `analyzer` kind is
+implemented. The display-granularity decision (per-statement vs per-kind-object `items`/`full`) is a UX
+call owned by core/Manuel, settled before the flip.

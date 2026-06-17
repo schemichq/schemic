@@ -1,0 +1,181 @@
+// The driver-side EXPLODE (docs/kind-registry-contract.md §7, sanctioned by core-dev): SurrealDB
+// authors index/event/field-index INLINE on the table, so a single `TableDef` fans out into one TABLE
+// object + N INDEX + M EVENT objects (and the db-level FUNCTION/ACCESS objects ride alongside). We
+// flatten the whole schema into per-kind portable objects BEFORE lowering, so `KindEngine.lower` stays
+// a clean 1:1 and the contract needs no "explode hook". This is what `Driver.lower` will wrap around
+// `lowerSchema` at the eventual wholesale flip.
+//
+// It reuses the EXISTING canonical pipeline — `schemaStruct` (TableDef -> normalized Struct IR, with
+// standalone events attached + functions/accesses resolved) then `structuredSnapshot` (Struct ->
+// canonical `DEFINE` statements keyed kind:table:name) — so every emitted DDL string is byte-identical
+// to the fixed-slot `surrealDriver.diff` path.
+//
+// CROSS-KIND DEPS: an object that calls `fn::name` must emit AFTER that function (the function-before-
+// table case the ordinal alone gets wrong). We scan each object's rendered DDL for `fn::` references and
+// attach `deps -> {kind:"function", name}` — on a table (field VALUE/ASSERT/DEFAULT/PERMISSIONS + table
+// PERMISSIONS), an event (WHEN/THEN), an access (SIGNUP/SIGNIN/AUTHENTICATE), and a function (its body
+// calling another fn::). Edges to functions outside the diff are ignored by the spine, so over-reporting
+// is harmless. (SEARCH index -> analyzer edges land when the analyzer kind is registered.)
+
+import type { AnyTable, AuthoredDef, Ref } from "@schemic/core";
+import type { Surreal } from "surrealdb";
+import { schemaStruct } from "../cli/lower";
+import { normalizeDb } from "../cli/struct";
+import type {
+  DbStructured,
+  StructAccess,
+  StructFunction,
+  StructTable,
+} from "../cli/structure";
+import { introspectStructured, structuredSnapshot } from "../cli/structure";
+import type { DefineStatement } from "../ddl";
+import type { Shape, StandaloneDef, TableDef } from "../pure";
+import type { SurrealPortable } from "./portable";
+
+/** Match a `fn::name` reference (incl. namespaced `fn::a::b`), capturing the bare function name. */
+const FN_REF = /fn::([A-Za-z0-9_]+(?:::[A-Za-z0-9_]+)*)/g;
+
+/**
+ * The cross-kind dependency edges for one object: a `base` set (its table, for index/event) plus the
+ * `fn::` functions referenced in its DDL — deduped, and excluding `self` (a function's body referencing
+ * itself is recursion, not an ordering edge).
+ */
+function depsOf(ddls: string[], base: Ref[] = [], self?: string): Ref[] {
+  const seen = new Set(base.map((r) => `${r.kind}:${r.name}`));
+  const out: Ref[] = [...base];
+  for (const ddl of ddls) {
+    for (const m of ddl.matchAll(FN_REF)) {
+      const name = m[1];
+      if (name === self) continue;
+      const key = `function:${name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ kind: "function", name });
+    }
+  }
+  return out;
+}
+
+/**
+ * The shared core: a NORMALIZED Struct IR -> per-kind portable objects. Renders each object's canonical
+ * `DEFINE` statement(s) via `structuredSnapshot`, then partitions: a {@link PTable} per table (head +
+ * nested fields), a {@link PIndex} per index, a {@link PEvent} per event, and the db-level
+ * {@link PFunction}/{@link PAccess} objects — each carrying its `fn::`/endpoint dependency edges. A
+ * table also carries its normalized {@link StructTable} and the opaque kinds their `native` struct, so
+ * `renderSchema` reconstructs `DbStructured` without re-parsing DDL. Both entry points
+ * ({@link explodeSchema} from authoring, {@link introspectAll} from a live DB) feed their normalized
+ * Struct here, so they produce byte-identical portable objects.
+ */
+export function fromStructured(db: DbStructured): SurrealPortable[] {
+  const stmts = Object.values(structuredSnapshot(db).statements);
+  const of = (kind: DefineStatement["kind"]) =>
+    stmts.filter((s) => s.kind === kind);
+
+  const out: SurrealPortable[] = [];
+
+  // Tables: head + nested fields. deps = RELATION in/out endpoints + fn:: from the head/fields.
+  const headByTable = new Map(of("table").map((s) => [s.name, s]));
+  const fieldsByTable = new Map<string, DefineStatement[]>();
+  for (const s of of("field")) {
+    const arr = fieldsByTable.get(s.table ?? "") ?? [];
+    arr.push(s);
+    fieldsByTable.set(s.table ?? "", arr);
+  }
+  for (const st of db.tables) {
+    const head = headByTable.get(st.name);
+    if (!head) continue; // a table always has a head; defensive only
+    const fields = fieldsByTable.get(st.name) ?? [];
+    const endpoints: Ref[] = [];
+    for (const t of st.kind.in ?? [])
+      endpoints.push({ kind: "table", name: t });
+    for (const t of st.kind.out ?? [])
+      endpoints.push({ kind: "table", name: t });
+    const deps = depsOf([head.ddl, ...fields.map((f) => f.ddl)], endpoints);
+    out.push({ kind: "table", name: st.name, head, fields, deps, struct: st });
+  }
+
+  for (const s of of("index"))
+    out.push({ kind: "index", name: s.name, table: s.table ?? "", stmt: s });
+  for (const s of of("event"))
+    out.push({
+      kind: "event",
+      name: s.name,
+      table: s.table ?? "",
+      stmt: s,
+      deps: depsOf([s.ddl], [{ kind: "table", name: s.table ?? "" }]),
+    });
+  // The opaque kinds carry their structured `native` (matched by name) for renderSchema.
+  const fnByName = new Map(db.functions.map((f) => [f.name, f]));
+  const accByName = new Map(db.accesses.map((a) => [a.name, a]));
+  for (const s of of("function")) {
+    const native = fnByName.get(s.name);
+    if (native)
+      out.push({
+        kind: "function",
+        name: s.name,
+        stmt: s,
+        deps: depsOf([s.ddl], [], s.name),
+        native,
+      });
+  }
+  for (const s of of("access")) {
+    const native = accByName.get(s.name);
+    if (native)
+      out.push({
+        kind: "access",
+        name: s.name,
+        stmt: s,
+        deps: depsOf([s.ddl]),
+        native,
+      });
+  }
+
+  return out;
+}
+
+/** Reassemble `DbStructured` from per-kind portable objects — the inverse of {@link fromStructured},
+ *  for `renderSchema` TS codegen. Tables carry their full normalized struct; the opaque kinds their
+ *  `native`. (No DDL re-parsing: the structured data rides on the objects per flip-plan §6b.) */
+export function toStructured(objects: SurrealPortable[]): DbStructured {
+  const tables: StructTable[] = [];
+  const functions: StructFunction[] = [];
+  const accesses: StructAccess[] = [];
+  for (const o of objects) {
+    if (o.kind === "table") tables.push(o.struct);
+    else if (o.kind === "function") functions.push(o.native);
+    else if (o.kind === "access") accesses.push(o.native);
+  }
+  return { tables, functions, accesses };
+}
+
+/**
+ * Authoring -> per-kind portable objects (what `Driver.lower` wraps around `lowerSchema`). Params mirror
+ * `buildSnapshot`'s public bound (`AnyTable`/`AuthoredDef`) and cast to the src `TableDef` the canonical
+ * pipeline reads. `schemaStruct` already normalizes (events attached, functions/accesses resolved).
+ */
+export function explodeSchema(
+  tables: AnyTable[],
+  defs: AuthoredDef[] = [],
+): SurrealPortable[] {
+  return fromStructured(
+    schemaStruct(
+      tables as unknown as TableDef<string, Shape>[],
+      defs as unknown as StandaloneDef[],
+    ),
+  );
+}
+
+/**
+ * The reverse path (flip-plan §4): a live connection -> per-kind portable objects, via ONE
+ * `INFO … STRUCTURE` read (`introspectStructured`) fanned across every kind. Normalized the same way as
+ * {@link decompose}/{@link explodeSchema} (`normalizeDb` → canonical `structuredSnapshot`), so an
+ * introspected schema canonicalizes IDENTICALLY to a lowered one — no introspect phantom-diffs. This is
+ * the COMPLETE introspection the flip needs: it returns objects for every registered kind that round-
+ * trips (table/index/event/function/access). `exclude` drops tables by name (e.g. the migrations table).
+ */
+export async function introspectAll(
+  conn: Surreal,
+  exclude?: Set<string>,
+): Promise<SurrealPortable[]> {
+  return fromStructured(normalizeDb(await introspectStructured(conn, exclude)));
+}

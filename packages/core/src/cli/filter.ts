@@ -1,5 +1,6 @@
 import type { Command } from "commander";
-import type { PortableDb, PortableTable } from "../driver/portable-ir";
+import type { KindRegistry, PortableObject } from "../kind";
+import { snapshotKinds, snapshotObjects } from "../kind";
 import type { StoredSnapshot } from "./meta";
 
 /**
@@ -75,96 +76,84 @@ export const inCat = (c: Cat, name: string): boolean =>
   c.on && (!c.names || c.names.has(name));
 
 // The SurrealDB statement/struct filters (`included`/`filterSnapshot`/`mergeSnapshot`/
-// `filterStructured`) live in `./surreal-filter`. Below are the dialect-free portable-IR filters.
+// `filterStructured`) live in `./surreal-filter`. Below are the dialect-free kind-registry filters.
 
-// --- portable-IR filters (the stored-snapshot path) ---------------------------------------------
+// --- kind-registry filters (the stored-snapshot path) -------------------------------------------
 
-/** Keep only the portable-IR objects that pass the filter (the {@link filterStructured} analog). */
-export function filterPortable(db: PortableDb, f: Filter): PortableDb {
-  const tables = db.tables
-    .filter((t) => inCat(f.tables, t.name))
-    .map((t) => ({
-      ...t,
-      events: t.events.filter((e) => inCat(f.events, e.name)),
-    }));
-  const functions = db.functions.filter((fn) => inCat(f.functions, fn.name));
-  const accesses = db.accesses.filter((a) => inCat(f.access, a.name));
-  return { tables, functions, accesses };
+const objKey = (o: PortableObject) => `${o.kind}:${o.name}`;
+
+/** Which Filter category gates a TOP-LEVEL kind (and whose name-set its name is matched against). */
+function category(kind: string): keyof Filter {
+  if (kind === "function") return "functions";
+  if (kind === "access") return "access";
+  return "tables"; // a table (and any future top-level structural kind)
 }
 
 /**
- * The stored snapshot to persist after a filtered `generate` (the {@link mergeSnapshot} analog over
- * the portable IR): included kinds take their new state from `next`, excluded kinds keep `prev`'s.
- * For a table that stays, its events are merged per the events filter. `files` overlays next on prev.
+ * Whether a portable object passes the filter. A TOP-LEVEL object (no owner) is gated by its kind's
+ * category + name. An OWNED object (owner set — an index/event/constraint) FOLLOWS its owner table's
+ * inclusion; an `event` is ADDITIONALLY gated by the `events` category. (Fields are substrate nested
+ * in their table object, never standalone here.)
+ */
+export function passesFilter(
+  registry: KindRegistry,
+  o: PortableObject,
+  f: Filter,
+): boolean {
+  const owner = registry.engine(o.kind)?.owner?.(o);
+  if (owner) {
+    if (!inCat(f.tables, owner.name)) return false;
+    return o.kind === "event" ? inCat(f.events, o.name) : true;
+  }
+  return inCat(f[category(o.kind)], o.name);
+}
+
+/** Keep only the portable objects that pass the filter (the {@link filterStructured} analog). */
+export function filterKinds(
+  registry: KindRegistry,
+  objects: PortableObject[],
+  f: Filter,
+): PortableObject[] {
+  return objects.filter((o) => passesFilter(registry, o, f));
+}
+
+/**
+ * The stored snapshot to persist after a filtered `generate`: INCLUDED objects take their new state
+ * from `next`, EXCLUDED objects keep `prev`'s. Dedup by `kind:name` (an included `next` object wins).
+ * `files` overlays next on prev.
  */
 export function mergeStored(
+  registry: KindRegistry,
   prev: StoredSnapshot,
   next: StoredSnapshot,
   f: Filter,
 ): StoredSnapshot {
-  const tables = new Map<string, PortableTable>();
-  for (const t of prev.portable.tables)
-    if (!inCat(f.tables, t.name)) tables.set(t.name, t);
-  for (const t of next.portable.tables) {
-    if (!inCat(f.tables, t.name)) continue;
-    const prevT = prev.portable.tables.find((x) => x.name === t.name);
-    const events = [
-      ...t.events.filter((e) => inCat(f.events, e.name)),
-      ...(prevT?.events.filter((e) => !inCat(f.events, e.name)) ?? []),
-    ];
-    tables.set(t.name, { ...t, events });
-  }
-  const functions = [
-    ...prev.portable.functions.filter((fn) => !inCat(f.functions, fn.name)),
-    ...next.portable.functions.filter((fn) => inCat(f.functions, fn.name)),
-  ];
-  const accesses = [
-    ...prev.portable.accesses.filter((a) => !inCat(f.access, a.name)),
-    ...next.portable.accesses.filter((a) => inCat(f.access, a.name)),
-  ];
+  const merged = new Map<string, PortableObject>();
+  for (const o of snapshotObjects(prev.schema))
+    if (!passesFilter(registry, o, f)) merged.set(objKey(o), o);
+  for (const o of snapshotObjects(next.schema))
+    if (passesFilter(registry, o, f)) merged.set(objKey(o), o);
   return {
-    version: 2,
+    version: 3,
     driver: next.driver,
-    portable: { tables: [...tables.values()], functions, accesses },
+    schema: snapshotKinds([...merged.values()]),
     files: { ...(prev.files ?? {}), ...(next.files ?? {}) },
   };
 }
 
 /**
- * Restrict the `disk` portable IR to objects that ALSO exist in the `live` portable IR (intersect by
- * name) AND pass the filter — for `baseline`. So hand-written schema not yet in the DB stays pending,
- * while what's really there is captured in the snapshot's canonical (generator) form.
+ * Restrict the `disk` objects to those that ALSO exist `live` (intersect by `kind:name`) AND pass the
+ * filter — for `baseline`. Hand-written schema not yet in the DB stays pending; what's really there is
+ * captured. Each field/index/event/constraint is its own object, so intersect-by-key handles them.
  */
-export function intersectPortable(
-  disk: PortableDb,
-  live: PortableDb,
+export function intersectKinds(
+  registry: KindRegistry,
+  disk: PortableObject[],
+  live: PortableObject[],
   f: Filter,
-): PortableDb {
-  const liveByName = new Map(live.tables.map((t) => [t.name, t]));
-  const tables = disk.tables.flatMap((t) => {
-    const lt = liveByName.get(t.name);
-    if (!lt || !inCat(f.tables, t.name)) return [];
-    const liveFields = new Set(lt.fields.map((fl) => fl.name));
-    const liveIndexes = new Set(lt.indexes.map((i) => i.name));
-    const liveEvents = new Set(lt.events.map((e) => e.name));
-    return [
-      {
-        ...t,
-        fields: t.fields.filter((fl) => liveFields.has(fl.name)),
-        indexes: t.indexes.filter((i) => liveIndexes.has(i.name)),
-        events: t.events.filter(
-          (e) => liveEvents.has(e.name) && inCat(f.events, e.name),
-        ),
-      },
-    ];
-  });
-  const liveFns = new Set(live.functions.map((fn) => fn.name));
-  const liveAccess = new Set(live.accesses.map((a) => a.name));
-  const functions = disk.functions.filter(
-    (fn) => liveFns.has(fn.name) && inCat(f.functions, fn.name),
+): PortableObject[] {
+  const liveKeys = new Set(live.map(objKey));
+  return disk.filter(
+    (o) => liveKeys.has(objKey(o)) && passesFilter(registry, o, f),
   );
-  const accesses = disk.accesses.filter(
-    (a) => liveAccess.has(a.name) && inCat(f.access, a.name),
-  );
-  return { tables, functions, accesses };
 }

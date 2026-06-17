@@ -1,35 +1,28 @@
-// The driver-PARAMETRIC diff path (multi-DB spike — see docs/MULTI-DB-SPIKE.md). When `config.driver`
-// (or `sz diff --driver <name>`) names a non-surreal driver, the diff command routes here instead of
-// the SurrealQL snapshot pipeline. It speaks only the portable IR + the Driver interface, so it is
-// dialect-free: author with `sz.*` (lowered + lifted to the portable IR), introspect the target DB
-// through its driver, compare with the driver's structured equality, and show the DDL gap.
-//
-// SCOPE: this is the spike's proof that the CLI can drive a second database end-to-end. It does NOT
-// replace the full snapshot/migration-file pipeline (that stays Surreal-only until the engine-wide
-// kind->PortableType swap graduates from spike to implementation).
+// The driver-parametric LIVE diff path. `sz diff --driver <name>` (or a non-default `config.driver`)
+// routes here: author with that driver's `s.*`, lower via its kind registry, introspect the live DB,
+// and show the DDL gap — all generic over the registry (core-v2). Each DB is its own world: you author
+// and diff with the SAME driver (kinds aren't cross-driver), so there is no cross-dialect lowering.
 
-import type { PortableDb, ResolvedConfig } from "@schemic/core";
+import type { ResolvedConfig } from "@schemic/core";
 import {
+  buildKindDiff,
   type DiffItem,
   formatItems,
   getDriver,
   loadDefs,
+  lowerSchema,
   ok,
   plural,
+  type PortableObject,
   style,
 } from "@schemic/core";
-
-// The dialect-free diff engine lives in the driver layer; re-export so existing CLI/test imports
-// (`diffPortable`/`planPortable`) keep resolving here.
-export type { PortableDiffItem } from "@schemic/core";
-export { diffPortable, planPortable } from "@schemic/core";
 
 /** A loaded, opaque driver connection (each driver's `connect` returns its own type). */
 type Conn = unknown;
 
 /**
- * Run `sz diff` against a non-surreal driver. Authoring is still the `sz.*` surface (lowered to the
- * portable IR via the Surreal authoring lowering); the TARGET driver owns emit/introspect/equal.
+ * Run `sz diff` against a driver's LIVE database. Authoring is that driver's `s.*` surface (exploded +
+ * lowered via its registry); the diff is the generic `buildKindDiff`.
  */
 export async function portableDiff(
   config: ResolvedConfig,
@@ -37,22 +30,19 @@ export async function portableDiff(
   opts: { json?: boolean } = {},
 ): Promise<void> {
   const driver = getDriver(driverName);
+  const reg = driver.registry;
 
-  // Desired = the declared schema, authored with sz.* and lifted to the portable IR.
+  // Desired = the declared schema, authored with this driver's s.* -> exploded -> lowered.
   const { tables, defs } = await loadDefs(config.schemaPath);
-  const desired: PortableDb = getDriver(config.driver ?? "surrealdb").lower(
-    tables,
-    defs,
-  );
+  const desired: PortableObject[] = lowerSchema(reg, driver.explode(tables, defs));
 
-  // Live = the target database, introspected through its own driver, then both sides normalized by
-  // the target (which PROJECTS the portable IR onto what that DB can represent).
+  // Live = the database, introspected through the driver, canonicalized identically to lowering.
   const conn = (await driver.connect(config)) as Conn;
-  let live: PortableDb;
+  let live: PortableObject[];
   try {
     // Exclude the migration bookkeeping tables (and their `_lock` companion) — they're CLI-owned, not
     // schema, so `diff` must not report them as "to remove". Same scoping as migrate's baseline read.
-    live = await driver.introspect(
+    live = await driver.introspectAll(
       conn as never,
       new Set([config.migrationsTable, `${config.migrationsTable}_lock`]),
     );
@@ -60,9 +50,9 @@ export async function portableDiff(
     await closeQuietly(conn);
   }
 
-  // Route through the driver's own diff strategy (field-level where the driver supports it), so the
-  // `diff --driver` display matches exactly what `gen`/`migrate` would emit for that database.
-  const diff = driver.diff(live, desired);
+  // Generic kind-registry diff (field-level via each kind's overwrite/displayItems), so the
+  // `diff --driver` display matches exactly what `gen`/`migrate` emit for that database.
+  const diff = buildKindDiff(reg, live, desired);
 
   if (opts.json) {
     console.log(

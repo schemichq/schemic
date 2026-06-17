@@ -16,11 +16,11 @@ import type { ResolvedConfig } from "../cli/config";
 import type { Diff } from "../cli/diff";
 import type { Filter } from "../cli/filter";
 import type { PullPlan } from "../cli/merge";
-import type { PortableDb } from "./portable-ir";
+import type { Definable, KindRegistry, PortableObject } from "../kind";
 
 /**
  * The dialect-NEUTRAL authoring contract — the only structure the orchestration reads off an
- * authored object (everything else is opaque and handed straight to {@link Driver.lower}). A table
+ * authored object (everything else is opaque and handed straight to {@link Driver.explode}). A table
  * contributes just its `name`; this is the upper bound for a driver's table-authoring type. The
  * Surreal `TableDef` is a structural subtype, as is any future dialect's table builder.
  */
@@ -128,26 +128,27 @@ export interface MigrationStore<Conn = unknown> {
 
 /**
  * An OPTIONAL throwaway-instance capability for round-trip canonicalization and `sz check`'s
- * migration replay. A driver WITHOUT this must provide a `normalize()` strong enough to canonicalize
- * purely; on such a driver `check`/replay-verification is degraded/unavailable (diff/apply still work).
+ * migration replay. Absent -> `check`/replay-verification is degraded/unavailable (diff/apply still
+ * work, since a kind's `lower`/`introspectAll` already canonicalize).
  */
 export interface ShadowCapability<Conn> {
-  /** Apply `ddl` to a fresh scratch DB, introspect it back to the portable IR, then drop it. */
+  /** Apply `ddl` to a fresh scratch DB, introspect it back to portable objects, then drop it. */
   roundTrip(
     conn: Conn,
     config: ResolvedConfig,
     ddl: string,
-  ): Promise<PortableDb>;
+  ): Promise<PortableObject[]>;
   /** Spin up a fully-isolated ephemeral instance (for migration replay). Caller must `stop()`. */
   ephemeral?(): Promise<{ conn: Conn; stop: () => Promise<void> }>;
 }
 
 /**
- * A database dialect. The five IR ops (`lower`/`emit`/`introspect`/`normalize` + `connect`/`apply`)
- * all pivot on the PORTABLE Struct-IR (`PortableDb` — dialect-independent field types); `equal` is
- * the structured comparison the dialect-free diff core uses. A driver translates the portable IR
- * to/from its own dialect (the Surreal driver lifts/lowers the SurrealQL string kinds; the Postgres
- * driver produces/consumes the portable IR natively).
+ * A database dialect, expressed as a SET OF KINDS (core-v2). The driver registers its object kinds on
+ * `registry`; core orchestrates schema ops GENERICALLY over it (`lowerSchema`/`buildKindDiff`/
+ * `emitKinds`/`orderObjects`) — it never names a kind. The driver owns only what isn't generic: the
+ * authoring -> kinded `explode`, a single-read `introspectAll`, the connection lifecycle, and the
+ * dialect-specific command capabilities. The field/type substrate (`PortableType`/`s.*`) stays core.
+ * See docs/kind-registry-flip-plan.md.
  */
 export interface Driver<
   Conn = unknown,
@@ -156,28 +157,23 @@ export interface Driver<
 > {
   readonly name: string;
 
-  // --- IR pipeline ---------------------------------------------------------------------------
-  /** Authoring (loaded `defineTable`/standalone defs) -> NORMALIZED portable IR. */
-  lower(tables: Tbl[], defs: Def[]): PortableDb;
-  /** Portable IR -> ordered DDL statements (a fresh apply / migration `up`). */
-  emit(db: PortableDb, opts?: EmitOptions): Statement[];
-  /** DROP/REMOVE DDL for one object — `up` for a removed object, `down` for an added one. */
-  remove(statement: Statement): string;
-  /** ALTER/OVERWRITE DDL for one changed object (replace-in-place where the dialect can). */
-  overwrite(statement: Statement): string;
-  /** Live connection -> portable IR (skipping `exclude`d tables). */
-  introspect(conn: Conn, exclude?: Set<string>): Promise<PortableDb>;
-  /** Portable IR -> canonical portable IR (deterministic; both lowerings converge here). */
-  normalize(db: PortableDb): PortableDb;
-  /** Structured equality over the canonical portable IR (the dialect-free diff core's comparison). */
-  equal(a: PortableDb, b: PortableDb): boolean;
+  // --- kind registry (the schema engine) -----------------------------------------------------
+  /** This driver's registered KINDS. Core runs lower/diff/emit/order generically over it. */
+  readonly registry: KindRegistry;
   /**
-   * Diff two portable IRs into executable `up`/`down` DDL (+ display items). The dialect owns the
-   * strategy: SurrealDB does clause-level `ALTER`/`OVERWRITE`; a coarser driver recreates objects.
-   * `prev` is the stored/live state, `next` the desired schema. Source-file linkage on the items is
-   * attached by the caller (the snapshot's `files` map), so a driver leaves `DiffItem.file` unset.
+   * Authoring (loaded `defineTable`/standalone defs) -> kinded {@link Definable}s. The driver-side
+   * fan-out: one inline-authored table explodes into `[table, ...index, ...event/constraint]`, each
+   * tagged with its `kind`. Core then lowers via `lowerSchema(registry, explode(...))` — so
+   * `KindEngine.lower` stays 1:1 and the contract needs no explode hook.
    */
-  diff(prev: PortableDb, next: PortableDb): Diff;
+  explode(tables: Tbl[], defs: Def[]): Definable[];
+  /**
+   * Live connection -> ALL portable objects, fanned across kinds from ONE read (INFO STRUCTURE /
+   * pg_catalog). Must canonicalize IDENTICALLY to lowering (a clean apply round-trips to a zero diff)
+   * and be COMPLETE (return every diffable kind, else presence-phantom-diffs). `exclude` skips tables
+   * by name.
+   */
+  introspectAll(conn: Conn, exclude?: Set<string>): Promise<PortableObject[]>;
 
   // --- execution -----------------------------------------------------------------------------
   connect(config: ResolvedConfig, over?: ConnectionOverrides): Promise<Conn>;
@@ -186,12 +182,6 @@ export interface Driver<
   close(conn: Conn): Promise<void>;
 
   // --- optional capabilities -----------------------------------------------------------------
-  /**
-   * Upgrade a legacy (pre-portable) on-disk snapshot's stored state into the portable IR. Only the
-   * driver that authored the legacy format knows how to lift it (Surreal lifts its string-kind
-   * struct). Absent -> this driver can't read a legacy snapshot (it predates multi-driver anyway).
-   */
-  upgradeSnapshot?(legacy: unknown): PortableDb;
   readonly shadow?: ShadowCapability<Conn>;
   /** Apply-time migration bookkeeping. Absent -> this driver can't run migrations (diff/gen still do). */
   readonly migrations?: MigrationStore<Conn>;
@@ -210,12 +200,16 @@ export interface Driver<
   /** Reduce a live diff (from {@link diffLive}) to the statements `push` applies; `prune: false` keeps removals. */
   syncPlan?(diff: Diff, prune?: boolean): string[];
   /**
-   * Render a portable IR to per-file authoring source in THIS dialect's `s.*` syntax, filtered — the
-   * codegen behind the offline `diff --ts`. `single` (a file key) folds everything into one combined
-   * module; otherwise `fileFor` maps each object to its own file. Same renderer `pull` writes with.
+   * Render portable objects to per-file source in THIS dialect's `s.*` syntax, filtered — the codegen
+   * behind the offline `diff --ts` and `pull`. Takes `PortableObject[]` (this driver's own portable
+   * shape): `diff --ts` renders the SNAPSHOT side (stored portable) and the DESIRED side
+   * (`lowerSchema(explode(...))`) at MATCHING fidelity so an in-sync schema yields identical files;
+   * `pull` renders the introspected DB. The driver re-derives its structured form from the portable
+   * objects (parsing its own DDL where needed — docs/kind-registry-flip-plan.md §6b). `single` (a file
+   * key) folds everything into one module; otherwise `fileFor` maps each object to its own file.
    */
   renderSchema?(
-    db: PortableDb,
+    objects: PortableObject[],
     filter: Filter,
     fileFor: (kind: string, name: string) => string,
     single?: string,

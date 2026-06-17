@@ -17,6 +17,7 @@
 import { describe, expect, test } from "bun:test";
 import type * as z from "zod";
 import { type Driver, driverNames, getDriver } from "./driver/driver";
+import { emitKinds, lowerSchema } from "./kind";
 
 /** The driver's authoring namespace (`s`) — a bag of field builders. Loosely typed (cross-driver). */
 // biome-ignore lint/suspicious/noExplicitAny: a driver's `s` is dialect-specific; the suite is generic.
@@ -93,17 +94,16 @@ export function describeDriverConformance(
         expect(driver.name).toBe(name);
       });
 
-      test("implements the IR pipeline + execution ops", () => {
+      test("exposes a kind registry + the schema/execution ops", () => {
+        // core-v2: schema ops are generic over `registry`; the driver provides the fan-out + execution.
+        expect(driver.registry).toBeDefined();
+        expect(typeof driver.registry.entries).toBe("function");
+        expect(driver.registry.names().length).toBeGreaterThan(0);
         for (const op of [
-          "lower",
-          "emit",
-          "remove",
-          "overwrite",
-          "introspect",
-          "normalize",
-          "equal",
-          "diff",
+          "explode",
+          "introspectAll",
           "connect",
+          "apply",
           "close",
         ] as const) {
           expect(typeof driver[op]).toBe("function");
@@ -149,24 +149,23 @@ export function describeDriverConformance(
       });
     });
 
-    describe("lowering (drop-in fields → portable IR)", () => {
-      test("a table of drop-in fields lowers + emits without throwing", () => {
+    describe("lowering (drop-in fields → kind registry)", () => {
+      test("a table of drop-in fields explodes + lowers + emits, carrying every field", () => {
         const shape: Record<string, unknown> = {};
         for (const { key, build } of DROP_INS) shape[`f_${key}`] = build(s);
         const table = defineTable("schemic_conformance_probe", shape);
 
-        const portable = driver.lower([table], []);
-        expect(portable.tables).toHaveLength(1);
-        // Every drop-in field made it into the lowered table (objects may fold to one native column).
-        const fieldNames = new Set(
-          portable.tables[0].fields.map((f) => f.name),
-        );
-        for (const { key } of DROP_INS) {
-          expect(fieldNames.has(`f_${key}`)).toBe(true);
-        }
+        // explode (authoring -> kinded definables) -> lowerSchema -> portable objects.
+        const portable = lowerSchema(driver.registry, driver.explode([table], []));
+        expect(portable.some((o) => o.kind === "table")).toBe(true);
 
-        const statements = driver.emit(portable);
-        expect(statements.length).toBeGreaterThan(0);
+        // The portable shape is the driver's own, but the emitted DDL is generic: every drop-in
+        // field name must appear in it (lowering + emit carried it through).
+        const ddl = emitKinds(driver.registry, portable).join("\n");
+        expect(ddl.length).toBeGreaterThan(0);
+        for (const { key } of DROP_INS) {
+          expect(ddl).toContain(`f_${key}`);
+        }
       });
     });
   });

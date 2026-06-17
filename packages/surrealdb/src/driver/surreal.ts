@@ -1,35 +1,34 @@
-// The SURREAL driver — driver #1 (see docs/MULTI-DB-SPIKE.md).
+// The SURREAL driver — a SET OF KINDS on the core-v2 registry (see docs/kind-registry-flip-plan.md).
 //
-// A thin adapter over the existing Surreal-specific functions: each op delegates to them and lifts/
-// lowers between the SurrealQL string-kind IR (`DbStructured`) and the dialect-independent pivot
-// (`PortableDb`) at its boundaries. So no current behavior changes, and the driver speaks the same
-// portable IR the diff core and every other driver speak. In the eventual package split this file
-// becomes `@surreal-zod/surreal`; for now it lives in core, clearly marked.
+// Everything dialect-specific lives here: the kind `registry` (table/index/event/function/access), the
+// authoring -> kinded `explode`, the single-read `introspectAll`, the connection lifecycle, and the
+// SurrealDB command capabilities. Core orchestrates schema ops (lower/diff/emit/order) GENERICALLY over
+// `registry` — it never names a kind. The Struct-IR (`DbStructured`) + `diffSnapshots` stay the driver's
+// INTERNAL clause-level engine (the kinds delegate to them); the field/type substrate stays core.
 
 import type {
   ApplyOptions,
   ConnectionOverrides as CfgOverrides,
   ConnectionOverrides,
+  Definable,
   Diff,
   Driver,
-  EmitOptions,
+  Filter,
   MigrationRecord,
   MigrationStore,
-  PortableDb,
+  PortableObject,
+  PullPlan,
   RenderedUnit,
   ResolvedConfig,
   ShadowCapability,
-  Statement,
 } from "@schemic/core";
-import { keyOf, registerDriver } from "@schemic/core";
+import { registerDriver } from "@schemic/core";
 import { escapeIdent, type Surreal } from "surrealdb";
-import type { SurrealParams } from "../config";
 import {
   connectEmbedded,
   spawnEphemeralServer,
   surrealBinaryAvailable,
 } from "../cli/engine";
-import { initScaffold } from "../cli/scaffold";
 import {
   applyStatements,
   diffAgainstDb,
@@ -38,51 +37,29 @@ import {
   tsStructsAgainstDb,
   verifyMigrations,
 } from "../cli/introspect";
-import { schemaStruct } from "../cli/lower";
 import { planPull, renderPerFile, renderSchemaToTS } from "../cli/pull";
-import { deepEqual, normalizeDb } from "../cli/struct";
-import type { DbStructured, Snapshot } from "../cli/structure";
-import { introspectStructured, structuredSnapshot } from "../cli/structure";
+import { initScaffold } from "../cli/scaffold";
+import { normalizeDb } from "../cli/struct";
+import type { DbStructured } from "../cli/structure";
 import { connect as surrealConnect } from "../cli/surreal-connect";
-import { diffSnapshots, renderMigration } from "../cli/surreal-diff";
+import { renderMigration } from "../cli/surreal-diff";
 import { filterStructured } from "../cli/surreal-filter";
+import type { SurrealParams } from "../config";
 import {
-  type DefineStatement,
-  overwriteStatement,
-  removeStatement,
-} from "../ddl";
+  explodeSchema,
+  fromStructured,
+  introspectAll as introspectAllKinds,
+  toStructured,
+} from "../kinds/explode";
+import type { SurrealPortable } from "../kinds/portable";
+import { surrealKinds } from "../kinds/registry";
 import type { Shape, StandaloneDef, TableDef } from "../pure";
-import { liftDb, lowerDb } from "./surreal-ir";
-
-/**
- * Re-derive the legacy (string-DDL) {@link Snapshot} from the portable IR, so the existing clause-
- * level `diffSnapshots` engine can run unchanged. `statements` come from `emit` (now clause-bearing),
- * `struct` from the lowered IR (drives cosmetic-change detection). Both sides are normalized first.
- */
-function toLegacySnapshot(db: PortableDb): Snapshot {
-  const norm = liftDb(normalizeDb(lowerDb(db)));
-  const statements: Record<string, DefineStatement> = {};
-  const snap = structuredSnapshot(lowerDb(norm));
-  for (const s of Object.values(snap.statements)) statements[keyOf(s)] = s;
-  return { version: 1, statements, struct: lowerDb(norm) };
-}
-
-// Apply/emit order: db-level functions first (tables/events may call fn::…), then tables, fields,
-// indexes, events, and finally access (SIGNUP/SIGNIN reference tables). Mirrors introspect.ts's RANK.
-const RANK: Record<DefineStatement["kind"], number> = {
-  function: 0,
-  table: 1,
-  field: 2,
-  index: 3,
-  event: 4,
-  access: 5,
-};
 
 const shadow: ShadowCapability<Surreal> = {
   // Apply DDL to a throwaway database, read it back via INFO STRUCTURE, drop it — the live-side
-  // canonicalizer. Delegates to `shadowStructured`, then lifts to the portable IR.
+  // canonicalizer. Delegates to `shadowStructured`, then to per-kind portable objects (== lowering).
   roundTrip: async (conn, config, ddl) =>
-    liftDb(normalizeDb(await shadowStructured(conn, config, ddl))),
+    fromStructured(normalizeDb(await shadowStructured(conn, config, ddl))),
   // `ephemeral` (full isolated instance for `sz check` replay) is intentionally not wired here —
   // `check` still uses its existing path. A later milestone routes it through this capability.
 };
@@ -190,57 +167,16 @@ export const surrealDriver: Driver<
   StandaloneDef
 > = {
   name: "surrealdb",
+  registry: surrealKinds,
 
-  // --- IR pipeline ---------------------------------------------------------------------------
-
-  lower(tables: TableDef<string, Shape>[], defs: StandaloneDef[]): PortableDb {
-    // `schemaStruct` returns the NORMALIZED string-kind IR; lift its field kinds to PortableType.
-    return liftDb(schemaStruct(tables, defs));
-  },
-
-  emit(db: PortableDb, opts?: EmitOptions): Statement[] {
-    // Portable IR -> DDL: lower the portable types back to SurrealQL kinds, then rebuild canonical
-    // DEFINE statements, ordered for apply. `overwrite` rewrites each as `… OVERWRITE …`.
-    const snap = structuredSnapshot(lowerDb(db));
-    const stmts = Object.values(snap.statements).sort(
-      (a, b) => RANK[a.kind] - RANK[b.kind],
-    );
-    if (opts?.overwrite) {
-      return stmts.map((s) => ({ ...s, ddl: overwriteStatement(s.ddl) }));
-    }
-    return stmts;
-  },
-
-  // SurrealQL replaces in place (DEFINE … OVERWRITE) and removes with REMOVE … IF EXISTS — both
-  // non-destructive, so a changed field doesn't drop column data. The surreal driver only ever
-  // receives statements it emitted, so they ARE DefineStatements (the neutral Statement's `kind`
-  // string narrows back to the surreal kind union here).
-  remove: (s) => removeStatement(s as DefineStatement),
-  overwrite: (s) => overwriteStatement(s.ddl),
-
-  async introspect(conn: Surreal, exclude?: Set<string>): Promise<PortableDb> {
-    return liftDb(await introspectStructured(conn, exclude));
-  },
-
-  normalize(db: PortableDb): PortableDb {
-    // Reuse the canonicalizer that operates on string kinds: lower -> normalize -> lift.
-    return liftDb(normalizeDb(lowerDb(db)));
-  },
-
-  // A legacy (v1) snapshot stored the SurrealQL string-kind struct — lift it to the portable IR.
-  upgradeSnapshot(legacy: unknown): PortableDb {
-    return liftDb(legacy as Parameters<typeof liftDb>[0]);
-  },
-
-  equal(a: PortableDb, b: PortableDb): boolean {
-    return deepEqual(this.normalize(a), this.normalize(b));
-  },
-
-  diff(prev: PortableDb, next: PortableDb): Diff {
-    // Bridge to the clause-level Surreal diff engine via re-derived legacy snapshots — preserving
-    // ALTER FIELD/ALTER TABLE and the cosmetic-change detection (no portable-IR feature is lost).
-    return diffSnapshots(toLegacySnapshot(prev), toLegacySnapshot(next));
-  },
+  // --- kind registry (the schema engine) -----------------------------------------------------
+  // Authoring -> kinded definables (the driver-side explode: one inline-authored table fans out into
+  // [table, ...index, ...event], db-level functions/accesses alongside). Core lowers via
+  // `lowerSchema(registry, explode(...))`, then diffs/emits/orders GENERICALLY — it never names a kind.
+  explode: (tables, defs) => explodeSchema(tables, defs),
+  // Live DB -> all portable objects: ONE `INFO … STRUCTURE` read fanned per kind, canonicalized
+  // IDENTICALLY to lowering (a clean apply round-trips to a zero diff) and complete (every kind).
+  introspectAll: (conn, exclude) => introspectAllKinds(conn, exclude),
 
   // --- execution -----------------------------------------------------------------------------
 
@@ -295,9 +231,14 @@ export const surrealDriver: Driver<
   diffLive: (conn, config, filter) => diffAgainstDb(conn, config, filter),
   syncPlan: (diff, prune) => syncPlan(diff, prune),
 
-  // Offline `diff --ts`: lower the portable IR back to the string-kind struct, filter, render.
-  renderSchema(db, filter, fileFor, single) {
-    return renderFiles(filterStructured(lowerDb(db), filter), fileFor, single);
+  // Offline `diff --ts` / `pull`: reconstruct the structured form from the portable objects (no DDL
+  // re-parse — the normalized struct rides on them), filter, render to per-file `s.*` source.
+  renderSchema(objects, filter, fileFor, single) {
+    return renderFiles(
+      filterStructured(toStructured(objects as SurrealPortable[]), filter),
+      fileFor,
+      single,
+    );
   },
 
   // Live `diff --ts`: both sides normalized through SurrealDB, then rendered per file.
@@ -385,7 +326,10 @@ export const surrealDriver: Driver<
     } else {
       // Scratch connection for the `remote` engine: check.db merged over the connection's own params.
       const remote: SurrealParams = { ...params, ...(check?.db ?? {}) };
-      checkCfg = { ...config, params: remote as unknown as Record<string, unknown> };
+      checkCfg = {
+        ...config,
+        params: remote as unknown as Record<string, unknown>,
+      };
       try {
         db = await surrealConnect(checkCfg, over as CfgOverrides);
       } catch (e) {

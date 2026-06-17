@@ -28,14 +28,4 @@ export {
   scalar,
   union,
 } from "./portable";
-export type {
-  PortableAccess,
-  PortableDb,
-  PortableEvent,
-  PortableField,
-  PortableFunction,
-  PortableIndex,
-  PortablePermissions,
-  PortableTable,
-  PortableTableKind,
-} from "./portable-ir";
+export type { PortableField, PortablePermissions } from "./portable-ir";

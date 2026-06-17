@@ -8,6 +8,7 @@ import {
   type DiffItem,
   type Driver,
   duplicateTables,
+  emitKinds,
   EMPTY_STORED,
   existingTables,
   type FilterOpts,
@@ -22,6 +23,7 @@ import {
   listMigrations,
   loadDefs,
   loadSchemas,
+  lowerSchema,
   ok,
   type PullFilePlan,
   type PullPlan,
@@ -31,6 +33,7 @@ import {
   type ResolvedConfig,
   readSnapshot,
   resolvePager,
+  snapshotObjects,
   style,
   summarizeKinds,
   unifiedDiff,
@@ -537,24 +540,20 @@ kindFlags(
                 );
               // Offline: render the snapshot's recorded schema and the declared schema to source,
               // then diff per file.
-              const prev = readSnapshot(config.metaDir, driver);
-              if (
-                !prev.portable.tables.length &&
-                !prev.portable.functions.length &&
-                !prev.portable.accesses.length
-              )
+              const prev = readSnapshot(config.metaDir);
+              const prevObjects = snapshotObjects(prev.schema);
+              if (prevObjects.length === 0)
                 throw new Error(
                   "offline diff --ts needs a snapshot — run `schemic gen` (or `schemic pull --write`) to record one, or pass --live.",
                 );
               const { tables, defs } = await loadDefs(config.schemaPath);
+              const desiredObjects = lowerSchema(
+                driver.registry,
+                driver.explode(tables, defs),
+              );
               await showTsDiff(
-                driver.renderSchema(prev.portable, filter, fileFor, single),
-                driver.renderSchema(
-                  driver.lower(tables, defs),
-                  filter,
-                  fileFor,
-                  single,
-                ),
+                driver.renderSchema(prevObjects, filter, fileFor, single),
+                driver.renderSchema(desiredObjects, filter, fileFor, single),
                 "Schema matches the snapshot.",
               );
             }
@@ -831,7 +830,7 @@ dbFlags(
     }
     const { tables, defs } = await loadDefs(config.schemaPath);
     const kinds = summarizeKinds(
-      driver.emit(driver.lower(tables, defs)).map((s) => s.ddl),
+      emitKinds(driver.registry, lowerSchema(driver.registry, driver.explode(tables, defs))),
     );
     console.log(ok(`Schemas valid${kinds ? ` — ${kinds}` : " (no objects)"}.`));
     if (opts.schema) return;

@@ -1,18 +1,17 @@
-// lower: the pg `s.*` authoring objects (./authoring.ts) -> the portable IR (@schemic/core). The
-// driver's `emit` then turns the IR into pg DDL, and `introspect` reads DDL back into the same IR, so
-// author -> lower -> emit -> introspect -> diff round-trips. Field TYPE comes from the Zod schema's
+// lower: the pg `s.*` authoring objects (./authoring.ts) -> the driver's table IR (`PgTable`). The
+// driver's `explode` then splits each PgTable into kind objects (table/index/constraint); `emit` turns
+// those into pg DDL and `introspectAll` reads DDL back into the same kind objects, so author -> lower
+// -> explode -> emit -> introspect -> diff round-trips. Field TYPE comes from the Zod schema's
 // structural wrappers (optional/nullable/array) combined with the PgMeta pg-type token; DDL clauses
-// (default/check/generated/identity/comment/reference) ride PgMeta into the IR's clause slots.
+// (default/check/generated/identity/comment/reference) ride PgMeta into the field's clause slots.
 
 import type {
-  PortableDb,
   PortableField,
-  PortableIndex,
-  PortableTable,
   PortableType,
   ScalarName,
 } from "@schemic/core/driver";
 import type { PgField, PgMeta, PgTableDef } from "./authoring";
+import type { PgIndexInfo, PgTable } from "./emit";
 
 /** Minimal view of a Zod schema's internal def (zod v4) — enough to peel structural wrappers. */
 interface ZodDef {
@@ -135,10 +134,10 @@ function lowerField(
   return pf;
 }
 
-/** One pg table definition -> a portable table (fields + composite PK + table CHECKs + indexes). */
-function lowerTable(def: PgTableDef): PortableTable {
+/** One pg table definition -> the driver's table IR (fields + composite PK + table CHECKs + indexes). */
+export function lowerTable(def: PgTableDef): PgTable {
   const fields: PortableField[] = [];
-  const indexes: PortableIndex[] = [];
+  const indexes: PgIndexInfo[] = [];
   const pkCols: string[] = [...(def.config.primaryKey ?? [])];
 
   for (const [name, field] of Object.entries(def.fields)) {
@@ -147,7 +146,7 @@ function lowerTable(def: PgTableDef): PortableTable {
       indexes.push({
         name: `${def.name}_${name}_key`,
         cols: [name],
-        spec: "UNIQUE",
+        unique: true,
       });
     if (field.native.primaryKey && !pkCols.includes(name)) pkCols.push(name);
   }
@@ -155,29 +154,18 @@ function lowerTable(def: PgTableDef): PortableTable {
     indexes.push({
       name: ix.name ?? `${def.name}_${ix.cols.join("_")}_idx`,
       cols: ix.cols,
-      spec: ix.unique ? "UNIQUE" : "",
+      unique: !!ix.unique,
     });
   }
 
-  const table: PortableTable = {
-    name: def.name,
-    kind: { kind: "NORMAL" },
-    schemafull: true,
-    fields,
-    indexes,
-    events: [],
-  };
+  const table: PgTable = { name: def.name, fields, indexes };
   if (pkCols.length > 0) table.primaryKey = pkCols;
   if (def.config.checks && def.config.checks.length > 0)
     table.checks = def.config.checks;
   return table;
 }
 
-/** Lower the authored pg tables (+ standalone defs — none in the pg surface yet) to the portable IR. */
-export function pgLower(tables: PgTableDef[]): PortableDb {
-  return {
-    tables: tables.map(lowerTable),
-    functions: [],
-    accesses: [],
-  };
+/** Lower the authored pg tables (+ standalone defs — none in the pg surface yet) to the table IR. */
+export function pgLower(tables: PgTableDef[]): PgTable[] {
+  return tables.map(lowerTable);
 }
