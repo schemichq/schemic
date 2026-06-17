@@ -200,14 +200,16 @@ export interface Driver<
   /** Reduce a live diff (from {@link diffLive}) to the statements `push` applies; `prune: false` keeps removals. */
   syncPlan?(diff: Diff, prune?: boolean): string[];
   /**
-   * Render authored definables to per-file source in THIS dialect's `s.*` syntax, filtered — the
-   * codegen behind the offline `diff --ts`. Takes the AUTHORING side (`Definable[]`), not the lowered
-   * IR: TS codegen needs the rich `StructField` that lowering drops, so the driver re-derives its
-   * structured form internally (docs/kind-registry-flip-plan.md §6b). `single` (a file key) folds
-   * everything into one module; otherwise `fileFor` maps each object to its own file.
+   * Render portable objects to per-file source in THIS dialect's `s.*` syntax, filtered — the codegen
+   * behind the offline `diff --ts` and `pull`. Takes `PortableObject[]` (this driver's own portable
+   * shape): `diff --ts` renders the SNAPSHOT side (stored portable) and the DESIRED side
+   * (`lowerSchema(explode(...))`) at MATCHING fidelity so an in-sync schema yields identical files;
+   * `pull` renders the introspected DB. The driver re-derives its structured form from the portable
+   * objects (parsing its own DDL where needed — docs/kind-registry-flip-plan.md §6b). `single` (a file
+   * key) folds everything into one module; otherwise `fileFor` maps each object to its own file.
    */
   renderSchema?(
-    defs: Definable[],
+    objects: PortableObject[],
     filter: Filter,
     fileFor: (kind: string, name: string) => string,
     single?: string,
