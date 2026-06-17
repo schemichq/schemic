@@ -21,6 +21,7 @@ import {
   lowerSchema,
   orderObjects,
   planKinds,
+  type PortableObject,
   type Ref,
   snapshotKinds,
   snapshotObjects,
