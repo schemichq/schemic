@@ -181,6 +181,46 @@ describe("buildKindDiff parity vs the fixed-slot pgDiff (up/down)", () => {
   });
 });
 
+// --- canonical change-detection (emit faithful; rewrite-prone clauses excluded) ----------------
+
+describe("canonical excludes rewrite-prone/non-introspected clauses from diffs", () => {
+  const fld = (
+    name: string,
+    type: PortableTable["fields"][number]["type"],
+    extra: Partial<PortableTable["fields"][number]> = {},
+  ) => ({ name, table: "t", type, ...extra });
+  const plain = pdb([tbl("t", [fld("n", scalar("int"))])]);
+  const withDefault = pdb([
+    tbl("t", [fld("n", scalar("int"), { default: "0" })]),
+  ]);
+  const otherDefault = pdb([
+    tbl("t", [fld("n", scalar("int"), { default: "5" })]),
+  ]);
+  const withComment = pdb([
+    tbl("t", [fld("n", scalar("int"), { comment: "count" })]),
+  ]);
+  const asFloat = pdb([tbl("t", [fld("n", scalar("float"))])]);
+
+  test("a DEFAULT change (or adding one) is NOT a change", () => {
+    expect(ud(diffK(withDefault, otherDefault))).toEqual({ up: [], down: [] });
+    expect(ud(diffK(plain, withDefault))).toEqual({ up: [], down: [] });
+  });
+
+  test("a COMMENT change is NOT a change", () => {
+    expect(ud(diffK(plain, withComment))).toEqual({ up: [], down: [] });
+  });
+
+  test("but emit stays faithful: DEFAULT + COMMENT DDL is still produced", () => {
+    const ddl = `${emitK(withDefault).join("\n")}\n${emitK(withComment).join("\n")}`;
+    expect(ddl).toContain("DEFAULT 0");
+    expect(ddl).toContain("COMMENT ON COLUMN");
+  });
+
+  test("a real type change IS still detected", () => {
+    expect(diffK(plain, asFloat).up.length).toBeGreaterThan(0);
+  });
+});
+
 // --- real round-trip via PGlite ----------------------------------------------------------------
 
 describe("kind path round-trips through a real engine", () => {
@@ -208,6 +248,44 @@ describe("kind path round-trips through a real engine", () => {
       const { up, down } = buildKindDiff(registry, a, b);
       expect({ up, down }).toEqual({ up: [], down: [] });
       expect(driver.equal(live, desired)).toBe(true);
+    } finally {
+      await conn.close();
+    }
+  });
+
+  test("clauses (default/check/comment) emit + apply but don't phantom-diff vs introspect", async () => {
+    const desired = pdb([
+      tbl("evt", [
+        {
+          name: "label",
+          table: "evt",
+          type: scalar("string"),
+          comment: "name",
+        },
+        {
+          name: "n",
+          table: "evt",
+          type: scalar("int"),
+          check: "n > 0",
+          default: "0",
+        },
+      ]),
+    ]);
+    const conn = (await driver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
+    try {
+      await driver.apply(conn, emitK(desired));
+      const live = await driver.introspect(conn);
+      // No normalize here: exercise the table kind's `canonical` directly. DEFAULT/CHECK/COMMENT are
+      // emitted + applied, but excluded from change-detection, so introspect (which can't read them
+      // back) does NOT phantom-diff the freshly-applied schema.
+      const { up, down } = buildKindDiff(
+        registry,
+        decompose(live),
+        decompose(desired),
+      );
+      expect({ up, down }).toEqual({ up: [], down: [] });
     } finally {
       await conn.close();
     }

@@ -30,6 +30,7 @@ import {
 import type { PortableDb, PortableField } from "@schemic/core/driver";
 import {
   addFkSql,
+  canonField,
   createTableDdl,
   dropFkSql,
   dropTableSql,
@@ -119,6 +120,23 @@ const tableEngine: KindEngine<PgTablePortable, PgTablePortable> = {
     }),
     ...commentLines(t),
   ],
+
+  // Change-detection key (NOT the emitted DDL): the equality-relevant shape only — canonField keeps
+  // type/nullability/identity/FK-actions and DROPS the rewrite-prone/non-introspected clauses
+  // (DEFAULT/CHECK/GENERATED/COMMENT), and table-level CHECKs are omitted too. So those clauses stay
+  // faithful in `emit` (fresh apply) but never count as a change -> no phantom-diff of a freshly
+  // applied schema vs introspect (PG rewrites exprs on read; comments aren't introspected). This is
+  // the fixed-slot driver's emit/equal asymmetry, restored at the kind seam.
+  canonical: (t) =>
+    createTableDdl({
+      name: t.name,
+      kind: { kind: "NORMAL" },
+      schemafull: true,
+      fields: t.fields.map((f) => canonField(f, t.name)),
+      indexes: [],
+      events: [],
+      ...(t.primaryKey ? { primaryKey: t.primaryKey } : {}),
+    }),
 
   remove: (t) => [dropTableSql(t.name)],
 

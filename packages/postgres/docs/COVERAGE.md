@@ -31,10 +31,10 @@ round-trip (author `s.*` → lower → emit → introspect → diff = 0) · `[n/
 
 | kind | `createKind'd?` | emit | introspect | diff | notes |
 |---|---|---|---|---|---|
-| `table` | [x] | [x] | [~] | [x] | registered + parity-green; columns nest as substrate; `overwrite` = clause-level column ALTER (type/null/default/comment), recreate-fallback for identity/generated/CHECK/PK; introspect via facade |
+| `table` | [x] | [x] | [~] | [x] | registered + parity-green; columns nest as substrate; `overwrite` = clause-level column ALTER (type/null/default/comment), recreate-fallback for identity/generated/CHECK/PK; **`canonical` excludes DEFAULT/CHECK/GENERATED/COMMENT + table-CHECK from change-detection** (emit stays faithful; no phantom-diff vs introspect); introspect via facade |
 | `column`* (substrate) | [n/a] | [x] | [x] | [x] | not a kind — `PortableField`/`PortableType` nested in `table`; substrate keeps `native{params}`+`check` |
-| `index` | [x] | [x] | [ ] | [~] | registered; `deps`+`owner`→table; emits `CREATE [UNIQUE] INDEX`; change = drop+recreate; not introspected back yet |
-| `constraint` (FK; PK/UNIQUE/CHECK/EXCLUDE TBD) | [x] | [x] | [~] | [~] | FK registered + parity-green; `deps`→[table, refTable] breaks mutual-FK cycles; change = drop+recreate; PK is table substrate; UNIQUE rides `index`; CHECK/EXCLUDE TBD |
+| `index` | [x] | [x] | [ ] | [~] | registered; `deps`→table (no `owner`, rank-grouped); emits `CREATE [UNIQUE] INDEX`; change = drop+recreate. **Caveat: not introspected → a unique index would phantom-diff (present in authoring, absent in introspect) at the flip → needs `introspectAll` to read indexes (pending core-dev decision on index model)** |
+| `constraint` (FK; PK/UNIQUE/CHECK/EXCLUDE TBD) | [x] | [x] | [~] | [~] | FK registered + parity-green; `deps`→[table, refTable] breaks mutual-FK cycles; change = drop+recreate; FK actions DO introspect (no phantom); PK is table substrate; UNIQUE rides `index`; CHECK/EXCLUDE TBD |
 | `view` | [ ] | [ ] | [ ] | [ ] | not implemented |
 | `materialized_view` | [ ] | [ ] | [ ] | [ ] | not implemented |
 | `sequence` (standalone) | [ ] | [ ] | [ ] | [ ] | identity-backed sequences are implicit today; standalone `CREATE SEQUENCE` not impl |
