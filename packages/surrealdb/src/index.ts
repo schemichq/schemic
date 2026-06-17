@@ -9,8 +9,23 @@
 // Side-effect: register `surrealDriver` with the core registry on import.
 import "./driver/surreal";
 
-/** Re-exported from the SDK: author SurrealQL expressions (event/permission bodies, asserts). */
-export { surql } from "surrealdb";
+import { type BoundQuery, surql as sdkSurql } from "surrealdb";
+
+/**
+ * Author SurrealQL expressions — the `s.*` authoring API takes these `BoundQuery` values everywhere a
+ * dynamic expression is allowed (`$default`/`$value`/`$computed`/`$assert`, `reference({ onDelete })`,
+ * event `when`/`then`, function bodies, permissions). A thin GENERIC wrapper over the SDK's tag so a
+ * direct SDK query can also carry its RESULT type — one tuple entry per statement:
+ * `db.query(surql<[string[]]>\`RETURN ['a', 'b', 'c']\`)`. Plain `surql\`…\`` (no type arg) is unchanged.
+ * Provided here (typed) so you stay on a single import, decoupled from the SDK version.
+ */
+export function surql<R extends unknown[] = unknown[]>(
+  strings: TemplateStringsArray,
+  ...values: unknown[]
+): BoundQuery<R> {
+  return sdkSurql(strings, ...values) as BoundQuery<R>;
+}
+export type { BoundQuery } from "surrealdb";
 /** SurrealDB config types (relocated from @schemic/core/config, now connections-only + dialect-free). */
 export type {
   AuthLevel,

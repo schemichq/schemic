@@ -12,6 +12,7 @@ import {
   RecordIdRange,
   type RecordIdValue,
   surql,
+  Table,
   Uuid,
 } from "surrealdb";
 import { z } from "zod";
@@ -1081,13 +1082,16 @@ export const s = {
    * multi-table union — `s.recordId(User)`, `s.recordId([User, Service])` — so a table's name is
    * only ever written in its own definition. (For a single-table link `User.record()` is preferred:
    * it also carries the id value type; `User.record().or(Post.record())` composes a union.)
+   *
+   * Called with NO argument — `s.recordId()` — it emits a bare `record` (a link to ANY table), since a
+   * record id's table is optional in SurrealDB.
    */
-  recordId: <T extends string | AnyTable>(
-    table: T | readonly T[],
+  recordId: <T extends string | AnyTable = string>(
+    table?: T | readonly T[],
   ): RecordIdField<T extends string ? T : NamesOf<T>> =>
     new RecordIdField(
-      (Array.isArray(table) ? table : [table]).map((t) =>
-        typeof t === "string" ? t : t.name,
+      (table === undefined ? [] : Array.isArray(table) ? table : [table]).map(
+        (t) => (typeof t === "string" ? t : t.name),
       ) as (T extends string ? T : NamesOf<T>)[],
     ),
   /**
@@ -1709,6 +1713,14 @@ export class TableDef<Name extends string, S extends Shape> {
     return this.config.relation ? "relation" : "table";
   }
 
+  /**
+   * A SurrealDB `Table` instance for this table — for direct SDK calls that take a table reference,
+   * e.g. `db.select(User.table)`. (For a record id, chain `User.record().for(id)`.)
+   */
+  get table(): Table<Name> {
+    return new Table(this.name);
+  }
+
   /** DB wire row -> app object. */
   decode(row: unknown): z.output<z.ZodObject<ZShape<S>>> {
     return z.decode(this.object, row as never);
@@ -2150,12 +2162,35 @@ type RejectNoDdl<S extends Shape> = {
       : S[K];
 };
 
+// The output (id value) type of an authored `id` field — WITHOUT the widen-to-RecordIdValue fallback
+// `IdValue` does, so `RejectBadId` can see whether it's actually a valid record-id value type.
+type IdOutput<Id> =
+  Id extends RecordIdField<string, infer V>
+    ? V
+    : Id extends SField<infer Sc, infer _>
+      ? z.output<Sc>
+      : Id extends z.ZodType
+        ? z.output<Id>
+        : never;
+
+/** Compile-time guard: an explicit `id` field must have a valid `RecordIdValue` value type — a
+ *  `s.symbol()`/`s.boolean()` id (not a valid id value) is rejected rather than silently widened. */
+type RejectBadId<S extends Shape> = "id" extends keyof S
+  ? [IdOutput<S["id"]>] extends [RecordIdValue]
+    ? unknown
+    : {
+        id: "the `id` field's value must be a valid RecordId value type (string | number | bigint | uuid | array | object) — e.g. s.string(), s.int(), s.uuid()";
+      }
+  : unknown;
+
 export function defineTable<Name extends string, S extends Shape>(
   name: Name,
-  // The object form is rejected at compile time (`RejectNoDdl`); the callback form keeps its
-  // precise `S` inference (a `& RejectNoDdl<S>` in a function-return position collapses it),
+  // The object form is rejected at compile time (`RejectNoDdl` + `RejectBadId`); the callback form
+  // keeps its precise `S` inference (a `& RejectNoDdl<S>` in a function-return position collapses it),
   // so a no-DDL field there is caught by the runtime `inferField` backstop instead.
-  shape: (S & RejectNoDdl<S>) | ((self: RecordIdField<Name>) => S),
+  shape:
+    | (S & RejectNoDdl<S> & RejectBadId<S>)
+    | ((self: RecordIdField<Name>) => S),
 ): TableDef<Name, WithSmartId<Name, S>> {
   const resolved =
     typeof shape === "function" ? shape(new RecordIdField([name])) : shape;

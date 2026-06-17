@@ -101,6 +101,46 @@ describe("renderPerFile", () => {
       `import { s, defineTable } from "@schemic/surrealdb";`,
     );
   });
+
+  test("a record field's REFERENCE round-trips to .reference(...) (VALUE preserved)", () => {
+    const withRef: DbStructured = {
+      tables: [
+        t("account", [f("id", "string", "account")]),
+        {
+          name: "comment",
+          kind: { kind: "NORMAL" },
+          schemafull: true,
+          indexes: [],
+          events: [],
+          fields: [
+            f("id", "string", "comment"),
+            // bare REFERENCE (or the materialized default IGNORE) -> .reference()
+            {
+              name: "ref",
+              kind: "record<account>",
+              reference: {},
+              table: "comment",
+            },
+            // ON DELETE UNSET *and* a VALUE — the original bug dropped the reference entirely.
+            {
+              name: "author",
+              kind: "record<account>",
+              reference: { on_delete: "UNSET" },
+              value: "fn::validate::user_exists()",
+              table: "comment",
+            },
+          ],
+        },
+      ],
+      functions: [],
+      accesses: [],
+    };
+    const out =
+      renderPerFile(withRef, (_k, n) => `${n}.ts`).get("comment.ts") ?? "";
+    expect(out).toContain(".reference()");
+    expect(out).toContain('.reference({ onDelete: "unset" })');
+    expect(out).toContain(".$value(surql`fn::validate::user_exists()`)");
+  });
 });
 
 describe("formatForAssert", () => {

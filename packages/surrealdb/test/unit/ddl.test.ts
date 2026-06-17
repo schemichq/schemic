@@ -63,6 +63,8 @@ describe("leaf types", () => {
   test("record links", () => {
     expect(typeOf(s.recordId("user"))).toBe("record<user>");
     expect(typeOf(s.recordId(["user", "admin"]))).toBe("record<user | admin>");
+    // No table -> a bare `record` (a link to ANY table); the table is optional in SurrealDB.
+    expect(typeOf(s.recordId())).toBe("record");
   });
 });
 

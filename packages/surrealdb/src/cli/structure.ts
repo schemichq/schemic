@@ -236,7 +236,7 @@ function canonicalPerms(
  * Field CLAUSES keyed by clause name (insertion order == DDL order), each value already in the
  * `ALTER FIELD … <set>` form — so the migration engine can diff clauses structurally without
  * re-parsing the DDL (matches the authoring `emit` in ddl.ts). Keys are drawn from
- * `FIELD_CLAUSE_ORDER`. REFERENCE is intentionally absent (canonicalField never emitted it).
+ * `FIELD_CLAUSE_ORDER` — including REFERENCE (emitted below + reversed by `pull`'s `renderField`).
  */
 function fieldClauses(f: StructField): Record<string, string> {
   const clauses: Record<string, string> = {

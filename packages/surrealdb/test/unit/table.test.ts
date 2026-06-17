@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DateTime, RecordId, surql } from "surrealdb";
+import { DateTime, RecordId, surql, Table } from "surrealdb";
 import { z } from "zod";
 import { emitTable } from "../../src/ddl";
 import { defineRelation, defineTable, RecordIdField, s } from "../../src/pure";
@@ -41,6 +41,28 @@ describe("smart id", () => {
     expect(ddl).toContain(
       "DEFINE FIELD reports ON TABLE node TYPE option<record<node>>;",
     );
+  });
+});
+
+describe("table instance helpers", () => {
+  const User = defineTable("user", { id: s.string(), name: s.string() });
+
+  test(".table returns a SurrealDB Table instance for direct SDK calls", () => {
+    expect(User.table).toBeInstanceOf(Table);
+    expect(User.table.name).toBe("user");
+  });
+
+  test("a record id is built via User.record().for(id)", () => {
+    const rid = User.record().for("abc");
+    expect(rid).toBeInstanceOf(RecordId);
+    expect(rid.table.name).toBe("user");
+    expect(rid.id).toBe("abc");
+  });
+
+  test("a relation also exposes .table (inherited from TableDef)", () => {
+    const Wrote = defineRelation("wrote", {});
+    expect(Wrote.table).toBeInstanceOf(Table);
+    expect(Wrote.table.name).toBe("wrote");
   });
 });
 
