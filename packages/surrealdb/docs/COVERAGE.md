@@ -181,20 +181,21 @@ not registered yet — so the gaps stay visible. `field` is **substrate nested i
 A kind is `[x]` in a column only when that capability round-trips through the **registry path**
 (`KindEngine` on `src/kinds/`), independently of the still-live fixed-slot path.
 
-**Status:** slice 2 (`table` + `index` + `event`) is **parity-green** — the registry path reproduces
-`surrealDriver.diff` byte-for-byte across add/change/remove of every column, asserted in
-`test/unit/kind-parity.test.ts`. The kinds run **alongside** the legacy `Driver` (not yet wired in):
-the Option-B facade (route `Driver.diff/emit` through the registry via a `PortableDb ↔ PortableObject[]`
-adapter, snapshot unchanged) and per-kind `introspect` land next, then the coordinated Option-A flip.
+**Status:** every kind SurrealDB currently emits — `table`, `index`, `event`, `function`, `access` — is
+**registry-complete + parity-green**: the registry path reproduces `surrealDriver.diff` byte-for-byte
+across add/change/remove of every one, asserted in `test/unit/kind-parity.test.ts`. The kinds run
+**alongside** the legacy `Driver` (facade-test phase — not wired into production). What's left before
+the coordinated Option-A flip: the Option-B facade (route `Driver.diff/emit` through the registry via a
+`PortableDb ↔ PortableObject[]` adapter, snapshot unchanged) and per-kind `introspect`.
 
 | Kind | Registered | `emit` | `overwrite`/diff | `introspect` | Notes |
 |---|---|---|---|---|---|
-| `table` (NORMAL/ANY/RELATION) | `[x]` | `[x]` | `[x]` | `[ ]` | fields nested; field+head ALTER inside `overwrite` (delegates to `diffSnapshots`); RELATION in/out → `deps` |
+| `table` (NORMAL/ANY/RELATION) | `[x]` | `[x]` | `[x]` | `[ ]` | fields nested; field+head ALTER inside `overwrite` (delegates to `diffSnapshots`); RELATION in/out + `fn::` → `deps` |
 | `field` *(substrate, nested in `table`)* | n/a | `[x]` | `[x]` | `[ ]` | `PortableField` clauses carried verbatim; **not** its own kind |
 | `index` (plain/UNIQUE/composite/COUNT) | `[x]` | `[x]` | `[x]` | `[ ]` | own kind; `deps`/`owner` → table; change = recreate (REMOVE + DEFINE) |
-| `event` | `[x]` | `[x]` | `[x]` | `[ ]` | own kind; `deps`/`owner` → table; change = `DEFINE EVENT OVERWRITE` |
-| `function` (`fn::`) | `[ ]` | `[ ]` | `[ ]` | `[ ]` | opaque kind, later slice; still on the fixed-slot path |
-| `access` (RECORD/JWT/BEARER) | `[ ]` | `[ ]` | `[ ]` | `[ ]` | opaque kind, later slice; still on the fixed-slot path |
+| `event` | `[x]` | `[x]` | `[x]` | `[ ]` | own kind; `deps`/`owner` → table + `fn::` callees; change = `DEFINE EVENT OVERWRITE` |
+| `function` (`fn::`) | `[x]` | `[x]` | `[x]` | `[ ]` | opaque kind; `deps` = other `fn::` it calls; change = `DEFINE FUNCTION OVERWRITE` |
+| `access` (RECORD/JWT/BEARER) | `[x]` | `[x]` | `[x]` | `[ ]` | opaque kind; `deps` = `fn::` in SIGNUP/SIGNIN/AUTHENTICATE; change = `DEFINE ACCESS OVERWRITE` |
 | `param` (`DEFINE PARAM`) | `[ ]` | `[ ]` | `[ ]` | `[ ]` | not yet in the driver at all |
 | `analyzer` (`DEFINE ANALYZER`) | `[ ]` | `[ ]` | `[ ]` | `[ ]` | needed for SEARCH indexes (`index` → `deps` → analyzer) |
 | `user` (`DEFINE USER`) | `[ ]` | `[ ]` | `[ ]` | `[ ]` | not yet in the driver |
@@ -202,8 +203,17 @@ adapter, snapshot unchanged) and per-kind `introspect` land next, then the coord
 | `config` (`DEFINE CONFIG GRAPHQL/API`) | `[ ]` | `[ ]` | `[ ]` | `[ ]` | 3.x; not yet in the driver |
 | `api` / `bucket` (3.x) | `[ ]` | `[ ]` | `[ ]` | `[ ]` | not yet in the driver |
 
-**Deferred (tracked):** per-kind `introspect` (slice one memoized `INFO … STRUCTURE` read across kinds,
-§5) is not yet on the engines — live reads still go through the legacy `introspectStructured`. `deps`
-currently carries RELATION in/out edges; the `fn::` edges from field `VALUE`/`ASSERT`/`DEFAULT`,
-table/field `PERMISSIONS`, and access `SIGNIN`/`AUTHENTICATE` (and SEARCH `index` → `analyzer`) land
-when `function`/`analyzer` register (they only affect ordering, so parity holds without them today).
+**`natives`: N/A.** SurrealDB emits no `PortableNative` objects — the db-level long-tail
+(`param`/`analyzer`/`user`/`model`/`config`/`api`/`bucket`) isn't implemented in the driver yet, and
+`function`/`access` are their own kinds (above), not natives. So there is nothing in the `natives` slot
+to migrate; it's listed here only so the gap stays visible.
+
+**`fn::` dependency edges (done).** Field `VALUE`/`ASSERT`/`DEFAULT`/`COMPUTED`/`PERMISSIONS`, table
+`PERMISSIONS`, event `WHEN`/`THEN`, and access `SIGNUP`/`SIGNIN`/`AUTHENTICATE` are scanned for `fn::`
+references; each becomes a `deps → {kind:"function"}` so a called function emits **before** its caller
+(the function-before-table case the ordinal alone gets wrong). Asserted in the parity suite.
+
+**Deferred (tracked):** per-kind `introspect` (one memoized `INFO … STRUCTURE` read across kinds, §5) is
+not yet on the engines — live reads still go through the legacy `introspectStructured`; it reuses the
+existing `introspect → decompose` path and lands with the facade. SEARCH `index` → `analyzer` edges land
+when the `analyzer` kind is implemented.

@@ -37,16 +37,40 @@ export interface PIndex extends PortableObject {
   readonly stmt: DefineStatement;
 }
 
-/** An event's portable form: the `DEFINE EVENT` statement + its owning table. */
+/** An event's portable form: the `DEFINE EVENT` statement + its owning table. `deps` carries any
+ *  `fn::` functions the WHEN/THEN call (so a called function emits BEFORE the event). */
 export interface PEvent extends PortableObject {
   readonly kind: "event";
   readonly name: string;
   readonly table: string;
   readonly stmt: DefineStatement;
+  readonly deps: Ref[];
 }
 
-/** Every portable object a slice-2 SurrealDB schema lowers to. */
-export type SurrealPortable = PTable | PIndex | PEvent;
+/**
+ * A db-level function's portable form — OPAQUE (a neutral identity + its canonical `DEFINE FUNCTION`
+ * statement, round-tripped verbatim). `deps` carries any OTHER `fn::` functions its body calls.
+ */
+export interface PFunction extends PortableObject {
+  readonly kind: "function";
+  readonly name: string;
+  readonly stmt: DefineStatement;
+  readonly deps: Ref[];
+}
+
+/**
+ * A db-level access/auth definition's portable form — OPAQUE. `deps` carries any `fn::` functions its
+ * SIGNUP/SIGNIN/AUTHENTICATE call (so those functions emit BEFORE the access).
+ */
+export interface PAccess extends PortableObject {
+  readonly kind: "access";
+  readonly name: string;
+  readonly stmt: DefineStatement;
+  readonly deps: Ref[];
+}
+
+/** Every portable object a SurrealDB schema lowers to. */
+export type SurrealPortable = PTable | PIndex | PEvent | PFunction | PAccess;
 
 /**
  * The authoring-side definables the explode produces. They ALREADY carry the normalized, canonical

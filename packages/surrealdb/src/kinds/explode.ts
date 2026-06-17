@@ -1,28 +1,58 @@
 // The driver-side EXPLODE (docs/kind-registry-contract.md §7, sanctioned by core-dev): SurrealDB
 // authors index/event/field-index INLINE on the table, so a single `TableDef` fans out into one TABLE
-// object + N INDEX + M EVENT objects. We flatten the schema into per-kind definables BEFORE lowering,
-// so `KindEngine.lower` stays a clean 1:1 and the contract needs no "explode hook". This is exactly
-// what `Driver.lower` will wrap around `lowerSchema` at the eventual wholesale flip.
+// object + N INDEX + M EVENT objects (and the db-level FUNCTION/ACCESS objects ride alongside). We
+// flatten the whole schema into per-kind portable objects BEFORE lowering, so `KindEngine.lower` stays
+// a clean 1:1 and the contract needs no "explode hook". This is what `Driver.lower` will wrap around
+// `lowerSchema` at the eventual wholesale flip.
 //
 // It reuses the EXISTING canonical pipeline — `schemaStruct` (TableDef -> normalized Struct IR, with
 // standalone events attached + functions/accesses resolved) then `structuredSnapshot` (Struct ->
 // canonical `DEFINE` statements keyed kind:table:name) — so every emitted DDL string is byte-identical
-// to the fixed-slot `surrealDriver.diff` path. Functions/accesses are NOT yet registered kinds (later
-// slices); their statements are produced by `schemaStruct` but dropped here.
+// to the fixed-slot `surrealDriver.diff` path.
+//
+// CROSS-KIND DEPS: an object that calls `fn::name` must emit AFTER that function (the function-before-
+// table case the ordinal alone gets wrong). We scan each object's rendered DDL for `fn::` references and
+// attach `deps -> {kind:"function", name}` — on a table (field VALUE/ASSERT/DEFAULT/PERMISSIONS + table
+// PERMISSIONS), an event (WHEN/THEN), an access (SIGNUP/SIGNIN/AUTHENTICATE), and a function (its body
+// calling another fn::). Edges to functions outside the diff are ignored by the spine, so over-reporting
+// is harmless. (SEARCH index -> analyzer edges land when the analyzer kind is registered.)
 
 import type { AnyTable, AuthoredDef, Ref } from "@schemic/core";
 import { schemaStruct } from "../cli/lower";
 import { structuredSnapshot } from "../cli/structure";
+import type { DefineStatement } from "../ddl";
 import type { Shape, StandaloneDef, TableDef } from "../pure";
 import type { SurrealPortable } from "./portable";
 
+/** Match a `fn::name` reference (incl. namespaced `fn::a::b`), capturing the bare function name. */
+const FN_REF = /fn::([A-Za-z0-9_]+(?:::[A-Za-z0-9_]+)*)/g;
+
 /**
- * Flatten authored tables (+ standalone defs) into per-kind portable objects: one {@link PTable} per
- * table (head + nested fields), one {@link PIndex} per index, one {@link PEvent} per event. A table's
- * `deps` are its RELATION in/out endpoint tables (so the graph emits a relation after its endpoints).
- *
- * Params mirror `buildSnapshot`'s public bound (`AnyTable`/`AuthoredDef`) and cast to the src `TableDef`
- * the canonical pipeline reads — the established way to bridge the src-vs-lib type duality.
+ * The cross-kind dependency edges for one object: a `base` set (its table, for index/event) plus the
+ * `fn::` functions referenced in its DDL — deduped, and excluding `self` (a function's body referencing
+ * itself is recursion, not an ordering edge).
+ */
+function depsOf(ddls: string[], base: Ref[] = [], self?: string): Ref[] {
+  const seen = new Set(base.map((r) => `${r.kind}:${r.name}`));
+  const out: Ref[] = [...base];
+  for (const ddl of ddls) {
+    for (const m of ddl.matchAll(FN_REF)) {
+      const name = m[1];
+      if (name === self) continue;
+      const key = `function:${name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ kind: "function", name });
+    }
+  }
+  return out;
+}
+
+/**
+ * Flatten authored tables (+ standalone defs) into per-kind portable objects: a {@link PTable} per
+ * table (head + nested fields), a {@link PIndex} per index, a {@link PEvent} per event, and the db-level
+ * {@link PFunction}/{@link PAccess} objects. Params mirror `buildSnapshot`'s public bound
+ * (`AnyTable`/`AuthoredDef`) and cast to the src `TableDef` the canonical pipeline reads.
  */
 export function explodeSchema(
   tables: AnyTable[],
@@ -32,28 +62,52 @@ export function explodeSchema(
     tables as unknown as TableDef<string, Shape>[],
     defs as unknown as StandaloneDef[],
   );
+  const stmts = Object.values(structuredSnapshot(db).statements);
+  const of = (kind: DefineStatement["kind"]) =>
+    stmts.filter((s) => s.kind === kind);
+
   const out: SurrealPortable[] = [];
-  for (const st of db.tables) {
-    // Render this one table's canonical statements (head + fields + its indexes + its events).
-    const snap = structuredSnapshot({
-      tables: [st],
-      functions: [],
-      accesses: [],
-    });
-    const stmts = Object.values(snap.statements);
-    const head = stmts.find((s) => s.kind === "table");
-    if (!head) continue; // a table always has a head; defensive only
 
-    const fields = stmts.filter((s) => s.kind === "field");
-    const deps: Ref[] = [];
-    for (const t of st.kind.in ?? []) deps.push({ kind: "table", name: t });
-    for (const t of st.kind.out ?? []) deps.push({ kind: "table", name: t });
-    out.push({ kind: "table", name: st.name, head, fields, deps });
-
-    for (const s of stmts.filter((s) => s.kind === "index"))
-      out.push({ kind: "index", name: s.name, table: st.name, stmt: s });
-    for (const s of stmts.filter((s) => s.kind === "event"))
-      out.push({ kind: "event", name: s.name, table: st.name, stmt: s });
+  // Tables: head + nested fields. deps = RELATION in/out endpoints + fn:: from the head/fields.
+  const headByTable = new Map(of("table").map((s) => [s.name, s]));
+  const fieldsByTable = new Map<string, DefineStatement[]>();
+  for (const s of of("field")) {
+    const arr = fieldsByTable.get(s.table ?? "") ?? [];
+    arr.push(s);
+    fieldsByTable.set(s.table ?? "", arr);
   }
+  for (const st of db.tables) {
+    const head = headByTable.get(st.name);
+    if (!head) continue; // a table always has a head; defensive only
+    const fields = fieldsByTable.get(st.name) ?? [];
+    const endpoints: Ref[] = [];
+    for (const t of st.kind.in ?? [])
+      endpoints.push({ kind: "table", name: t });
+    for (const t of st.kind.out ?? [])
+      endpoints.push({ kind: "table", name: t });
+    const deps = depsOf([head.ddl, ...fields.map((f) => f.ddl)], endpoints);
+    out.push({ kind: "table", name: st.name, head, fields, deps });
+  }
+
+  for (const s of of("index"))
+    out.push({ kind: "index", name: s.name, table: s.table ?? "", stmt: s });
+  for (const s of of("event"))
+    out.push({
+      kind: "event",
+      name: s.name,
+      table: s.table ?? "",
+      stmt: s,
+      deps: depsOf([s.ddl], [{ kind: "table", name: s.table ?? "" }]),
+    });
+  for (const s of of("function"))
+    out.push({
+      kind: "function",
+      name: s.name,
+      stmt: s,
+      deps: depsOf([s.ddl], [], s.name),
+    });
+  for (const s of of("access"))
+    out.push({ kind: "access", name: s.name, stmt: s, deps: depsOf([s.ddl]) });
+
   return out;
 }

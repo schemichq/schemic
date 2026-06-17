@@ -1,5 +1,5 @@
-// Slice 2 parity (docs/kind-registry-contract.md §3): the generic kind-registry path must reproduce
-// the fixed-slot `surrealDriver.diff` for the `table`/`index`/`event` kinds. We assert the STRONGEST
+// Kind-registry parity (docs/kind-registry-contract.md §3): the generic kind-registry path must reproduce
+// the fixed-slot `surrealDriver.diff` for the `table`/`index`/`event`/`function`/`access` kinds. We assert the STRONGEST
 // statement — that `planKinds(registry, lowerAll(prev), lowerAll(next)).{up,down}` equals
 // `surrealDriver.diff(lower(prev), lower(next)).{up,down}` — across add/change/remove of every kind, so
 // the engines stay byte-exact with the production path (and the test self-maintains: no hand-written DDL).
@@ -17,6 +17,8 @@ import {
   snapshotObjects,
 } from "@schemic/core";
 import {
+  defineAccess,
+  defineFunction,
   defineRelation,
   defineTable,
   s,
@@ -295,5 +297,91 @@ describe("buildKindDiff + snapshot round-trip", () => {
       up: [],
       down: [],
     });
+  });
+});
+
+describe("function kind parity (opaque)", () => {
+  const add = () =>
+    defineFunction("add", { a: s.int(), b: s.int() })
+      .returns(s.int())
+      .body(surql`RETURN $a + $b`);
+
+  test("add a function", () => {
+    parity([], [], [], [add()]);
+  });
+
+  test("change a function body (DEFINE FUNCTION OVERWRITE)", () => {
+    const changed = defineFunction("add", { a: s.int(), b: s.int() })
+      .returns(s.int())
+      .body(surql`RETURN $a * $b`);
+    parity([], [], [add()], [changed]);
+  });
+
+  test("remove a function", () => {
+    parity([], [], [add()], []);
+  });
+});
+
+describe("access kind parity (opaque)", () => {
+  const acct = () => defineAccess("acct").record().signin(surql`SELECT 1`);
+
+  test("add an access", () => {
+    parity([], [], [], [acct()]);
+  });
+
+  test("change an access (DEFINE ACCESS OVERWRITE)", () => {
+    const changed = defineAccess("acct").record().signin(surql`SELECT 2`);
+    parity([], [], [acct()], [changed]);
+  });
+
+  test("remove an access", () => {
+    parity([], [], [acct()], []);
+  });
+});
+
+describe("fn:: dependency ordering (function emits before its caller)", () => {
+  const fmt = () =>
+    defineFunction("fmt", { v: s.string() })
+      .returns(s.string())
+      .body(surql`RETURN $v`);
+  const fnIdx = (up: string[]) =>
+    up.findIndex((l) => /^DEFINE FUNCTION fn::fmt/.test(l));
+
+  test("before a table whose field COMPUTED calls it", () => {
+    const t = defineTable("doc", {
+      id: s.string(),
+      slug: s.string().$computed(surql`fn::fmt(id)`),
+    });
+    const up = emitKinds(surrealKinds, lowerAll([t], [fmt()]));
+    expect(fnIdx(up)).toBeGreaterThanOrEqual(0);
+    expect(fnIdx(up)).toBeLessThan(
+      up.findIndex((l) => /^DEFINE TABLE doc/.test(l)),
+    );
+  });
+
+  test("before an event whose THEN calls it", () => {
+    const t = defineTable("user", { id: s.string(), n: s.int() }).event("ev", {
+      // biome-ignore lint/suspicious/noThenProperty: event DSL "then" clause, not a thenable.
+      then: surql`UPDATE $after.id SET x = fn::fmt("y")`,
+    });
+    const up = emitKinds(surrealKinds, lowerAll([t], [fmt()]));
+    expect(fnIdx(up)).toBeGreaterThanOrEqual(0);
+    expect(fnIdx(up)).toBeLessThan(
+      up.findIndex((l) => /^DEFINE EVENT ev/.test(l)),
+    );
+  });
+
+  test("before an access whose SIGNIN calls it", () => {
+    const check = defineFunction("fmt", { v: s.string() })
+      .returns(s.string())
+      .body(surql`RETURN $v`);
+    const access = defineAccess("acct")
+      .record()
+      .signin(surql`SELECT * FROM user WHERE fn::fmt(email)`);
+    const up = emitKinds(surrealKinds, lowerAll([], [check, access]));
+    expect(fnIdx(up)).toBeGreaterThanOrEqual(0);
+    expect(fnIdx(up)).toBeLessThan(
+      up.findIndex((l) => /^DEFINE ACCESS acct/.test(l)),
+    );
   });
 });
