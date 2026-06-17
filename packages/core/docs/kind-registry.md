@@ -166,13 +166,22 @@ Everything *object-kind-specific* moves to the drivers.
 
 The converged multi-DB engine works today; migrate **kind-by-kind, green at each step**:
 
-1. Land `createKind` + the registry + a generic `plan`/snapshot *alongside* the current fixed-slot engine.
-2. Move ONE kind (`function`, already the opaque-`native` pattern → lowest risk) onto the registry; prove
-   parity.
-3. Move `access`/`event` (also opaque). Then the structured ones (`index`, then `table`/`field`).
-4. Solve cross-kind ordering (§7.1) before/with the structured kinds.
-5. Retire the fixed slots last; flip the snapshot to v3.
+1. **DONE (slice 1).** Land the registry + the generic spine (`KindRegistry`/`KindEngine`/`planKinds`/
+   `orderObjects`) *alongside* the current fixed-slot engine, proven by an in-core fake driver
+   (`packages/core/test/unit/kind-registry.test.ts`). The cross-kind ordering (§7.1) and field-level
+   diff are solved here, in core, before any driver migrates.
+2. Move the **`table` kind first** (the contract's hardest consumer — fields-as-substrate, field-level
+   diff, clause-level `ALTER`) onto a real driver, with `index`/`event` as their **own** kinds
+   (deps/owner → table). Prove parity vs the live engine. *Flipped from the original "function first":*
+   slice 1 already de-risked the opaque path, so the remaining contract risk is in the structured kind —
+   validate it there while the contract is still cheap to reshape. And function-first wouldn't exercise
+   cross-kind ordering against real tables (they'd still be on the fixed slots).
+3. Then the opaque kinds (`access`/`function`) — trivial once the structured path is proven — and the
+   driver-specific natives (Surreal `ANALYZER`/`PARAM`/…; PG `EXTENSION`/`DOMAIN`/`ENUM`/…) as `define`
+   calls, not new core slots.
+4. Retire the fixed slots last. (Snapshot format is free to change — pre-launch, no v2→v3 migration.)
 
+The driver-facing API + migration ask is written up in [`kind-registry-contract.md`](./kind-registry-contract.md).
 `native` is already the opaque-kind pattern, so the engine is *half* this design already — the registry
 just makes it uniform + first-class.
 
