@@ -22,23 +22,19 @@ import type {
   ConnectionEntry,
   ConnectionInput,
   ConnectionOverrides,
+  Definable,
   Diff,
-  DiffItem,
   Driver,
-  EmitOptions,
   MigrationDirection,
   MigrationRecord,
   MigrationStore,
-  PortableDb,
   PortableField,
-  PortableIndex,
-  PortableTable,
+  PortableObject,
   PortableType,
   ResolveContext,
   ResolvedConfig,
   ScalarName,
   ShadowCapability,
-  Statement,
 } from "@schemic/core/driver";
 import {
   connectionEntry,
@@ -46,19 +42,8 @@ import {
   registerDriver,
 } from "@schemic/core/driver";
 import type { PgTableDef } from "./authoring";
-import {
-  addColSql,
-  addFkSql,
-  canonField,
-  createTableDdl,
-  dropColSql,
-  dropTableSql,
-  escId,
-  fkActions,
-  fkName,
-  pgColumn,
-  pgEmitFields,
-} from "./emit";
+import { escId, type PgIndexInfo, type PgTable } from "./emit";
+import { registry, splitTables } from "./kinds";
 import { pgLower } from "./lower";
 
 // The pg-native authoring surface (`s.*`, defineTable, PgField, $postgres escape hatch, …).
@@ -72,318 +57,6 @@ export interface PgConn {
   ): Promise<{ rows: T[] }>;
   exec(sql: string): Promise<unknown>;
   close(): Promise<void>;
-}
-
-// --- normalize: project the portable IR onto what Postgres represents ---------------------------
-
-function pgNormalizeTable(t: PortableTable): PortableTable {
-  // Drop dotted sub-fields (folded into their jsonb parent); keep the equality-relevant per-field
-  // shape (canonField) + the structural table objects that round-trip (composite PK).
-  const fields = t.fields
-    .filter((f) => !f.name.includes("."))
-    .map((f) => canonField(f, t.name))
-    .sort((a, b) => a.name.localeCompare(b.name));
-  const out: PortableTable = {
-    name: t.name,
-    kind: { kind: "NORMAL" }, // Postgres has no relation/any table kinds.
-    schemafull: true,
-    fields,
-    indexes: [], // secondary/unique indexes emit but aren't introspected back yet (capability gap)
-    events: [],
-  };
-  if (t.primaryKey && t.primaryKey.length > 0)
-    out.primaryKey = [...t.primaryKey];
-  return out;
-}
-
-function pgNormalize(db: PortableDb): PortableDb {
-  return {
-    tables: [...db.tables]
-      .map(pgNormalizeTable)
-      .sort((a, b) => a.name.localeCompare(b.name)),
-    functions: [], // no portable Postgres function model in the spike
-    accesses: [],
-  };
-}
-
-// --- emit: portable IR -> CREATE TABLE ----------------------------------------------------------
-
-function emitTable(t: PortableTable): Statement[] {
-  const fields = pgEmitFields(t);
-  const create: Statement = {
-    kind: "table",
-    name: t.name,
-    ddl: createTableDdl(t),
-  };
-
-  const fks: Statement[] = [];
-  const idx: Statement[] = [];
-  const comments: Statement[] = [];
-  for (const f of fields) {
-    const col = pgColumn(f.type);
-    if (col.references) {
-      fks.push({
-        kind: "fk", // FK applied after all tables exist (ordered via the RANK below).
-        name: fkName(t.name, f.name),
-        table: t.name,
-        ddl: `ALTER TABLE ${escId(t.name)} ADD CONSTRAINT ${escId(fkName(t.name, f.name))} FOREIGN KEY (${escId(f.name)}) REFERENCES ${escId(col.references)} (${escId("id")})${fkActions(f.reference)};`,
-      });
-    }
-    if (f.comment !== undefined) {
-      comments.push({
-        kind: "comment",
-        name: `${t.name}.${f.name}`,
-        table: t.name,
-        ddl: `COMMENT ON COLUMN ${escId(t.name)}.${escId(f.name)} IS '${f.comment.replace(/'/g, "''")}';`,
-      });
-    }
-  }
-  for (const ix of t.indexes) {
-    if (ix.spec !== "UNIQUE") continue; // only UNIQUE indexes in this pass
-    idx.push({
-      kind: "index",
-      name: ix.name,
-      table: t.name,
-      ddl: `CREATE UNIQUE INDEX ${escId(ix.name)} ON ${escId(t.name)} (${ix.cols.map(escId).join(", ")});`,
-    });
-  }
-  return [create, ...fks, ...idx, ...comments];
-}
-
-function pgEmit(db: PortableDb, _opts?: EmitOptions): Statement[] {
-  // All CREATE TABLEs first, then FK constraints + indexes, then comments.
-  const tables = [...db.tables].sort((a, b) => a.name.localeCompare(b.name));
-  const stmts = tables.flatMap(emitTable);
-  const RANK: Record<string, number> = {
-    table: 0,
-    field: 1,
-    fk: 2,
-    index: 2,
-    event: 3,
-    function: 4,
-    access: 5,
-    comment: 6,
-  };
-  return [...stmts].sort((a, b) => (RANK[a.kind] ?? 9) - (RANK[b.kind] ?? 9));
-}
-
-/** DROP DDL for one Postgres object. (Postgres emits per-table, so objects are tables + FK constraints.) */
-function pgRemove(s: Statement): string {
-  if (s.kind === "comment" && s.table) {
-    const col = s.name.slice(s.table.length + 1);
-    return `COMMENT ON COLUMN ${escId(s.table)}.${escId(col)} IS NULL;`;
-  }
-  if (s.kind === "fk" && s.table) {
-    // FK constraints (ALTER TABLE … ADD CONSTRAINT) are dropped as constraints.
-    return `ALTER TABLE ${escId(s.table)} DROP CONSTRAINT IF EXISTS ${escId(s.name)};`;
-  }
-  if (s.kind === "index") {
-    // CREATE [UNIQUE] INDEX … is dropped as an index.
-    return `DROP INDEX IF EXISTS ${escId(s.name)};`;
-  }
-  return `DROP TABLE IF EXISTS ${escId(s.name)} CASCADE;`;
-}
-
-/**
- * Replace one Postgres object. Postgres has no in-place CREATE-OR-REPLACE for tables, so a changed
- * table is drop+recreate (COARSE — destructive of row data). Per-column ALTERs are a future
- * refinement once the portable diff tracks field-level changes for the pg driver.
- */
-function pgOverwrite(s: Statement): string {
-  return `${pgRemove(s)}\n${s.ddl}`;
-}
-
-// --- diff: FIELD-LEVEL Postgres DDL (ALTER TABLE), not whole-table drop+recreate ----------------
-
-/** One ordered diff op: forward `up` DDL, the `down` DDL that undoes it (internal order preserved). */
-interface PgOp {
-  up: string[];
-  down: string[];
-  items: DiffItem[];
-}
-
-/**
- * Field-level Postgres diff. Tables present on BOTH sides diff column-by-column into ALTER TABLE
- * ADD/DROP/ALTER COLUMN — so adding a column no longer drops the table's rows (the old coarse
- * drop+recreate). Whole tables added/removed still CREATE / DROP CASCADE. Ops are built in up-
- * dependency order (all CREATEs before FKs; column drops/table drops last); `down` is the inverse
- * run backwards (ops reversed, each op's own DDL inverted). A column TYPE change is best-effort —
- * Postgres attempts the cast and an incompatible change surfaces at apply.
- */
-function pgDiff(prev: PortableDb, next: PortableDb): Diff {
-  const a = pgNormalize(prev);
-  const b = pgNormalize(next);
-  const prevT = new Map(a.tables.map((t) => [t.name, t]));
-  const nextT = new Map(b.tables.map((t) => [t.name, t]));
-  const refOf = (f: PortableField) => pgColumn(f.type).references;
-  // RAW (un-normalized) tables carry the full clauses (default/check/identity/PK/FK actions/…) — emit
-  // new/removed tables from these so generated migrations reproduce the authored schema exactly.
-  const prevRaw = new Map(prev.tables.map((t) => [t.name, t]));
-  const nextRaw = new Map(next.tables.map((t) => [t.name, t]));
-
-  const ops: PgOp[] = [];
-  const add = (op: PgOp) => ops.push(op);
-
-  // 1) New tables: full CREATE (composite PK, identity, defaults, …) first, then their FKs/indexes/
-  //    comments — so a cross-table FK finds its target. `down` is a DROP CASCADE (handles all of it).
-  const newTables = b.tables.filter((t) => !prevT.has(t.name));
-  for (const t of newTables) {
-    const raw = nextRaw.get(t.name);
-    const create = raw && emitTable(raw).find((s) => s.kind === "table");
-    if (!create) continue;
-    add({
-      up: [create.ddl],
-      down: [dropTableSql(t.name)],
-      items: [
-        {
-          op: "add",
-          key: `table:${t.name}:${t.name}`,
-          kind: "table",
-          table: t.name,
-          ddl: create.ddl,
-        },
-      ],
-    });
-  }
-  for (const t of newTables) {
-    const raw = nextRaw.get(t.name);
-    if (!raw) continue;
-    for (const stmt of emitTable(raw).filter((s) => s.kind !== "table")) {
-      add({
-        up: [stmt.ddl],
-        down: [pgRemove(stmt)],
-        items: [
-          {
-            op: "add",
-            key: `${stmt.kind}:${t.name}:${stmt.name}`,
-            kind: stmt.kind,
-            table: t.name,
-            ddl: stmt.ddl,
-          },
-        ],
-      });
-    }
-  }
-
-  // 2) Tables on BOTH sides: column-level ALTERs.
-  for (const t of b.tables) {
-    const before = prevT.get(t.name);
-    if (!before) continue;
-    const beforeF = new Map(before.fields.map((f) => [f.name, f]));
-    const afterF = new Map(t.fields.map((f) => [f.name, f]));
-
-    // added columns (+ FK)
-    for (const f of t.fields) {
-      if (beforeF.has(f.name)) continue;
-      const ref = refOf(f);
-      const up = [
-        addColSql(t.name, f),
-        ...(ref ? [addFkSql(t.name, f.name, ref)] : []),
-      ];
-      add({
-        up,
-        down: [dropColSql(t.name, f.name)], // DROP COLUMN cascades to its FK
-        items: [
-          {
-            op: "add",
-            key: `field:${t.name}:${f.name}`,
-            kind: "field",
-            table: t.name,
-            ddl: addColSql(t.name, f),
-          },
-        ],
-      });
-    }
-
-    // changed columns (type and/or nullability)
-    for (const f of t.fields) {
-      const bf = beforeF.get(f.name);
-      if (!bf) continue;
-      const ca = pgColumn(f.type);
-      const cb = pgColumn(bf.type);
-      if (ca.sql === cb.sql && ca.nullable === cb.nullable) continue;
-      const upStmts: string[] = [];
-      const downStmts: string[] = [];
-      if (ca.sql !== cb.sql) {
-        upStmts.push(
-          `ALTER TABLE ${escId(t.name)} ALTER COLUMN ${escId(f.name)} TYPE ${ca.sql};`,
-        );
-        downStmts.push(
-          `ALTER TABLE ${escId(t.name)} ALTER COLUMN ${escId(f.name)} TYPE ${cb.sql};`,
-        );
-      }
-      if (ca.nullable !== cb.nullable) {
-        const setNull = (n: boolean) =>
-          `ALTER TABLE ${escId(t.name)} ALTER COLUMN ${escId(f.name)} ${n ? "DROP NOT NULL" : "SET NOT NULL"};`;
-        upStmts.push(setNull(ca.nullable));
-        downStmts.push(setNull(cb.nullable));
-      }
-      add({
-        up: upStmts,
-        down: downStmts,
-        items: [
-          {
-            op: "change",
-            key: `field:${t.name}:${f.name}`,
-            kind: "field",
-            table: t.name,
-            before: `${escId(f.name)} ${cb.sql}${cb.nullable ? "" : " NOT NULL"}`,
-            after: `${escId(f.name)} ${ca.sql}${ca.nullable ? "" : " NOT NULL"}`,
-          },
-        ],
-      });
-    }
-
-    // dropped columns (DROP COLUMN cascades to its FK; recreate adds the column back + FK on down)
-    for (const f of before.fields) {
-      if (afterF.has(f.name)) continue;
-      const ref = refOf(f);
-      add({
-        up: [dropColSql(t.name, f.name)],
-        down: [
-          addColSql(t.name, f),
-          ...(ref ? [addFkSql(t.name, f.name, ref)] : []),
-        ],
-        items: [
-          {
-            op: "remove",
-            key: `field:${t.name}:${f.name}`,
-            kind: "field",
-            table: t.name,
-            ddl: dropColSql(t.name, f.name),
-            old: addColSql(t.name, f),
-          },
-        ],
-      });
-    }
-  }
-
-  // 3) Removed tables: DROP CASCADE up / full recreate (table then FKs/indexes/comments) down.
-  for (const t of a.tables) {
-    if (nextT.has(t.name)) continue;
-    const raw = prevRaw.get(t.name);
-    const recreate = raw ? emitTable(raw).map((s) => s.ddl) : [];
-    add({
-      up: [dropTableSql(t.name)],
-      down: recreate,
-      items: [
-        {
-          op: "remove",
-          key: `table:${t.name}:${t.name}`,
-          kind: "table",
-          table: t.name,
-          ddl: dropTableSql(t.name),
-          old: recreate.join("\n"),
-        },
-      ],
-    });
-  }
-
-  const up = ops.flatMap((o) => o.up);
-  // `down` undoes `up`: reverse the op order, each op contributing its own (internally-ordered) down.
-  const down = [...ops].reverse().flatMap((o) => o.down);
-  const items = ops.flatMap((o) => o.items);
-  return { up, down, items };
 }
 
 // --- introspect: information_schema -> portable IR ----------------------------------------------
@@ -490,7 +163,7 @@ function pgScalarFromUdt(udt: string): PortableType {
 async function pgIntrospect(
   conn: PgConn,
   exclude: Set<string> = new Set(),
-): Promise<PortableDb> {
+): Promise<PgTable[]> {
   // Also skip the companion lock table this driver creates for any excluded (bookkeeping) table.
   const skip = new Set(exclude);
   for (const t of exclude) skip.add(`${t}_lock`);
@@ -585,29 +258,26 @@ async function pgIntrospect(
     byTable.set(c.table_name, list);
   }
 
-  // Group index rows -> PortableIndex[] per table (columns in index order, dedup by index name).
-  const idxBy = new Map<string, Map<string, PortableIndex>>();
+  // Group index rows -> PgIndexInfo[] per table (columns in index order, dedup by index name).
+  const idxBy = new Map<string, Map<string, PgIndexInfo>>();
   for (const r of idxs) {
     if (skip.has(r.table_name)) continue;
-    const byName = idxBy.get(r.table_name) ?? new Map<string, PortableIndex>();
+    const byName = idxBy.get(r.table_name) ?? new Map<string, PgIndexInfo>();
     const ix = byName.get(r.index_name) ?? {
       name: r.index_name,
       cols: [],
-      spec: "UNIQUE",
+      unique: true,
     };
     ix.cols.push(r.column_name);
     byName.set(r.index_name, ix);
     idxBy.set(r.table_name, byName);
   }
 
-  const tables: PortableTable[] = [...seen].map((name) => {
-    const t: PortableTable = {
+  return [...seen].map((name) => {
+    const t: PgTable = {
       name,
-      kind: { kind: "NORMAL" },
-      schemafull: true,
       fields: byTable.get(name) ?? [],
       indexes: [...(idxBy.get(name)?.values() ?? [])],
-      events: [],
     };
     if (!isImplicit(name)) {
       const pk = pkBy.get(name);
@@ -615,7 +285,6 @@ async function pgIntrospect(
     }
     return t;
   });
-  return { tables, functions: [], accesses: [] };
 }
 
 // --- connection (PGlite, embedded) --------------------------------------------------------------
@@ -640,13 +309,13 @@ async function newPglite(dataDir?: string): Promise<PgConn> {
 }
 
 const shadow: ShadowCapability<PgConn> = {
-  // A throwaway in-memory PGlite IS the shadow: apply the DDL, read it back, done (no drop needed —
-  // the instance is discarded). This is the "embedded engine" canonicalization path.
-  async roundTrip(_conn, _config, ddl) {
+  // A throwaway in-memory PGlite IS the shadow: apply the DDL, read it back as kind objects, done (no
+  // drop needed — the instance is discarded). This is the "embedded engine" canonicalization path.
+  async roundTrip(_conn, _config, ddl): Promise<PortableObject[]> {
     const scratch = await newPglite();
     try {
       if (ddl.trim()) await scratch.exec(ddl);
-      return pgNormalize(await pgIntrospect(scratch));
+      return splitTables(await pgIntrospect(scratch));
     } finally {
       await scratch.close();
     }
@@ -856,17 +525,20 @@ const migrations: MigrationStore<PgConn> = {
 export const postgresDriver: Driver<PgConn> = {
   name: "postgres",
 
-  // Lower the pg-native `s.*` authoring objects to the portable IR (see ./lower.ts). The authored
-  // tables are this driver's own `PgTableDef` (a structural `Authored`); core hands them back opaquely.
-  lower: (tables) => pgLower(tables as unknown as PgTableDef[]),
+  // The kind registry (table/index/constraint) — core runs lower/diff/emit/order generically over it.
+  registry,
 
-  emit: pgEmit,
-  remove: pgRemove,
-  overwrite: pgOverwrite,
-  introspect: (conn, exclude) => pgIntrospect(conn, exclude),
-  normalize: pgNormalize,
-  equal: (a, b) => deepEqualJson(pgNormalize(a), pgNormalize(b)),
-  diff: pgDiff,
+  // Authoring (pg-native `defineTable` -> PgTableDef) -> kinded Definables: lower each table to the
+  // driver's `PgTable` IR (./lower.ts), then split it into [table, ...index, ...constraint] objects
+  // (./kinds.ts splitTable). Core then runs lowerSchema(registry, explode(...)). pg has no standalone
+  // defs, so `defs` is unused.
+  explode: (tables): Definable[] =>
+    splitTables(pgLower(tables as unknown as PgTableDef[])),
+
+  // One information_schema/pg_catalog read -> ALL kind objects, canonicalized identically to lowering
+  // (a clean apply round-trips to a zero diff) and complete (table + index + FK), so no phantom diffs.
+  introspectAll: async (conn, exclude) =>
+    splitTables(await pgIntrospect(conn, exclude)),
 
   /**
    * Raw READ query for connection RESOLVERS + seed (returns rows opaquely). Postgres binds
@@ -981,10 +653,5 @@ export default async function seed() {
 const INIT_ENV = `# A real Postgres server (uncomment to use instead of embedded PGlite):
 # DATABASE_URL=postgres://user:pass@localhost:5432/app
 `;
-
-/** A small structural deep-equal (the portable IR is plain JSON). */
-function deepEqualJson(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
-}
 
 registerDriver(postgresDriver as Driver<unknown>);

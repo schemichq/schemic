@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { buildKindDiff, emitKinds } from "@schemic/core";
 import {
   defineTable,
   type PgConn,
@@ -6,22 +7,37 @@ import {
   s,
   sqlExpr,
 } from "../src/index";
+import { registry, splitTables } from "../src/kinds";
+import { lowerTable, pgLower } from "../src/lower";
 
-// The pg-native s.* authoring surface: author with pg vocabulary -> lower to the portable IR ->
-// emit pg DDL -> apply to a real PGlite -> introspect -> diff = 0. Structural clauses (native types
-// + params, identity, composite PK, FK actions) round-trip; expression clauses (default/check/
-// generated/comment) are emit-faithful but excluded from equality (Postgres rewrites them).
-
-const lower = (...tables: ReturnType<typeof defineTable>[]) =>
-  postgresDriver.lower(tables, []);
+// The pg-native s.* authoring surface, post-flip: author with pg vocabulary -> lower to the driver's
+// table IR (lowerTable) -> split into kind objects -> emit pg DDL -> apply to a real PGlite ->
+// introspectAll -> diff = 0. Structural clauses (native types + params, identity, composite PK, FK
+// actions) round-trip; expression clauses (default/check/generated/comment) are emit-faithful but
+// excluded from change-detection (Postgres rewrites them) via the table kind's `canonical`.
 
 async function open(): Promise<PgConn> {
   return (await postgresDriver.connect({
     params: { url: "" },
   } as never)) as PgConn;
 }
+const ddl = (t: ReturnType<typeof defineTable>) =>
+  emitKinds(registry, splitTables([lowerTable(t)])).join("\n");
+const roundtripEmpty = async (
+  ...tables: ReturnType<typeof defineTable>[]
+): Promise<boolean> => {
+  const ir = pgLower(tables);
+  const conn = await open();
+  try {
+    await postgresDriver.apply(conn, emitKinds(registry, splitTables(ir)));
+    const live = await postgresDriver.introspectAll(conn);
+    return buildKindDiff(registry, live, splitTables(ir)).up.length === 0;
+  } finally {
+    await conn.close();
+  }
+};
 
-describe("lower: pg s.* -> portable IR", () => {
+describe("lower: pg s.* -> table IR", () => {
   test("canonical types -> portable scalars; pg-specific -> native(+params)", () => {
     const t = defineTable("widget", {
       name: s.text(),
@@ -33,8 +49,7 @@ describe("lower: pg s.* -> portable IR", () => {
       tags: s.text().array(),
       meta: s.jsonb(),
     });
-    const { tables } = lower(t);
-    const f = new Map(tables[0].fields.map((x) => [x.name, x.type]));
+    const f = new Map(lowerTable(t).fields.map((x) => [x.name, x.type]));
     expect(f.get("name")).toEqual({ t: "scalar", name: "string" });
     expect(f.get("count")).toEqual({ t: "scalar", name: "int" });
     expect(f.get("big")).toEqual({
@@ -71,7 +86,7 @@ describe("lower: pg s.* -> portable IR", () => {
         onUpdate: "restrict",
       }),
     });
-    const byName = new Map(lower(t).tables[0].fields.map((x) => [x.name, x]));
+    const byName = new Map(lowerTable(t).fields.map((x) => [x.name, x]));
     expect(byName.get("age")?.type).toEqual({
       t: "option",
       inner: { t: "native", db: "postgres", name: "smallint" },
@@ -88,7 +103,6 @@ describe("lower: pg s.* -> portable IR", () => {
   });
 
   test("tables satisfy the CLI loader duck-type (name/fields/config/record)", () => {
-    // The shared loader (core/cli/schema isTableDef) recognizes tables structurally.
     const t = defineTable("x", { a: s.text() });
     expect(typeof t.name).toBe("string");
     expect(typeof t.fields).toBe("object");
@@ -107,7 +121,7 @@ describe("lower: pg s.* -> portable IR", () => {
       role: s.text().$default("member"),
       score: s.integer().$check("score >= 0"),
     }).primaryKey("org", "person");
-    const tbl = lower(t).tables[0];
+    const tbl = lowerTable(t);
     expect(tbl.primaryKey).toEqual(["org", "person"]);
     const byName = new Map(tbl.fields.map((x) => [x.name, x]));
     expect(byName.get("role")?.default).toBe("'member'");
@@ -116,12 +130,6 @@ describe("lower: pg s.* -> portable IR", () => {
 });
 
 describe("emit: DDL clause rendering", () => {
-  const ddl = (t: ReturnType<typeof defineTable>) =>
-    postgresDriver
-      .emit(lower(t))
-      .map((x) => x.ddl)
-      .join("\n");
-
   test("native types with params, identity, default, check, generated", () => {
     const out = ddl(
       defineTable("p", {
@@ -160,8 +168,10 @@ describe("emit: DDL clause rendering", () => {
         }),
       }),
     );
-    expect(post).toContain("ON DELETE cascade");
-    expect(post).toContain("ON UPDATE no action");
+    // The constraint kind canonicalizes actions (UPPERCASE so they match introspect / round-trip) and
+    // omits the default NO ACTION — unlike the old fixed-slot emit which echoed the authored case.
+    expect(post).toContain("ON DELETE CASCADE");
+    expect(post).not.toContain("ON UPDATE");
   });
 
   test("$unique emits a UNIQUE index", () => {
@@ -170,78 +180,47 @@ describe("emit: DDL clause rendering", () => {
   });
 });
 
-describe("round-trip: author -> emit -> PGlite -> introspect -> diff = 0", () => {
+describe("round-trip: author -> emit -> PGlite -> introspectAll -> diff = 0", () => {
   test("diverse native types + nullability + identity", async () => {
-    const widget = defineTable("widget", {
-      name: s.varchar(255),
-      age: s.smallint().optional(),
-      balance: s.numeric(12, 2),
-      big: s.bigint(),
-      ratio: s.real(),
-      active: s.boolean(),
-      created: s.timestamptz(),
-      meta: s.jsonb(),
-      tags: s.text().array(),
-      token: s.uuid(),
-      seq: s.integer().$identity("by-default"),
-    });
-    const ir = lower(widget);
-    const conn = await open();
-    try {
-      await postgresDriver.apply(
-        conn,
-        postgresDriver.emit(ir).map((x) => x.ddl),
-      );
-      const live = await postgresDriver.introspect(conn);
-      expect(postgresDriver.equal(ir, live)).toBe(true);
-    } finally {
-      await conn.close();
-    }
+    expect(
+      await roundtripEmpty(
+        defineTable("widget", {
+          name: s.varchar(255),
+          age: s.smallint().optional(),
+          balance: s.numeric(12, 2),
+          big: s.bigint(),
+          ratio: s.real(),
+          active: s.boolean(),
+          created: s.timestamptz(),
+          meta: s.jsonb(),
+          tags: s.text().array(),
+          token: s.uuid(),
+          seq: s.integer().$identity("by-default"),
+        }),
+      ),
+    ).toBe(true);
   });
 
   test("FK with referential actions + composite PK", async () => {
-    const user = defineTable("user", { name: s.text() });
-    const post = defineTable("post", {
-      title: s.text(),
-      author: s.references("user", { onDelete: "cascade" }),
-    });
-    const member = defineTable("member", {
-      org: s.text(),
-      person: s.text(),
-    }).primaryKey("org", "person");
-
-    const ir = lower(user, post, member);
-    const conn = await open();
-    try {
-      await postgresDriver.apply(
-        conn,
-        postgresDriver.emit(ir).map((x) => x.ddl),
-      );
-      const live = await postgresDriver.introspect(conn);
-      expect(postgresDriver.equal(ir, live)).toBe(true);
-    } finally {
-      await conn.close();
-    }
+    expect(
+      await roundtripEmpty(
+        defineTable("user", { name: s.text() }),
+        defineTable("post", {
+          title: s.text(),
+          author: s.references("user", { onDelete: "cascade" }),
+        }),
+        defineTable("member", {
+          org: s.text(),
+          person: s.text(),
+        }).primaryKey("org", "person"),
+      ),
+    ).toBe(true);
   });
 
   test("$postgres escape hatch round-trips as its native pg type", async () => {
-    const codec = s.$postgres(
-      "text",
-      // an App-side object stored as text via a Zod codec
-      s.text().schema,
+    const codec = s.$postgres("text", s.text().schema);
+    expect(await roundtripEmpty(defineTable("blob", { raw: codec }))).toBe(
+      true,
     );
-    const t = defineTable("blob", { raw: codec });
-    const ir = lower(t);
-    const conn = await open();
-    try {
-      await postgresDriver.apply(
-        conn,
-        postgresDriver.emit(ir).map((x) => x.ddl),
-      );
-      const live = await postgresDriver.introspect(conn);
-      expect(postgresDriver.equal(ir, live)).toBe(true);
-    } finally {
-      await conn.close();
-    }
   });
 });

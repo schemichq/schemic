@@ -16,25 +16,24 @@ round-trip (author `s.*` → lower → emit → introspect → diff = 0) · `[n/
 > Per the kind-registry contract (`packages/core/docs/kind-registry-contract.md`): core no longer
 > hard-codes object kinds — each driver **registers** its kinds on a per-driver `KindRegistry` and core
 > orchestrates generically. This table tracks **every** PostgreSQL object kind, its registration status,
-> and round-trip coverage, so gaps stay visible. **Slice 2 in progress:** `table`/`index`/`constraint`
-> are registered (`src/kinds.ts`) and **parity-green** — `emitKinds`/`buildKindDiff` over `decompose`
-> reproduce the fixed-slot `pgEmit`/`pgDiff` (`test/kinds.test.ts`), validated through a real PGlite
-> round-trip. The kinds run behind the **Option-B facade** (a temporary `PortableDb`↔`PortableObject[]`
-> adapter); the live `Driver`/CLI/snapshot path is still the fixed-slot one (untouched + green) until
-> the coordinated **Option-A flip** wires the spine into the CLI. Per-kind `KindEngine.introspect` is
-> deferred — the facade reuses the existing `pgIntrospect` (→ `PortableDb` → `decompose`).
+> and round-trip coverage, so gaps stay visible. **Option-A flip DONE:** the live `postgresDriver` IS
+> the registry — `{ registry, explode, introspectAll, connect/apply/close, … }`; the fixed-slot
+> `lower`/`emit`/`diff`/`normalize`/`equal`/`introspect` are gone, and core runs the generic spine
+> (`lowerSchema`/`buildKindDiff`/`emitKinds`) over the kinds. `explode = splitTables(pgLower(...))`,
+> `introspectAll = splitTables(pgIntrospect(...))` (one read, complete: table + index + FK), so a clean
+> apply round-trips to a zero diff (`test/{kinds,postgres,authoring}.test.ts`, real PGlite).
 >
 > `column` and the field-level clauses are **substrate** (shared `PortableField`/`PortableType`), nested
-> inside the `table` kind — **not a kind**. Inline FK/UNIQUE/CHECK/index are **driver-side exploded**
-> out of the table by `decompose` into their own kind objects (`deps`→table(s)), per core-dev's
-> sanctioned explode pattern — this is what lets the dependency graph break mutual-FK cycles.
+> inside the `table` kind — **not a kind**. Inline FK/UNIQUE/index are **driver-side exploded** out of
+> the table by `splitTable` into their own kind objects (`deps`→table(s)) — this is what lets the
+> dependency graph break mutual-FK cycles.
 
 | kind | `createKind'd?` | emit | introspect | diff | notes |
 |---|---|---|---|---|---|
-| `table` | [x] | [x] | [~] | [x] | registered + parity-green; columns nest as substrate; `overwrite` = clause-level column ALTER (type/null/default/comment), recreate-fallback for identity/generated/CHECK/PK; **`canonical` excludes DEFAULT/CHECK/GENERATED/COMMENT + table-CHECK from change-detection** (emit stays faithful; no phantom-diff vs introspect); introspect via facade |
+| `table` | [x] | [x] | [x] | [x] | registered; columns nest as substrate; `overwrite` = clause-level column ALTER (type/null/default/comment), recreate-fallback for identity/generated/CHECK/PK; **`canonical` excludes DEFAULT/CHECK/GENERATED/COMMENT + table-CHECK from change-detection** (emit stays faithful; no phantom-diff vs introspect); **`displayItems` = per-field, grouped under the table** |
 | `column`* (substrate) | [n/a] | [x] | [x] | [x] | not a kind — `PortableField`/`PortableType` nested in `table`; substrate keeps `native{params}`+`check` |
-| `index` | [x] | [x] | [x] | [x] | registered; `deps`→table (no `owner`, rank-grouped); emits `CREATE [UNIQUE] INDEX`; change = drop+recreate. **UNIQUE indexes now introspect (pg_index, excl. PK/expression) → full round-trip, no phantom** (real index add/drop diffs). Non-unique / partial / method indexes (gin/gist/…) not yet emitted or read |
-| `constraint` (FK; PK/UNIQUE/CHECK/EXCLUDE TBD) | [x] | [x] | [~] | [~] | FK registered + parity-green; `deps`→[table, refTable] breaks mutual-FK cycles; change = drop+recreate; FK actions DO introspect (no phantom); PK is table substrate; UNIQUE rides `index`; CHECK/EXCLUDE TBD |
+| `index` | [x] | [x] | [x] | [x] | registered; `deps`→table (no `owner`, rank-grouped); emits `CREATE [UNIQUE] INDEX`; change = drop+recreate. **UNIQUE indexes introspect (pg_index, excl. PK/expression) → full round-trip, no phantom** (real index add/drop diffs). Non-unique / partial / method indexes (gin/gist/…) not yet emitted or read |
+| `constraint` (FK; PK/UNIQUE/CHECK/EXCLUDE TBD) | [x] | [x] | [x] | [~] | FK registered; `deps`→[table, refTable] breaks mutual-FK cycles; change = drop+recreate; FK + actions introspect (canonicalized UPPERCASE, no phantom); PK is table substrate; UNIQUE rides `index`; CHECK/EXCLUDE TBD |
 | `view` | [ ] | [ ] | [ ] | [ ] | not implemented |
 | `materialized_view` | [ ] | [ ] | [ ] | [ ] | not implemented |
 | `sequence` (standalone) | [ ] | [ ] | [ ] | [ ] | identity-backed sequences are implicit today; standalone `CREATE SEQUENCE` not impl |

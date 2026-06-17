@@ -11,15 +11,14 @@
 //
 // index/constraint DECLINE `owner` (opt-in clustering): without it the spine falls back to ordinal+name,
 // so the emit order is all tables -> all indexes -> all constraints (pg's rank-grouped convention),
-// not clustered per-table. Cross-table FK is then byte-identical to the fixed-slot pgEmit; a mixed
-// FK+index multi-table emit differs only in the fk-vs-index sub-order (same SET, deps-correct) — which
-// is why the live Driver stays fixed-slot until the coordinated Option-A flip (no double golden churn).
+// not clustered per-table. Cross-table FK still emits after both tables (deps); a genuine mutual FK is
+// broken because constraints depend on tables, not each other.
 //
-// `decompose` splits a normalized PortableDb into these kind objects — the Option-B facade adapter
-// (see ./index.ts): Driver.emit = emitKinds(registry, decompose(db)); Driver.diff = buildKindDiff(
-// registry, decompose(prev), decompose(next)). The CLI + PortableDb snapshot stay UNCHANGED; only this
-// thin PortableDb <-> PortableObject[] seam is temporary, deleted at the coordinated Option-A flip.
-// The KindEngines themselves are permanent. Per the contract, kinds are pg's own — never cross-driver.
+// `splitTable` turns the driver's table IR (`PgTable`, from ./lower for authoring or ./index's
+// pgIntrospect for a live DB) into these kind objects. The Driver feeds it through both seams:
+// `explode = splitTables(pgLower(...))` (authoring) and `introspectAll = splitTables(pgIntrospect(...))`
+// (live), and core runs the generic spine (lowerSchema/buildKindDiff/emitKinds) over the result. Per
+// the contract, kinds are pg's own — never cross-driver.
 
 import {
   type KindEngine,
@@ -27,7 +26,7 @@ import {
   type PortableObject,
   type Ref,
 } from "@schemic/core";
-import type { PortableDb, PortableField } from "@schemic/core/driver";
+import type { DiffItem, PortableField } from "@schemic/core/driver";
 import {
   addFkSql,
   canonField,
@@ -39,6 +38,7 @@ import {
   fkActions,
   fkName,
   normAction,
+  type PgTable,
   pgColumn,
   pgEmitFields,
 } from "./emit";
@@ -100,21 +100,83 @@ const sameArr = (a?: string[], b?: string[]) =>
 const sameField = (a: PortableField, b: PortableField) =>
   JSON.stringify(a) === JSON.stringify(b);
 
+const fieldKey = (table: string, name: string) => `field:${table}:${name}`;
+const createInput = (t: PgTablePortable) => ({
+  name: t.name,
+  fields: t.fields,
+  ...(t.primaryKey ? { primaryKey: t.primaryKey } : {}),
+  ...(t.checks ? { checks: t.checks } : {}),
+});
+
+/**
+ * Per-FIELD display items for a table change (Manuel's per-field decision): each carries its owner
+ * `table` so the CLI groups them under it. `(prev,next)` diffs columns -> add/change/remove; an added
+ * table `(undefined,next)` lists every column as an add (the `--full` projection); a dropped table
+ * `(prev,undefined)` lists every column as a remove. A change with no column delta (a PK / table-CHECK
+ * only change) falls back to a single whole-table item so it's never silently empty. DISPLAY ONLY.
+ */
+function fieldDisplayItems(
+  prev: PgTablePortable | undefined,
+  next: PgTablePortable | undefined,
+): DiffItem[] {
+  const table = (next ?? prev)?.name ?? "";
+  const before = new Map((prev?.fields ?? []).map((f) => [f.name, f]));
+  const after = new Map((next?.fields ?? []).map((f) => [f.name, f]));
+  const items: DiffItem[] = [];
+  for (const f of next?.fields ?? [])
+    if (!before.has(f.name))
+      items.push({
+        op: "add",
+        key: fieldKey(table, f.name),
+        kind: "field",
+        table,
+        ddl: fieldColumnDdl(f),
+      });
+  for (const f of next?.fields ?? []) {
+    const b = before.get(f.name);
+    if (!b) continue;
+    if (fieldColumnDdl(b) !== fieldColumnDdl(f) || b.comment !== f.comment)
+      items.push({
+        op: "change",
+        key: fieldKey(table, f.name),
+        kind: "field",
+        table,
+        before: fieldColumnDdl(b),
+        after: fieldColumnDdl(f),
+      });
+  }
+  for (const f of prev?.fields ?? [])
+    if (!after.has(f.name))
+      items.push({
+        op: "remove",
+        key: fieldKey(table, f.name),
+        kind: "field",
+        table,
+        ddl: `ALTER TABLE ${escId(table)} DROP COLUMN IF EXISTS ${escId(f.name)};`,
+        old: fieldColumnDdl(f),
+      });
+  if (items.length === 0 && prev && next)
+    items.push({
+      op: "change",
+      key: `table:${table}:${table}`,
+      kind: "table",
+      table,
+      before: createTableDdl(createInput(prev)),
+      after: createTableDdl(createInput(next)),
+    });
+  return items;
+}
+
 const tableEngine: KindEngine<PgTablePortable, PgTablePortable> = {
-  // In the facade, objects arrive already portable (from `decompose`); `lower` is the identity. At the
-  // Option-A flip it becomes the authoring -> portable map (the explode feeds lowerSchema).
+  // Objects arrive already in this kind's portable shape (from `explode`/`introspectAll` via splitTable
+  // / lowerSchema). `lower` is the identity — the split already produced the normalized portable object.
   lower: (t) => t,
 
-  // CREATE TABLE (columns + PK + table CHECKs) followed by any column COMMENTs. Same createTableDdl the
-  // fixed-slot emitTable uses -> the CREATE statement is byte-identical by construction.
+  // CREATE TABLE (columns + PK + table CHECKs) followed by any column COMMENTs.
   emit: (t) => [
     createTableDdl({
       name: t.name,
-      kind: { kind: "NORMAL" },
-      schemafull: true,
       fields: t.fields,
-      indexes: [],
-      events: [],
       ...(t.primaryKey ? { primaryKey: t.primaryKey } : {}),
       ...(t.checks ? { checks: t.checks } : {}),
     }),
@@ -130,13 +192,14 @@ const tableEngine: KindEngine<PgTablePortable, PgTablePortable> = {
   canonical: (t) =>
     createTableDdl({
       name: t.name,
-      kind: { kind: "NORMAL" },
-      schemafull: true,
       fields: t.fields.map((f) => canonField(f, t.name)),
-      indexes: [],
-      events: [],
       ...(t.primaryKey ? { primaryKey: t.primaryKey } : {}),
     }),
+
+  // Per-FIELD display items (Manuel's decision: field-level changes grouped under their table). Each
+  // carries `table` so the CLI groups them hierarchically. DISPLAY ONLY — never affects up/down DDL.
+  // (prev,next): diff the columns; (undefined,next): list all columns as adds (the --full projection).
+  displayItems: (prev, next) => fieldDisplayItems(prev, next),
 
   remove: (t) => [dropTableSql(t.name)],
 
@@ -268,57 +331,60 @@ registry.define({
   ...constraintEngine,
 });
 
-// --- decompose: PortableDb -> the kinds' portable objects (the facade adapter) -------------------
+// --- splitTable: the driver's table IR -> the registry's kind objects ----------------------------
 
 /**
- * Split a (normalized) PortableDb into the registry's portable objects, exploding each table's inline
- * indexes + FKs into their own `index`/`constraint` objects. The table object keeps the FK columns as
- * plain `text` columns (the constraint object carries the FK itself). This is the inverse seam of the
- * fixed-slot emit, so emitKinds(registry, decompose(db)) reproduces the same DDL set as pgEmit(db).
+ * Split one `PgTable` (from `lowerTable` for authoring, or `pgIntrospect` for a live DB) into the
+ * registry's portable objects: the `table` (columns substrate + PK + table CHECKs, with FK columns kept
+ * as plain `text` columns) plus its `index` and `constraint` (FK) objects. The single seam both
+ * `explode` (authoring) and `introspectAll` (live) go through, so a clean apply round-trips to a zero
+ * diff. Replaces the old PortableDb<->objects facade adapter.
  */
-export function decompose(db: PortableDb): PortableObject[] {
+export function splitTable(t: PgTable): PortableObject[] {
   const out: PortableObject[] = [];
-  for (const t of db.tables) {
-    const fields = pgEmitFields(t);
-    const table: PgTablePortable = {
-      kind: "table",
-      name: t.name,
-      fields,
-      ...(t.primaryKey && t.primaryKey.length > 0
-        ? { primaryKey: t.primaryKey }
-        : {}),
-      ...(t.checks && t.checks.length > 0 ? { checks: t.checks } : {}),
+  const fields = pgEmitFields(t);
+  const table: PgTablePortable = {
+    kind: "table",
+    name: t.name,
+    fields,
+    ...(t.primaryKey && t.primaryKey.length > 0
+      ? { primaryKey: t.primaryKey }
+      : {}),
+    ...(t.checks && t.checks.length > 0 ? { checks: t.checks } : {}),
+  };
+  out.push(table);
+
+  for (const ix of t.indexes) {
+    const index: PgIndexPortable = {
+      kind: "index",
+      name: ix.name,
+      table: t.name,
+      cols: ix.cols,
+      unique: ix.unique,
     };
-    out.push(table);
+    out.push(index);
+  }
 
-    for (const ix of t.indexes) {
-      const index: PgIndexPortable = {
-        kind: "index",
-        name: ix.name,
-        table: t.name,
-        cols: ix.cols,
-        unique: ix.spec === "UNIQUE",
-      };
-      out.push(index);
-    }
-
-    for (const f of fields) {
-      const ref = pgColumn(f.type).references;
-      if (!ref) continue;
-      const onDelete = normAction(f.reference?.on_delete);
-      const onUpdate = normAction(f.reference?.on_update);
-      const fk: PgConstraintPortable = {
-        kind: "constraint",
-        name: fkName(t.name, f.name),
-        table: t.name,
-        ctype: "fk",
-        column: f.name,
-        refTable: ref,
-        ...(onDelete ? { onDelete } : {}),
-        ...(onUpdate ? { onUpdate } : {}),
-      };
-      out.push(fk);
-    }
+  for (const f of fields) {
+    const ref = pgColumn(f.type).references;
+    if (!ref) continue;
+    const onDelete = normAction(f.reference?.on_delete);
+    const onUpdate = normAction(f.reference?.on_update);
+    const fk: PgConstraintPortable = {
+      kind: "constraint",
+      name: fkName(t.name, f.name),
+      table: t.name,
+      ctype: "fk",
+      column: f.name,
+      refTable: ref,
+      ...(onDelete ? { onDelete } : {}),
+      ...(onUpdate ? { onUpdate } : {}),
+    };
+    out.push(fk);
   }
   return out;
 }
+
+/** Split many `PgTable`s into the flat kind-object list (the `explode`/`introspectAll` shape). */
+export const splitTables = (tables: PgTable[]): PortableObject[] =>
+  tables.flatMap(splitTable);

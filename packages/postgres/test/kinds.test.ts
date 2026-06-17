@@ -2,46 +2,37 @@ import { describe, expect, test } from "bun:test";
 import { buildKindDiff, emitKinds } from "@schemic/core";
 import {
   option,
-  type PortableDb,
-  type PortableTable,
+  type PortableField,
   record,
   scalar,
 } from "@schemic/core/driver";
+import type { PgTable } from "../src/emit";
 import { type PgConn, postgresDriver } from "../src/index";
-import { decompose, registry } from "../src/kinds";
+import { registry, splitTables } from "../src/kinds";
 
-// The kind-registry migration (Option-B facade). Proves the postgres `table`/`index`/`constraint`
-// engines + `decompose` reproduce the fixed-slot driver's DDL: emitKinds(decompose(db)) vs pgEmit and
-// buildKindDiff(decompose(prev), decompose(next)) vs pgDiff. The CLI + PortableDb path stay untouched;
-// these tests are the parity bar before the coordinated Option-A flip.
+// The postgres kind registry, post Option-A flip. The driver speaks kinds: explode(authoring) +
+// introspectAll feed the generic spine (emitKinds/buildKindDiff). These tests drive that spine
+// directly over the driver's table IR (PgTable) -> kind objects (splitTables), and round-trip through
+// a real PGlite engine via driver.introspectAll.
 
 const driver = postgresDriver;
-const pdb = (tables: PortableTable[]): PortableDb => ({
-  tables,
-  functions: [],
-  accesses: [],
-});
+const f = (
+  name: string,
+  type: PortableField["type"],
+  extra: Partial<PortableField> = {},
+): PortableField => ({ name, table: "", type, ...extra });
 const tbl = (
   name: string,
-  fields: PortableTable["fields"],
-  extra: Partial<PortableTable> = {},
-): PortableTable => ({
-  name,
-  kind: { kind: "NORMAL" },
-  schemafull: true,
-  fields,
-  indexes: [],
-  events: [],
-  ...extra,
+  fields: PortableField[],
+  extra: Partial<PgTable> = {},
+): PgTable => ({ name, fields, indexes: [], ...extra });
+const emitK = (tables: PgTable[]) => emitKinds(registry, splitTables(tables));
+const diffK = (a: PgTable[], b: PgTable[]) =>
+  buildKindDiff(registry, splitTables(a), splitTables(b));
+const ud = (d: { up: string[]; down: string[] }) => ({
+  up: d.up,
+  down: d.down,
 });
-const f = (name: string, type: PortableTable["fields"][number]["type"]) => ({
-  name,
-  table: "",
-  type,
-});
-
-const emitK = (db: PortableDb) => emitKinds(registry, decompose(db));
-const emitFixed = (db: PortableDb) => driver.emit(db).map((s) => s.ddl);
 
 // --- registration ------------------------------------------------------------------------------
 
@@ -54,56 +45,55 @@ describe("postgres kind registry", () => {
   });
 });
 
-// --- emit parity -------------------------------------------------------------------------------
+// --- emit --------------------------------------------------------------------------------------
 
-describe("emitKinds parity vs the fixed-slot pgEmit", () => {
-  test("single table (columns only) is byte-identical", () => {
-    const db = pdb([
+describe("emitKinds", () => {
+  test("a table maps column types/nullability + implicit id PK", () => {
+    const out = emitK([
       tbl("user", [
         f("name", scalar("string")),
         f("age", option(scalar("int"))),
         f("active", scalar("bool")),
       ]),
     ]);
-    expect(emitK(db)).toEqual(emitFixed(db));
+    expect(out).toEqual([
+      'CREATE TABLE "user" (\n  "id" text PRIMARY KEY,\n  "active" boolean NOT NULL,\n  "age" integer,\n  "name" text NOT NULL\n);',
+    ]);
   });
 
-  test("single table + unique index is byte-identical (index clusters after its table)", () => {
-    const db = pdb([
+  test("a unique index emits after its table", () => {
+    const out = emitK([
       tbl("user", [f("email", scalar("string"))], {
-        indexes: [{ name: "user_email_key", cols: ["email"], spec: "UNIQUE" }],
+        indexes: [{ name: "user_email_key", cols: ["email"], unique: true }],
       }),
     ]);
-    expect(emitK(db)).toEqual(emitFixed(db));
-    expect(emitK(db)).toEqual([
+    expect(out).toEqual([
       'CREATE TABLE "user" (\n  "id" text PRIMARY KEY,\n  "email" text NOT NULL\n);',
       'CREATE UNIQUE INDEX "user_email_key" ON "user" ("email");',
     ]);
   });
 
-  test("composite PK + table CHECK is byte-identical", () => {
-    const db = pdb([
+  test("composite PK + table CHECK (no implicit id)", () => {
+    const out = emitK([
       tbl(
         "membership",
         [f("org", scalar("string")), f("user", scalar("string"))],
         { primaryKey: ["org", "user"], checks: ["org <> user"] },
       ),
     ]);
-    expect(emitK(db)).toEqual(emitFixed(db));
+    expect(out[0]).toContain('PRIMARY KEY ("org", "user")');
+    expect(out[0]).toContain("CHECK (org <> user)");
+    expect(out[0]).not.toContain('"id" text PRIMARY KEY');
   });
 
-  test("cross-table FK is byte-identical (no owner -> rank-grouped: tables, then constraints)", () => {
-    const db = pdb([
+  test("cross-table FK emits after BOTH tables (rank-grouped, no clustering)", () => {
+    const out = emitK([
       tbl("post", [
         f("title", scalar("string")),
         f("author", record(["user"])),
       ]),
       tbl("user", [f("name", scalar("string"))]),
     ]);
-    // With `owner` declined, the spine emits all CREATEs then all constraints (by name) — exactly
-    // pgEmit's rank grouping. The FK still emits after BOTH its table and the referenced table.
-    expect(emitK(db)).toEqual(emitFixed(db));
-    const out = emitK(db);
     const fk = out.findIndex((s) => s.includes("ADD CONSTRAINT"));
     expect(
       out.findIndex((s) => s.includes('CREATE TABLE "post"')),
@@ -111,121 +101,157 @@ describe("emitKinds parity vs the fixed-slot pgEmit", () => {
     expect(
       out.findIndex((s) => s.includes('CREATE TABLE "user"')),
     ).toBeLessThan(fk);
+    expect(out[fk]).toBe(
+      'ALTER TABLE "post" ADD CONSTRAINT "post_author_fkey" FOREIGN KEY ("author") REFERENCES "user" ("id");',
+    );
   });
 
   test("mutual FK resolves (tables first, then both constraints) — the cycle-break", () => {
-    const db = pdb([
+    const out = emitK([
       tbl("a", [f("b", record(["b"]))]),
       tbl("b", [f("a", record(["a"]))]),
     ]);
-    const out = emitK(db); // must not throw: constraints depend on tables, not each other
     const lastCreate = Math.max(
       out.findIndex((s) => s.includes('CREATE TABLE "a"')),
       out.findIndex((s) => s.includes('CREATE TABLE "b"')),
     );
-    const firstFk = out.findIndex((s) => s.includes("ADD CONSTRAINT"));
-    expect(firstFk).toBeGreaterThan(lastCreate);
+    expect(out.findIndex((s) => s.includes("ADD CONSTRAINT"))).toBeGreaterThan(
+      lastCreate,
+    );
   });
 });
 
-// --- diff parity -------------------------------------------------------------------------------
+// --- diff --------------------------------------------------------------------------------------
 
-const diffK = (a: PortableDb, b: PortableDb) =>
-  buildKindDiff(registry, decompose(a), decompose(b));
-const diffFixed = (a: PortableDb, b: PortableDb) => driver.diff(a, b);
-const ud = (d: { up: string[]; down: string[] }) => ({
-  up: d.up,
-  down: d.down,
-});
-
-describe("buildKindDiff parity vs the fixed-slot pgDiff (up/down)", () => {
-  const base = pdb([tbl("user", [f("name", scalar("string"))])]);
+describe("buildKindDiff up/down", () => {
+  const base = [tbl("user", [f("name", scalar("string"))])];
 
   test("add column", () => {
-    const next = pdb([
+    const next = [
       tbl("user", [f("name", scalar("string")), f("age", scalar("int"))]),
-    ]);
-    expect(ud(diffK(base, next))).toEqual(ud(diffFixed(base, next)));
+    ];
+    expect(ud(diffK(base, next))).toEqual({
+      up: ['ALTER TABLE "user" ADD COLUMN "age" integer NOT NULL;'],
+      down: ['ALTER TABLE "user" DROP COLUMN IF EXISTS "age";'],
+    });
   });
 
   test("change column type", () => {
-    const prev = pdb([tbl("user", [f("age", scalar("int"))])]);
-    const next = pdb([tbl("user", [f("age", scalar("float"))])]);
-    expect(ud(diffK(prev, next))).toEqual(ud(diffFixed(prev, next)));
+    const prev = [tbl("user", [f("age", scalar("int"))])];
+    const next = [tbl("user", [f("age", scalar("float"))])];
+    expect(ud(diffK(prev, next))).toEqual({
+      up: ['ALTER TABLE "user" ALTER COLUMN "age" TYPE double precision;'],
+      down: ['ALTER TABLE "user" ALTER COLUMN "age" TYPE integer;'],
+    });
   });
 
   test("change column nullability", () => {
-    const prev = pdb([tbl("user", [f("age", scalar("int"))])]);
-    const next = pdb([tbl("user", [f("age", option(scalar("int")))])]);
-    expect(ud(diffK(prev, next))).toEqual(ud(diffFixed(prev, next)));
+    const prev = [tbl("user", [f("age", scalar("int"))])];
+    const next = [tbl("user", [f("age", option(scalar("int")))])];
+    expect(ud(diffK(prev, next))).toEqual({
+      up: ['ALTER TABLE "user" ALTER COLUMN "age" DROP NOT NULL;'],
+      down: ['ALTER TABLE "user" ALTER COLUMN "age" SET NOT NULL;'],
+    });
   });
 
   test("add table", () => {
-    const next = pdb([
-      tbl("user", [f("name", scalar("string"))]),
-      tbl("tag", [f("label", scalar("string"))]),
-    ]);
-    expect(ud(diffK(base, next))).toEqual(ud(diffFixed(base, next)));
+    const next = [...base, tbl("tag", [f("label", scalar("string"))])];
+    expect(ud(diffK(base, next))).toEqual({
+      up: [
+        'CREATE TABLE "tag" (\n  "id" text PRIMARY KEY,\n  "label" text NOT NULL\n);',
+      ],
+      down: ['DROP TABLE IF EXISTS "tag" CASCADE;'],
+    });
   });
 
   test("drop table", () => {
-    const prev = pdb([
-      tbl("user", [f("name", scalar("string"))]),
-      tbl("tag", [f("label", scalar("string"))]),
-    ]);
-    expect(ud(diffK(prev, base))).toEqual(ud(diffFixed(prev, base)));
+    const prev = [...base, tbl("tag", [f("label", scalar("string"))])];
+    expect(ud(diffK(prev, base))).toEqual({
+      up: ['DROP TABLE IF EXISTS "tag" CASCADE;'],
+      down: [
+        'CREATE TABLE "tag" (\n  "id" text PRIMARY KEY,\n  "label" text NOT NULL\n);',
+      ],
+    });
   });
 
-  test("no change -> empty diff", () => {
+  test("no change -> empty", () => {
     expect(ud(diffK(base, base))).toEqual({ up: [], down: [] });
   });
 });
 
-// --- canonical change-detection (emit faithful; rewrite-prone clauses excluded) ----------------
+// --- canonical: emit faithful, rewrite-prone/non-introspected clauses excluded from diffs ------
 
-describe("canonical excludes rewrite-prone/non-introspected clauses from diffs", () => {
+describe("canonical change-detection", () => {
   const fld = (
     name: string,
-    type: PortableTable["fields"][number]["type"],
-    extra: Partial<PortableTable["fields"][number]> = {},
-  ) => ({ name, table: "t", type, ...extra });
-  const plain = pdb([tbl("t", [fld("n", scalar("int"))])]);
-  const withDefault = pdb([
-    tbl("t", [fld("n", scalar("int"), { default: "0" })]),
-  ]);
-  const otherDefault = pdb([
-    tbl("t", [fld("n", scalar("int"), { default: "5" })]),
-  ]);
-  const withComment = pdb([
-    tbl("t", [fld("n", scalar("int"), { comment: "count" })]),
-  ]);
-  const asFloat = pdb([tbl("t", [fld("n", scalar("float"))])]);
+    extra: Partial<PortableField> = {},
+  ): PortableField => ({ name, table: "t", type: scalar("int"), ...extra });
+  const plain = [tbl("t", [fld("n")])];
+  const withDefault = [tbl("t", [fld("n", { default: "0" })])];
+  const otherDefault = [tbl("t", [fld("n", { default: "5" })])];
+  const withComment = [tbl("t", [fld("n", { comment: "count" })])];
+  const asFloat = [tbl("t", [fld("n", { type: scalar("float") })])];
 
-  test("a DEFAULT change (or adding one) is NOT a change", () => {
+  test("DEFAULT add/change is NOT a change", () => {
     expect(ud(diffK(withDefault, otherDefault))).toEqual({ up: [], down: [] });
     expect(ud(diffK(plain, withDefault))).toEqual({ up: [], down: [] });
   });
 
-  test("a COMMENT change is NOT a change", () => {
+  test("COMMENT change is NOT a change", () => {
     expect(ud(diffK(plain, withComment))).toEqual({ up: [], down: [] });
   });
 
-  test("but emit stays faithful: DEFAULT + COMMENT DDL is still produced", () => {
+  test("but emit stays faithful (DEFAULT + COMMENT DDL produced)", () => {
     const ddl = `${emitK(withDefault).join("\n")}\n${emitK(withComment).join("\n")}`;
     expect(ddl).toContain("DEFAULT 0");
     expect(ddl).toContain("COMMENT ON COLUMN");
   });
 
-  test("a real type change IS still detected", () => {
+  test("a real type change IS detected", () => {
     expect(diffK(plain, asFloat).up.length).toBeGreaterThan(0);
   });
 });
 
-// --- real round-trip via PGlite ----------------------------------------------------------------
+// --- displayItems: per-field, grouped under their table (Manuel's decision) ---------------------
 
-describe("kind path round-trips through a real engine", () => {
-  test("emitKinds -> PGlite -> introspect -> buildKindDiff is empty", async () => {
-    const desired = pdb([
+describe("displayItems (per-field diff display)", () => {
+  test("a column add/type-change surfaces as per-field items under the table", () => {
+    const prev = [tbl("user", [f("name", scalar("string"))])];
+    const next = [
+      tbl("user", [f("name", scalar("string")), f("age", scalar("int"))]),
+    ];
+    const items = diffK(prev, next).items ?? [];
+    const add = items.find((i) => i.key === "field:user:age");
+    expect(add?.op).toBe("add");
+    expect(add?.kind).toBe("field");
+    expect(add?.table).toBe("user");
+  });
+
+  test("--full lists every column as a per-field add", () => {
+    const full =
+      diffK([], [tbl("user", [f("name", scalar("string"))])]).full ?? [];
+    expect(full.map((s) => s.key)).toContain("field:user:name");
+  });
+});
+
+// --- real round-trip via PGlite + introspectAll ------------------------------------------------
+
+describe("introspectAll round-trips through a real engine", () => {
+  const roundtrip = async (desired: PgTable[]) => {
+    const conn = (await driver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
+    try {
+      await driver.apply(conn, emitK(desired));
+      const live = await driver.introspectAll(conn);
+      return buildKindDiff(registry, live, splitTables(desired));
+    } finally {
+      await conn.close();
+    }
+  };
+
+  test("tables + FK -> diff empty", async () => {
+    const { up, down } = await roundtrip([
       tbl("user", [
         f("name", scalar("string")),
         f("age", option(scalar("int"))),
@@ -235,91 +261,25 @@ describe("kind path round-trips through a real engine", () => {
         f("author", record(["user"])),
       ]),
     ]);
-    const conn = (await driver.connect({
-      params: { url: "" },
-    } as never)) as PgConn;
-    try {
-      await driver.apply(conn, emitK(desired));
-      const live = await driver.introspect(conn);
-      // Compare on the normalized portable form (option->nullable, FK actions canonical), exactly the
-      // basis the fixed-slot `equal` uses; the kind diff over it must be empty.
-      const a = decompose(driver.normalize(live));
-      const b = decompose(driver.normalize(desired));
-      const { up, down } = buildKindDiff(registry, a, b);
-      expect({ up, down }).toEqual({ up: [], down: [] });
-      expect(driver.equal(live, desired)).toBe(true);
-    } finally {
-      await conn.close();
-    }
+    expect({ up, down }).toEqual({ up: [], down: [] });
   });
 
-  test("clauses (default/check/comment) emit + apply but don't phantom-diff vs introspect", async () => {
-    const desired = pdb([
+  test("clauses (default/check/comment) emit + apply but don't phantom-diff", async () => {
+    const { up, down } = await roundtrip([
       tbl("evt", [
-        {
-          name: "label",
-          table: "evt",
-          type: scalar("string"),
-          comment: "name",
-        },
-        {
-          name: "n",
-          table: "evt",
-          type: scalar("int"),
-          check: "n > 0",
-          default: "0",
-        },
+        f("label", scalar("string"), { comment: "name" }),
+        f("n", scalar("int"), { check: "n > 0", default: "0" }),
       ]),
     ]);
-    const conn = (await driver.connect({
-      params: { url: "" },
-    } as never)) as PgConn;
-    try {
-      await driver.apply(conn, emitK(desired));
-      const live = await driver.introspect(conn);
-      // No normalize here: exercise the table kind's `canonical` directly. DEFAULT/CHECK/COMMENT are
-      // emitted + applied, but excluded from change-detection, so introspect (which can't read them
-      // back) does NOT phantom-diff the freshly-applied schema.
-      const { up, down } = buildKindDiff(
-        registry,
-        decompose(live),
-        decompose(desired),
-      );
-      expect({ up, down }).toEqual({ up: [], down: [] });
-    } finally {
-      await conn.close();
-    }
+    expect({ up, down }).toEqual({ up: [], down: [] });
   });
 
-  test("a unique index round-trips (introspectAll reads it -> the index kind has no phantom)", async () => {
-    const desired = pdb([
+  test("a unique index round-trips (introspectAll reads it back)", async () => {
+    const { up, down } = await roundtrip([
       tbl("account", [f("email", scalar("string"))], {
-        indexes: [
-          { name: "account_email_key", cols: ["email"], spec: "UNIQUE" },
-        ],
+        indexes: [{ name: "account_email_key", cols: ["email"], unique: true }],
       }),
     ]);
-    const conn = (await driver.connect({
-      params: { url: "" },
-    } as never)) as PgConn;
-    try {
-      await driver.apply(conn, emitK(desired));
-      const live = await driver.introspect(conn);
-      // The index is read back (pg_index), so decompose(live) has the matching index object — no
-      // presence phantom. No normalize (it would zero indexes).
-      const { up, down } = buildKindDiff(
-        registry,
-        decompose(live),
-        decompose(desired),
-      );
-      expect({ up, down }).toEqual({ up: [], down: [] });
-      // sanity: introspect actually surfaced the unique index
-      const acct = live.tables.find((t) => t.name === "account");
-      expect(acct?.indexes).toEqual([
-        { name: "account_email_key", cols: ["email"], spec: "UNIQUE" },
-      ]);
-    } finally {
-      await conn.close();
-    }
+    expect({ up, down }).toEqual({ up: [], down: [] });
   });
 });

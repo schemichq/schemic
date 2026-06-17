@@ -1,15 +1,34 @@
-// Pure Postgres DDL + type helpers — the shared emit primitives both the fixed-slot driver
-// (./index.ts) and the kind engines (./kinds.ts) build on, so a table's CREATE/ALTER DDL is
-// produced by ONE set of functions (parity by construction, no drift between the two paths). No
-// Driver/connection state here: just portable-IR -> pg DDL string transforms.
+// Pure Postgres DDL + type helpers — the shared emit primitives the kind engines (./kinds.ts) +
+// authoring lower (./lower.ts) + introspection (./index.ts) build on, so a table's CREATE/ALTER DDL
+// is produced by ONE set of functions (no drift). No Driver/connection state here: just IR -> pg DDL
+// string transforms. The field/type SUBSTRATE (`PortableField`/`PortableType`) is core's; the table-
+// level container is this driver's own (`PgTable`) — `PortableTable` retired at the kind-registry flip.
 
 import type {
   PortableField,
-  PortableTable,
   PortableType,
   ScalarName,
 } from "@schemic/core/driver";
 import { nullable } from "@schemic/core/driver";
+
+/** A secondary index over one table's columns (this driver emits UNIQUE; others tracked for parity). */
+export interface PgIndexInfo {
+  name: string;
+  cols: string[];
+  unique: boolean;
+}
+
+/** The driver-private table shape (replaces the retired `PortableTable`): columns + PK + CHECKs + idx. */
+export interface PgTable {
+  name: string;
+  fields: PortableField[];
+  indexes: PgIndexInfo[];
+  primaryKey?: string[];
+  checks?: string[];
+}
+
+/** Just what `createTableDdl` needs (a `PgTable` is a structural superset). */
+export type PgCreateInput = Omit<PgTable, "indexes">;
 
 export const escId = (name: string) => `"${name.replace(/"/g, '""')}"`;
 
@@ -154,7 +173,7 @@ export function canonField(f: PortableField, table: string): PortableField {
 }
 
 /** Fields ready for emit: drop dotted sub-fields, canonicalize the type, KEEP all DDL clauses, sort. */
-export function pgEmitFields(t: PortableTable): PortableField[] {
+export function pgEmitFields(t: PgCreateInput): PortableField[] {
   return t.fields
     .filter((f) => !f.name.includes("."))
     .map((f) => ({ ...f, table: t.name, type: pgCanonType(f.type) }))
@@ -191,9 +210,9 @@ export function fieldColumnDdl(f: PortableField): string {
 /**
  * The `CREATE TABLE (...)` statement body for a table — the implicit `id` PK (or a custom/composite
  * PRIMARY KEY), every column with its clauses, and table-level CHECKs. The single source for table
- * creation DDL, shared by the fixed-slot `emitTable` and the `table` kind's `emit`.
+ * creation DDL, used by the `table` kind's `emit`/`canonical`.
  */
-export function createTableDdl(t: PortableTable): string {
+export function createTableDdl(t: PgCreateInput): string {
   const fields = pgEmitFields(t);
   const custom = !!(t.primaryKey && t.primaryKey.length > 0);
   const cols: string[] = [];
