@@ -10,23 +10,27 @@ import type { ResolvedConfig } from "@schemic/core";
 import {
   type Authored,
   type AuthoredDef,
+  buildKindDiff,
   checksum,
   type Diff,
   type Driver,
   EMPTY_STORED,
   type Filter,
-  filterPortable,
+  filterKinds,
   getDriver,
-  intersectPortable,
+  intersectKinds,
   isEmptyDiff,
   listMigrations,
   loadDefs,
+  lowerSchema,
   type Migration,
   type MigrationStore,
   makeJiti,
   mergeStored,
   parseFilter,
   readSnapshot,
+  snapshotKinds,
+  snapshotObjects,
   type StoredSnapshot,
   slug,
   timestamp,
@@ -34,8 +38,9 @@ import {
 } from "@schemic/core";
 
 /**
- * Build the canonical STORED snapshot from the authored schema: lower to the portable IR via the
- * driver, plus a name->source-file map (display-only; attached to diff items by `attachFiles`).
+ * Build the canonical STORED snapshot from the authored schema: explode authoring into kinded
+ * definables, lower via the registry, plus a name->source-file map (display-only; attached to diff
+ * items by `attachFiles`).
  */
 function buildStored(
   driver: Driver,
@@ -43,7 +48,7 @@ function buildStored(
   defs: AuthoredDef[],
   opts: { fileOf?: Map<unknown, string>; root?: string } = {},
 ): StoredSnapshot {
-  const portable = driver.lower(tables, defs);
+  const objects = lowerSchema(driver.registry, driver.explode(tables, defs));
   const files: Record<string, string> = {};
   const rel = (abs: string) => (opts.root ? relative(opts.root, abs) : abs);
   for (const t of tables) {
@@ -56,7 +61,12 @@ function buildStored(
     const key = d.kind === "event" ? d.table : d.name;
     if (abs && key) files[key] = rel(abs);
   }
-  return { version: 2, driver: driver.name, portable, files };
+  return {
+    version: 3,
+    driver: driver.name,
+    schema: snapshotKinds(objects),
+    files,
+  };
 }
 
 /** The driver's apply-time migration bookkeeping (the dialect SQL behind `migrate`/`rollback`/…). */
@@ -108,17 +118,17 @@ export async function planMigration(
 ): Promise<MigrationPlan> {
   const { tables, defs, fileOf } = await loadDefs(config.schemaPath);
   const driver = getDriver(config.driver ?? "surrealdb");
+  const reg = driver.registry;
   const next = buildStored(driver, tables, defs, { fileOf, root: config.root });
-  const prev = opts.baseline
-    ? EMPTY_STORED
-    : readSnapshot(config.metaDir, driver);
-  const diff = driver.diff(
-    filterPortable(prev.portable, filter),
-    filterPortable(next.portable, filter),
+  const prev = opts.baseline ? EMPTY_STORED : readSnapshot(config.metaDir);
+  const diff = buildKindDiff(
+    reg,
+    filterKinds(reg, snapshotObjects(prev.schema), filter),
+    filterKinds(reg, snapshotObjects(next.schema), filter),
   );
   attachFiles(diff, prev.files ?? {}, next.files ?? {});
   // Persist only the generated kinds; excluded kinds (e.g. access) keep their prior snapshot state.
-  return { diff, next: mergeStored(prev, next, filter) };
+  return { diff, next: mergeStored(reg, prev, next, filter) };
 }
 
 /**
@@ -233,40 +243,45 @@ export async function baseline(
   filter: Filter = parseFilter({}),
 ): Promise<GenerateResult> {
   const driver = getDriver(config.driver ?? "surrealdb");
-  // What actually exists in the live DB (canonical portable IR), used ONLY to scope the baseline:
-  // hand-written schema not yet in the DB stays pending for the next `schemic gen` rather than being
-  // silently marked applied.
-  const live = driver.normalize(
-    await driver.introspect(
-      db,
-      new Set([config.migrationsTable, `${config.migrationsTable}_lock`]),
-    ),
+  const reg = driver.registry;
+  // What actually exists in the live DB (canonical portable objects), used ONLY to scope the
+  // baseline: hand-written schema not yet in the DB stays pending for the next `schemic gen` rather
+  // than being silently marked applied. introspectAll already canonicalizes (== lowering).
+  const live = await driver.introspectAll(
+    db,
+    new Set([config.migrationsTable, `${config.migrationsTable}_lock`]),
   );
   // The snapshot stores GENERATOR-form schema (what `schemic gen`/`schemic diff` compare against
   // offline). We take the just-pulled disk schema and keep only the objects present in the DB —
-  // intersecting by name so the stored form stays the canonical (generator) one, not the INFO form.
+  // intersecting by `kind:name` so the stored form stays the canonical (generator) one, not the INFO form.
   const { tables, defs, fileOf } = await loadDefs(config.schemaPath);
   const disk = buildStored(driver, tables, defs, {
     fileOf,
     root: config.root,
   });
-  const pulledPortable = intersectPortable(disk.portable, live, filter);
+  const pulledObjects = intersectKinds(
+    reg,
+    snapshotObjects(disk.schema),
+    live,
+    filter,
+  );
   const pulled: StoredSnapshot = {
-    version: 2,
+    version: 3,
     driver: driver.name,
-    portable: pulledPortable,
+    schema: snapshotKinds(pulledObjects),
     files: disk.files,
   };
 
-  const prev = readSnapshot(config.metaDir, driver);
-  const diff = driver.diff(
-    filterPortable(prev.portable, filter),
-    pulledPortable,
+  const prev = readSnapshot(config.metaDir);
+  const diff = buildKindDiff(
+    reg,
+    filterKinds(reg, snapshotObjects(prev.schema), filter),
+    pulledObjects,
   );
   attachFiles(diff, prev.files ?? {}, pulled.files ?? {});
   const plan: MigrationPlan = {
     diff,
-    next: mergeStored(prev, pulled, filter),
+    next: mergeStored(reg, prev, pulled, filter),
   };
   const prepared = prepareMigration(config, plan, "baseline");
   if (!prepared) {
