@@ -542,19 +542,19 @@ kindFlags(
               // then diff per file.
               const prev = readSnapshot(config.metaDir);
               const prevObjects = snapshotObjects(prev.schema);
-              if (prevObjects.length === 0)
-                throw new Error(
-                  "offline diff --ts needs a snapshot — run `schemic gen` (or `schemic pull --write`) to record one, or pass --live.",
-                );
               const { tables, defs } = await loadDefs(config.schemaPath);
               const desiredObjects = lowerSchema(
                 driver.registry,
                 driver.explode(tables, defs),
               );
+              // No snapshot? Render against an empty current side — the whole schema shows as added
+              // TS, the same as plain `diff` does against an empty snapshot.
               await showTsDiff(
                 driver.renderSchema(prevObjects, filter, fileFor, single),
                 driver.renderSchema(desiredObjects, filter, fileFor, single),
-                "Schema matches the snapshot.",
+                prevObjects.length
+                  ? "Schema matches the snapshot."
+                  : "No schema to render.",
               );
             }
             return;
@@ -627,6 +627,8 @@ const genAction = (
     console.log(
       `${plural(plan.diff.up.length, "change")} to migrate${kinds ? ` — ${kinds}` : ""}.`,
     );
+    // Preview the changes BEFORE prompting for a name, so you see what you're naming.
+    console.log(formatDiff(plan.diff, {}));
     const title =
       name ??
       (opts.baseline ? "baseline" : opts.yes ? undefined : await promptTitle());
@@ -635,8 +637,6 @@ const genAction = (
       console.log(ok("No schema changes — nothing to generate."));
       return;
     }
-    // Show the actual migration script that will be written, then commit it.
-    console.log(`\n${prepared.content}`);
     const res = commitMigration(config, prepared);
     console.log(
       `${ok(res.file ?? "migration written")}  ${style.dim(`(+${res.up} up / ${res.down} down)`)}`,
