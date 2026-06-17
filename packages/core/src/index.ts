@@ -133,16 +133,21 @@ export type {
 } from "./driver/portable-ir";
 // --- kind registry (core-v2) — generic, open object kinds (docs/kind-registry.md) -------------
 export {
+  buildKindDiff,
   type Definable,
   emitKinds,
   introspectKinds,
   type KindEngine,
   type KindPlan,
   KindRegistry,
+  type KindSnapshot,
   type KindSpec,
+  lowerSchema,
   type OrderNode,
   orderObjects,
   type PortableObject,
   planKinds,
   type Ref,
+  snapshotKinds,
+  snapshotObjects,
 } from "./kind";

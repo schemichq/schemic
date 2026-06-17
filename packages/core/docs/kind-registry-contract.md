@@ -16,6 +16,17 @@ KINDS** on a `KindRegistry`; core orchestrates **generically** over the registry
 kind. What stays in core is the **field/type vocabulary** (`s.*` Zod drop-in, `PortableType`, codecs) —
 the *substrate* every kind builds on. **Fields/types are NOT a kind.**
 
+> **Each database is its own world — kinds are NOT cross-driver compatible, and that's by design.** A
+> driver's kinds, their portable forms, their DDL, and their `native` payloads are **its own**; nothing
+> is meant to be shared, interchangeable, or comparable with another driver's. Don't design a kind to
+> "match" another DB's, don't reach for a neutral cross-DB shape, and don't expect a schema authored for
+> one driver to mean anything to another. The shared field/type substrate (above) is the **single,
+> deliberate** exception — it ports across drivers because that's the whole point of the type model; the
+> portable IR is "portable" so *core* can handle any kind uniformly, **not** so kinds port between DBs.
+> Practical upshot: model your kinds for YOUR database's real DDL, full stop. Use `native` payloads
+> freely; carry dialect clauses verbatim; never compromise fidelity for an imagined cross-DB common
+> denominator.
+
 ## 2. What core now exports (`@schemic/core`)
 
 ```ts
@@ -25,12 +36,22 @@ import {
   type Definable,        // { kind: string; name: string } — your authoring object's neutral bound
   type PortableObject,   // { kind: string; name: string } — your kind's portable form's neutral bound
   type Ref,              // { kind: string; name: string } — a dependency edge
-  planKinds,             // (registry, prev, next) -> { up, down } — the generic diff/plan spine
-  emitKinds,             // (registry, defs) -> string[]   — fresh-apply DDL
+  lowerSchema,           // (registry, defs: Definable[]) -> PortableObject[]  — author -> portable
+  planKinds,             // (registry, prevP, nextP) -> { up, down }           — diff two PORTABLE sides
+  buildKindDiff,         // (registry, prevP, nextP) -> Diff                    — up/down + items + full
+  emitKinds,             // (registry, schemaP: PortableObject[]) -> string[]  — fresh-apply DDL
+  type KindSnapshot,     // { kinds: Record<string, PortableObject[]> }        — the stored snapshot
+  snapshotKinds,         // (schemaP) -> KindSnapshot  ·  snapshotObjects(snap) -> PortableObject[]
+  snapshotObjects,
   introspectKinds,       // (registry, conn) -> PortableObject[] — reverse, fanned out per kind
   orderObjects,          // the dependency-graph topo-sort (exposed for testing)
 } from "@schemic/core";
 ```
+
+The spine works on **portable objects** (both sides already lowered) — exactly like the fixed-slot
+`Driver.diff(prev, next)`. Lower the authoring side once (`lowerSchema`); the `prev` side comes from a
+stored `KindSnapshot`. `buildKindDiff` returns the same `Diff` shape the CLI + migration model already
+consume (`up`/`down`/`items`/`full`), so a migrated kind drops straight into the existing command paths.
 
 ### `KindEngine<A, P>` — what each kind must provide
 
@@ -110,6 +131,30 @@ engine's `up`/`down` for representative add/change/remove cases on real DDL. Sli
 `packages/core/test/unit/kind-registry.test.ts` is the in-core template (a 3-kind fake driver); your
 package asserts the same against your real `s.*` + emit.
 
+### Track your kinds — a kind inventory in `docs/COVERAGE.md`
+
+So parity stays visible rather than guessed, **each driver maintains a KIND INVENTORY** — the complete
+list of object kinds its database has, with the registration status of each (registered? authoring?
+emit? introspect? diff round-trips?). Add it as a section in your existing `docs/COVERAGE.md` (same
+legend as the DDL-syntax map: `[ ]` not done · `[~]` partial · `[x]` full round-trip). List **every**
+kind your DB supports, including ones you haven't registered yet, so the gaps are explicit. Suggested
+columns: `kind name` · `createKind'd?` · `emit` · `introspect` · `diff` · notes.
+
+Seed lists to start from (driver owner corrects/extends — these are the *expected/possible* kinds, not
+a claim of completeness):
+
+- **SurrealDB** — `table` (NORMAL/RELATION/ANY), `field`*, `index` (UNIQUE/SEARCH/MTREE/HNSW), `event`,
+  `function` (`fn::`), `access` (RECORD/JWT), `param` (`DEFINE PARAM`), `analyzer`, `user`, `model`
+  (`DEFINE MODEL`), `namespace`/`database` (if in scope), `config` (`DEFINE CONFIG GRAPHQL/API`),
+  `api`/`bucket` (3.x, if targeted). *`field` is **substrate nested in `table`**, not its own kind.
+- **PostgreSQL** — `table`, `column`*, `index`, `constraint` (PK/FK/UNIQUE/CHECK/EXCLUDE), `view`,
+  `materialized_view`, `sequence`, `type`/`enum`/`domain` (`CREATE TYPE`), `function`, `procedure`,
+  `trigger`, `extension`, `schema`, `role`/`grant` (if in scope), `policy` (RLS). *`column` is
+  **substrate nested in `table`**.
+
+Mark a kind `[x]` only when it **round-trips** (author → emit → introspect → diff = zero). The
+inventory is what tells us — at a glance — how far each driver is through the migration.
+
 ## 4. Cross-kind dependency ordering (the load-bearing rule)
 
 A per-kind ordinal is **not** sufficient: a table's event can call a function, so that function must
@@ -136,10 +181,17 @@ introspectable.
 
 ## 6. Coexistence during migration
 
-`planKinds` only plans definables whose `kind` is **registered on the registry** — anything else it
-skips. So while some kinds are on the registry and others on the fixed `PortableDb` slots, run both
-engines and concatenate, ordering the registry side with the graph. (Core will provide the bridge in
-the slice that needs it; flagging it here so the interim state is expected, not surprising.)
+The registry path is now **feature-complete** vs what the CLI consumes — `lowerSchema` (author →
+portable), `buildKindDiff` (the full `Diff`: up/down/items/full), `snapshotKinds`/`snapshotObjects`
+(the stored snapshot), `emitKinds` (fresh apply). So a driver **flips wholesale**: once your kinds are
+registered, swap your `Driver.lower`/`emit`/`diff` + snapshot for the registry calls **in one step** —
+there is no half-on/half-off production engine to bridge. "Kind by kind" is the **development + parity
+cadence** (build + green-test one kind at a time on your branch), not a shipped intermediate state.
+
+If you do want to land kinds incrementally, `planKinds`/`buildKindDiff` only touch objects whose `kind`
+is **registered** (unregistered ones are skipped), so you can run the registry path beside the legacy
+path during development and concatenate. But the target is the clean swap — DM `core-dev` if your
+dialect makes a true interim coexistence necessary and we'll add the merge.
 
 ## 7. Open boundary decisions — confirm with core-dev before slice 2
 

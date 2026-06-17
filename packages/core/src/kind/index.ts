@@ -4,12 +4,17 @@
 // path is untouched while kinds migrate onto this one (docs/kind-registry.md §8).
 
 export {
+  buildKindDiff,
   emitKinds,
   introspectKinds,
   type KindPlan,
+  type KindSnapshot,
+  lowerSchema,
   type OrderNode,
   orderObjects,
   planKinds,
+  snapshotKinds,
+  snapshotObjects,
 } from "./plan";
 export {
   type Definable,

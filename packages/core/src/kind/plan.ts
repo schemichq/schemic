@@ -1,7 +1,11 @@
-// The GENERIC migration spine over a {@link KindRegistry} — core's kind-blind orchestration. It loops
-// the registered kinds, lowers both schema sides to portable objects, classifies each object as
-// add/change/remove, ORDERS them across kinds by a dependency graph, and emits up/down DDL. It never
-// names a kind: every kind-specific decision is delegated to that kind's {@link KindEngine}.
+// The GENERIC migration spine over a {@link KindRegistry} — core's kind-blind orchestration. It
+// classifies each portable object as add/change/remove, ORDERS them across kinds by a dependency
+// graph, and emits up/down DDL + the display {@link Diff}. It never names a kind: every kind-specific
+// decision is delegated to that kind's {@link KindEngine}.
+//
+// The spine works on PORTABLE objects (both sides already lowered), exactly like the fixed-slot
+// `Driver.diff(prev, next)`: the stored snapshot IS portable, and the authoring side is lowered once
+// via {@link lowerSchema}. So `prev` is a snapshot, `next` is `lowerSchema(registry, defs)`.
 //
 // Cross-kind ordering is the load-bearing part (docs/kind-registry.md §7.1). THREE layers:
 //   1. dependency GRAPH + topological sort  -> CORRECTNESS (an object emits after everything it deps on)
@@ -10,7 +14,16 @@
 // A per-kind ordinal ALONE is wrong: a table's event can call a function, so the function must emit
 // BEFORE the table — a function-before-table the graph handles and an ordinal cannot. Drops reverse it.
 
-import type { Definable, KindRegistry, PortableObject, Ref } from "./registry";
+// NOTE: `Diff`/`DiffItem` are a type-only import (erased at compile — no runtime cli->kind coupling),
+// the same arrangement as ./driver/portable-diff.ts.
+import type { Diff, DiffItem } from "../cli/diff";
+import type {
+  Definable,
+  KindEngine,
+  KindRegistry,
+  PortableObject,
+  Ref,
+} from "./registry";
 
 const refKey = (r: Ref) => `${r.kind}:${r.name}`;
 
@@ -80,6 +93,51 @@ export function orderObjects<T extends OrderNode>(
   return out;
 }
 
+// --- lowering + snapshot ------------------------------------------------------------------------
+
+/**
+ * Author -> portable: lower each definable through its kind's engine (skipping unregistered kinds).
+ * The single place authoring becomes portable; everything downstream (diff/emit/snapshot) is portable.
+ */
+export function lowerSchema(
+  registry: KindRegistry,
+  defs: Definable[],
+): PortableObject[] {
+  const out: PortableObject[] = [];
+  for (const d of defs) {
+    const engine = registry.engine(d.kind);
+    if (engine) out.push(engine.lower(d));
+  }
+  return out;
+}
+
+/**
+ * The registry SNAPSHOT — portable objects grouped by kind. The open, generic replacement for
+ * `PortableDb`'s fixed slots; serializes as plain JSON (it is plain data). Pre-launch: the format is
+ * free to change, no version migration.
+ */
+export interface KindSnapshot {
+  kinds: Record<string, PortableObject[]>;
+}
+
+/** Group a flat portable schema into a snapshot (by kind). */
+export function snapshotKinds(schema: PortableObject[]): KindSnapshot {
+  const kinds: Record<string, PortableObject[]> = {};
+  for (const o of schema) {
+    const bucket = kinds[o.kind] ?? [];
+    bucket.push(o);
+    kinds[o.kind] = bucket;
+  }
+  return { kinds };
+}
+
+/** Flatten a snapshot back into a portable schema (the inverse of {@link snapshotKinds}). */
+export function snapshotObjects(snap: KindSnapshot): PortableObject[] {
+  return Object.values(snap.kinds).flat();
+}
+
+// --- diff / plan --------------------------------------------------------------------------------
+
 /** One classified object change, carrying its ordering metadata + the portable sides for DDL. */
 interface Change extends OrderNode {
   readonly op: "add" | "change" | "remove";
@@ -93,117 +151,199 @@ export interface KindPlan {
   down: string[];
 }
 
-/**
- * Diff two authored schema states into an executable up/down program, generically over the registry.
- *
- * For each registered kind: lower both sides, match portable objects by name, and classify —
- * add (next only) / remove (prev only) / change (both, but their emitted DDL differs). Then order all
- * non-removes parent-first (the dependency graph) and removes child-first (reverse), and walk that one
- * sequence building `up` and its inverse; `down` is the inverse run backwards (a rolled-back parent is
- * recreated before its children, an added object dropped child-first). Same shape as the fixed-slot
- * `planPortable`, but assembled ACROSS kinds via the graph rather than relying on emit-rank.
- */
-export function planKinds(
-  registry: KindRegistry,
-  prev: Definable[],
-  next: Definable[],
-): KindPlan {
-  // Lower each side, per kind, to portable objects keyed by `kind:name`.
-  const lower = (defs: Definable[]) => {
-    const byKey = new Map<string, PortableObject>();
-    for (const d of defs) {
-      const engine = registry.engine(d.kind);
-      if (!engine) continue; // a definable of an unregistered kind isn't ours to plan
-      const p = engine.lower(d);
-      byKey.set(refKey(p), p);
-    }
-    return byKey;
-  };
-  const prevByKey = lower(prev);
-  const nextByKey = lower(next);
+const orderNodeOf = (
+  engine: KindEngine,
+  portable: PortableObject,
+): OrderNode => ({
+  kind: portable.kind,
+  name: portable.name,
+  deps: engine.deps?.(portable) ?? [],
+  owner: engine.owner?.(portable),
+});
 
-  // Classify every touched object.
+/** Display identity: `kind:owner:name` (owner blank for a top-level object) + the display owner. */
+const itemKey = (n: OrderNode) => `${n.kind}:${n.owner?.name ?? ""}:${n.name}`;
+const itemTable = (n: OrderNode) => n.owner?.name ?? n.name;
+
+const byKey = (schema: PortableObject[]) =>
+  new Map(schema.map((o) => [refKey(o), o]));
+
+/**
+ * Classify both sides into ordered add/change/remove sets — the shared core of plan + diff. A `change`
+ * is two objects of the same key whose emitted DDL differs (same test as the fixed-slot engine). Each
+ * class is topologically ordered parent-first; the caller reverses one class for drops/inversion.
+ */
+function orderedChanges(
+  registry: KindRegistry,
+  prev: PortableObject[],
+  next: PortableObject[],
+): { nonRemoves: Change[]; removes: Change[] } {
+  const prevByKey = byKey(prev);
+  const nextByKey = byKey(next);
   const changes: Change[] = [];
-  const allKeys = new Set([...prevByKey.keys(), ...nextByKey.keys()]);
-  for (const k of allKeys) {
+  for (const k of new Set([...prevByKey.keys(), ...nextByKey.keys()])) {
     const p = prevByKey.get(k);
     const n = nextByKey.get(k);
     const portable = n ?? p;
     if (!portable) continue;
     const engine = registry.engine(portable.kind);
     if (!engine) continue;
-    const node = {
-      kind: portable.kind,
-      name: portable.name,
-      deps: engine.deps?.(portable) ?? [],
-      owner: engine.owner?.(portable),
-    };
+    const node = orderNodeOf(engine, portable);
     if (p && !n) changes.push({ op: "remove", prev: p, ...node });
     else if (!p && n) changes.push({ op: "add", next: n, ...node });
-    else if (p && n) {
-      const same = engine.emit(p).join("\n") === engine.emit(n).join("\n");
-      if (!same) changes.push({ op: "change", prev: p, next: n, ...node });
-    }
+    else if (p && n && engine.emit(p).join("\n") !== engine.emit(n).join("\n"))
+      changes.push({ op: "change", prev: p, next: n, ...node });
   }
-
-  // Order each class parent-first (the dependency graph). `up` runs creates/changes parent-first then
-  // drops child-first; `down` is the mirror: recreate drops parent-first, then undo creates/changes
-  // child-first. We invert PER OBJECT (not by reversing the flat DDL list) so a kind's multi-line
-  // block — a table emitted with its fields — keeps its internal order in both directions.
   const ord = (kind: string) => registry.ordinal(kind);
-  const nonRemoves = orderObjects(
-    changes.filter((c) => c.op !== "remove"),
-    ord,
-  );
-  const removes = orderObjects(
-    changes.filter((c) => c.op === "remove"),
-    ord,
-  );
-
-  const engineOf = (c: Change) => registry.engine(c.kind);
-  const overwriteUp = (c: Change, a: PortableObject, b: PortableObject) => {
-    const e = engineOf(c);
-    if (!e) return [];
-    return e.overwrite?.(a, b) ?? [...e.remove(a), ...e.emit(b)];
+  return {
+    nonRemoves: orderObjects(
+      changes.filter((c) => c.op !== "remove"),
+      ord,
+    ),
+    removes: orderObjects(
+      changes.filter((c) => c.op === "remove"),
+      ord,
+    ),
   };
+}
 
+const overwriteUp = (
+  engine: KindEngine,
+  a: PortableObject,
+  b: PortableObject,
+): string[] =>
+  engine.overwrite?.(a, b) ?? [...engine.remove(a), ...engine.emit(b)];
+
+/**
+ * Diff two portable schema states into an executable up/down program, generically over the registry.
+ *
+ * `up` runs creates/changes parent-first (the dependency graph) then drops child-first; `down` is the
+ * mirror: recreate drops parent-first, then undo creates/changes child-first. We invert PER OBJECT (not
+ * by reversing the flat DDL list) so a kind's multi-line block — a table emitted with its fields —
+ * keeps its internal order in both directions.
+ */
+export function planKinds(
+  registry: KindRegistry,
+  prev: PortableObject[],
+  next: PortableObject[],
+): KindPlan {
+  const { nonRemoves, removes } = orderedChanges(registry, prev, next);
   const up: string[] = [];
+  const down: string[] = [];
   for (const c of nonRemoves) {
-    const e = engineOf(c);
+    const e = registry.engine(c.kind);
     if (!e) continue;
     if (c.op === "add" && c.next) up.push(...e.emit(c.next));
     else if (c.op === "change" && c.prev && c.next)
-      up.push(...overwriteUp(c, c.prev, c.next));
+      up.push(...overwriteUp(e, c.prev, c.next));
   }
   for (const c of [...removes].reverse()) {
-    // drops child-first
-    const e = engineOf(c);
+    const e = registry.engine(c.kind); // drops child-first
     if (e && c.prev) up.push(...e.remove(c.prev));
   }
-
-  const down: string[] = [];
   for (const c of removes) {
-    // recreate dropped objects parent-first
-    const e = engineOf(c);
+    const e = registry.engine(c.kind); // recreate dropped objects parent-first
     if (e && c.prev) down.push(...e.emit(c.prev));
   }
   for (const c of [...nonRemoves].reverse()) {
-    // undo creates/changes child-first
-    const e = engineOf(c);
+    const e = registry.engine(c.kind); // undo creates/changes child-first
     if (!e) continue;
     if (c.op === "add" && c.next) down.push(...e.remove(c.next));
     else if (c.op === "change" && c.prev && c.next)
-      down.push(...overwriteUp(c, c.next, c.prev));
+      down.push(...overwriteUp(e, c.next, c.prev));
   }
   return { up, down };
 }
 
+/** Per-object display items for a change set, in up order (creates/changes parent-first, drops child-first). */
+function diffItems(
+  registry: KindRegistry,
+  nonRemoves: Change[],
+  removes: Change[],
+): DiffItem[] {
+  const items: DiffItem[] = [];
+  const push = (c: Change) => {
+    const e = registry.engine(c.kind);
+    if (!e) return;
+    const base = { key: itemKey(c), table: itemTable(c), kind: c.kind };
+    if (c.op === "add" && c.next)
+      items.push({ ...base, op: "add", ddl: e.emit(c.next).join("\n") });
+    else if (c.op === "remove" && c.prev)
+      items.push({
+        ...base,
+        op: "remove",
+        ddl: e.remove(c.prev).join("\n"),
+        old: e.emit(c.prev).join("\n"),
+      });
+    else if (c.op === "change" && c.prev && c.next)
+      items.push({
+        ...base,
+        op: "change",
+        before: e.emit(c.prev).join("\n"),
+        after: e.emit(c.next).join("\n"),
+      });
+  };
+  for (const c of nonRemoves) push(c);
+  for (const c of [...removes].reverse()) push(c);
+  return items;
+}
+
 /**
- * Fresh-apply DDL for an authored schema: every object created, ordered across kinds by the graph.
- * (The `up` of a diff from an empty state — convenient for `emit`/scaffold paths.)
+ * The full {@link Diff} the CLI + migration model consume — up/down DDL + per-object display items +
+ * the whole desired schema (`full`, for `--full`). This is what a driver's `Driver.diff` returns once
+ * its kinds are on the registry (the generic counterpart of the fixed-slot `buildDiff`). Source-file
+ * linkage on the items is attached by the caller (the snapshot's `files` map), so `file` is left unset.
  */
-export function emitKinds(registry: KindRegistry, defs: Definable[]): string[] {
-  return planKinds(registry, [], defs).up;
+export function buildKindDiff(
+  registry: KindRegistry,
+  prev: PortableObject[],
+  next: PortableObject[],
+): Diff {
+  const { nonRemoves, removes } = orderedChanges(registry, prev, next);
+  const { up, down } = planKinds(registry, prev, next);
+  const full = orderedSchema(registry, next).map(
+    ({ engine, portable, node }) => ({
+      key: itemKey(node),
+      table: itemTable(node),
+      ddl: engine.emit(portable).join("\n"),
+    }),
+  );
+  return { up, down, items: diffItems(registry, nonRemoves, removes), full };
+}
+
+/** Lower-already portable schema, topologically ordered, paired with each object's engine + node. */
+function orderedSchema(
+  registry: KindRegistry,
+  schema: PortableObject[],
+): { engine: KindEngine; portable: PortableObject; node: OrderNode }[] {
+  const items = schema.flatMap((portable) => {
+    const engine = registry.engine(portable.kind);
+    return engine
+      ? [{ engine, portable, node: orderNodeOf(engine, portable) }]
+      : [];
+  });
+  const pos = new Map(
+    orderObjects(
+      items.map((i) => i.node),
+      (k) => registry.ordinal(k),
+    ).map((n, i) => [itemKey(n), i]),
+  );
+  return items.sort(
+    (a, b) => (pos.get(itemKey(a.node)) ?? 0) - (pos.get(itemKey(b.node)) ?? 0),
+  );
+}
+
+/**
+ * Fresh-apply DDL for a portable schema: every object created, ordered across kinds by the graph.
+ * (The `up` of a diff from an empty state.) Lower authoring first via {@link lowerSchema}.
+ */
+export function emitKinds(
+  registry: KindRegistry,
+  schema: PortableObject[],
+): string[] {
+  return orderedSchema(registry, schema).flatMap(({ engine, portable }) =>
+    engine.emit(portable),
+  );
 }
 
 /**

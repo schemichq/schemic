@@ -13,13 +13,17 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  buildKindDiff,
   emitKinds,
   introspectKinds,
   type KindEngine,
   KindRegistry,
+  lowerSchema,
   orderObjects,
   planKinds,
   type Ref,
+  snapshotKinds,
+  snapshotObjects,
 } from "../../src/kind";
 
 // --- a throwaway driver: three kinds on one registry --------------------------------------------
@@ -292,5 +296,73 @@ describe("introspectKinds fans out across kinds off one connection", () => {
     });
     const found = await introspectKinds(reg, /* conn */ {});
     expect(found.map((o) => `${o.kind}:${o.name}`)).toEqual(["table:user"]);
+  });
+});
+
+// --- lowering + snapshot round-trip -------------------------------------------------------------
+
+describe("lowerSchema + snapshot", () => {
+  test("lowerSchema runs each definable through its kind's engine", () => {
+    const portable = lowerSchema(registry, [
+      defineTable("user", [{ name: "name", type: "string" }]),
+      defineFunction("fmt").body("RETURN 1"),
+    ]);
+    expect(portable.map((o) => `${o.kind}:${o.name}`)).toEqual([
+      "table:user",
+      "function:fmt",
+    ]);
+  });
+
+  test("snapshot groups by kind and round-trips through JSON to a zero diff", () => {
+    const portable = lowerSchema(registry, [
+      defineTable("user", [{ name: "name", type: "string" }]),
+      defineIndex("user_name", "user", ["name"]),
+      defineFunction("fmt").body("RETURN 1"),
+    ]);
+    const snap = snapshotKinds(portable);
+    expect(Object.keys(snap.kinds).sort()).toEqual([
+      "function",
+      "index",
+      "table",
+    ]);
+    // Serialize -> parse -> flatten back; diffing the restored snapshot vs the live schema is empty.
+    const restored = snapshotObjects(JSON.parse(JSON.stringify(snap)));
+    expect(planKinds(registry, restored, portable)).toEqual({
+      up: [],
+      down: [],
+    });
+  });
+});
+
+// --- buildKindDiff (the full Diff the CLI consumes) ---------------------------------------------
+
+describe("buildKindDiff produces up/down + display items + full", () => {
+  const prev = lowerSchema(registry, [
+    defineTable("user", [{ name: "name", type: "string" }]),
+  ]);
+  const next = lowerSchema(registry, [
+    defineTable("user", [
+      { name: "name", type: "string" },
+      { name: "age", type: "int" },
+    ]),
+    defineFunction("fmt").body("RETURN 1"),
+  ]);
+
+  test("up/down match planKinds; a change item + an add item are reported", () => {
+    const diff = buildKindDiff(registry, prev, next);
+    expect({ up: diff.up, down: diff.down }).toEqual(
+      planKinds(registry, prev, next),
+    );
+    // user changed (field added); fmt added.
+    const items = diff.items ?? [];
+    expect(items.find((i) => i.key === "table::user")?.op).toBe("change");
+    expect(items.find((i) => i.key === "function::fmt")?.op).toBe("add");
+  });
+
+  test("`full` lists every desired object's DDL, ordered across kinds", () => {
+    const full = buildKindDiff(registry, prev, next).full ?? [];
+    expect(full.map((s) => s.key)).toEqual(["table::user", "function::fmt"]);
+    expect(full[0].ddl).toContain("DEFINE TABLE user");
+    expect(full[0].ddl).toContain("DEFINE FIELD age ON user TYPE int");
   });
 });
