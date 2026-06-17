@@ -7,33 +7,27 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import type { Driver } from "../driver";
-import type { PortableDb } from "../driver/portable-ir";
+import type { KindSnapshot } from "../kind";
 
 // The legacy STATEMENT snapshot types (Snapshot/SnapshotStatement/EMPTY_SNAPSHOT) now live in
 // cli/structure.ts (the SurrealDB module that produces them) — this file is the NEUTRAL stored-
 // snapshot + migration-file engine.
 
 /**
- * The STORED snapshot (`_snapshot.json`): the canonical **portable IR** is the single source of
- * truth; DDL is derived via the driver (`driver.emit`/`driver.diff`). Diffed against the next
- * `generate`. `files` maps each object's table/db-level name to its project-root-relative source
- * file (display-only; attached to diff items by the CLI). A v1 snapshot on disk is upgraded on read.
+ * The STORED snapshot (`_snapshot.json`): the canonical schema is portable objects grouped by kind
+ * (a {@link KindSnapshot}); DDL is derived generically via the kind registry (`buildKindDiff`/
+ * `emitKinds`). Diffed against the next `generate`. `files` maps each object's name to its
+ * project-root-relative source file (display-only; attached to diff items by the CLI). Pre-launch:
+ * the format is free to change, so there is no on-disk version migration — an unrecognized snapshot
+ * is treated as empty (regenerate via `schemic gen --baseline`).
  */
 export interface StoredSnapshot {
-  version: 2;
+  version: 3;
   /** The driver that authored this snapshot ("surrealdb", "postgres", …). */
   driver: string;
-  portable: PortableDb;
+  /** Portable objects grouped by kind. */
+  schema: KindSnapshot;
   files?: Record<string, string>;
-}
-
-/** A pre-portable (v1) statement snapshot still on disk, for read-compat (lifted to portable). */
-interface LegacySnapshotV1 {
-  version: 1;
-  statements?: Record<string, unknown>;
-  /** The driver-private legacy struct (Surreal's string-kind IR) — opaque here; the driver lifts it. */
-  struct?: unknown;
 }
 
 /** A migration file on disk. The filename is the source of truth — there's no journal. */
@@ -50,9 +44,9 @@ const MIGRATION_EXT = ".surql";
 /** A fresh empty STORED snapshot. Fresh each call so callers can't alias shared empty state. */
 function emptyStored(): StoredSnapshot {
   return {
-    version: 2,
+    version: 3,
     driver: "surrealdb",
-    portable: { tables: [], functions: [], accesses: [] },
+    schema: { kinds: {} },
     files: {},
   };
 }
@@ -61,45 +55,16 @@ function emptyStored(): StoredSnapshot {
 export const EMPTY_STORED: StoredSnapshot = emptyStored();
 
 /**
- * Read the stored snapshot, upgrading a legacy v1 (statement) snapshot to the portable form. A v1
- * upgrade needs the `driver` (only it knows how to lift its legacy struct); v2 reads don't.
+ * Read the stored snapshot. Pre-launch: any snapshot that isn't the current `version: 3` shape (a
+ * pre-portable v1/v2, or absent) is treated as EMPTY — regenerate with `schemic gen --baseline`.
  */
-export function readSnapshot(
-  metaDir: string,
-  driver?: Pick<Driver, "name" | "upgradeSnapshot">,
-): StoredSnapshot {
+export function readSnapshot(metaDir: string): StoredSnapshot {
   const path = join(metaDir, SNAPSHOT_FILE);
   if (!existsSync(path)) return emptyStored();
-  const raw = JSON.parse(readFileSync(path, "utf8")) as
-    | StoredSnapshot
-    | LegacySnapshotV1;
-  if (raw.version === 2) return { files: {}, ...raw };
-  return upgradeV1(raw, driver);
-}
-
-/** Lift a v1 statement snapshot into the portable form via the driver's `upgradeSnapshot` hook. */
-function upgradeV1(
-  v1: LegacySnapshotV1,
-  driver?: Pick<Driver, "name" | "upgradeSnapshot">,
-): StoredSnapshot {
-  if (v1.struct) {
-    if (!driver?.upgradeSnapshot)
-      throw new Error(
-        "This snapshot predates the portable format and the active driver can't upgrade it. " +
-          "Run `schemic snapshot reset` then `schemic gen --baseline` to regenerate it.",
-      );
-    return {
-      version: 2,
-      driver: driver.name ?? "surrealdb",
-      portable: driver.upgradeSnapshot(v1.struct),
-      files: {},
-    };
-  }
-  if (Object.keys(v1.statements ?? {}).length === 0) return emptyStored();
-  throw new Error(
-    "The migration snapshot predates the portable format and has no recorded Struct. " +
-      "Run `schemic snapshot reset` then `schemic gen --baseline` to regenerate it.",
-  );
+  const raw = JSON.parse(readFileSync(path, "utf8")) as Partial<StoredSnapshot>;
+  if (raw.version === 3 && raw.driver && raw.schema)
+    return { files: {}, ...(raw as StoredSnapshot) };
+  return emptyStored();
 }
 
 export function writeSnapshot(metaDir: string, snapshot: StoredSnapshot): void {
