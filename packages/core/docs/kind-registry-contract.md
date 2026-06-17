@@ -193,18 +193,32 @@ is **registered** (unregistered ones are skipped), so you can run the registry p
 path during development and concatenate. But the target is the clean swap — DM `core-dev` if your
 dialect makes a true interim coexistence necessary and we'll add the merge.
 
-## 7. Open boundary decisions — confirm with core-dev before slice 2
+## 7. Boundary decisions — RESOLVED (surrealdb review, 2026-06-16)
 
-- **`index`/`event` as own kinds vs nested in the table** — recommendation: **own kinds** (matches the
-  graph ordering + keeps the table kind's portable form small). Push back if your dialect makes nesting
-  cleaner.
-- **Substrate line:** where exactly "neutral field/type vocabulary" ends and "kind" begins — a table's
-  fields use `PortableField`/`PortableType` unchanged; only the table-level structure moves into the
-  kind. Raise any field-shape needs (clauses you carry verbatim) so we keep them in the substrate.
-- **`overwrite` granularity:** the spine compares whole-object `emit` strings to detect change, then
-  calls `overwrite(prev, next)` once per changed object. If you need *clause-level* sub-diffing inside
-  one object (e.g. ALTER only the changed field), do it **inside** `overwrite` (slice 1's table kind
-  shows the pattern). Tell core-dev if you need finer hooks.
+- **`index`/`event` as own kinds vs nested in the table — OWN KINDS.** Confirmed: matches the graph
+  ordering, keeps the table kind's portable form small, and a driver that already emits separate
+  `kind:index`/`kind:event` statements drops in without a reshape. `index`/`event` carry their table via
+  `owner`/`deps`.
+- **Substrate line — CONFIRMED.** A table's fields use `PortableField`/`PortableType` unchanged; only
+  the table-level structure moves into the kind. `PortableField` already covers the full Surreal clause
+  set (flexible/default(+always)/value/computed/assert/readonly/comment/reference/permissions); raise
+  any field-shape your dialect needs and we keep it in the substrate.
+- **`overwrite` granularity — CONFIRMED.** The spine compares whole-object `emit` strings to detect a
+  change, then calls `overwrite(prev, next)` once per changed object; do clause-level sub-diffing (e.g.
+  `ALTER FIELD` only the changed field) **inside** `overwrite` (slice 1's table kind shows it). A
+  field add/change/remove shifts the table's `emit`, so the table flags changed and `overwrite` emits
+  the field-level delta.
+- **Authoring fan-out (one authored object → many kind objects) — DRIVER-SIDE EXPLODE, no contract
+  hook.** A dialect that authors indexes/events/constraints **inline** on the table (Surreal; Postgres)
+  expands one authored `TableDef` into `[table, ...index, ...event]` `Definable`s (each tagged with its
+  `kind`) **inside its own `Driver.lower`, before calling `lowerSchema`**. `KindEngine.lower` stays a
+  clean 1:1; the fan-out is dialect-specific authoring, and `lowerSchema` takes `Definable[]` so the
+  driver preprocesses freely. Keep source-file linkage driver-side — exploded children inherit the
+  table's file. (No `explode` hook is added to the contract; revisit only if a clean generic shape emerges.)
+- **`deps` fan-out — CONFIRMED sufficient.** `deps(portable): Ref[]` returns the FULL edge set, not just
+  event→function: Surreal field `VALUE`/`ASSERT`/`DEFAULT`, table/field `PERMISSIONS`, and access
+  `SIGNIN`/`AUTHENTICATE` can call `fn::`; a `SEARCH` index depends on its `ANALYZER`. Return them all;
+  the graph ignores edges to objects outside the current diff.
 
-**Questions / contract changes → DM `core-dev`** (per the repo's bridge rules). I'll fold confirmed
-decisions back into this doc and `kind-registry.md`.
+**Further questions / contract changes → DM `core-dev`** (per the repo's bridge rules). Confirmed
+decisions are folded back here and into `kind-registry.md`.
