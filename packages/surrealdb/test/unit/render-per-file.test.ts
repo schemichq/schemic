@@ -97,7 +97,9 @@ describe("renderPerFile", () => {
     expect(out).not.toContain(".$default(surql`false`)");
     // surql is imported from surrealdb, NOT folded into the @schemic/core import.
     expect(out).toContain(`import { surql } from "surrealdb";`);
-    expect(out).toContain(`import { s, defineTable } from "@schemic/surrealdb";`);
+    expect(out).toContain(
+      `import { s, defineTable } from "@schemic/surrealdb";`,
+    );
   });
 });
 

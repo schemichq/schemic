@@ -166,7 +166,9 @@ export const greet = defineFunction("greet", { name: s.string() })
       name: "greet",
       exportName: "greet",
       code: desired,
-      imports: [`import { defineFunction, s, surql } from "@schemic/surrealdb";`],
+      imports: [
+        `import { defineFunction, s, surql } from "@schemic/surrealdb";`,
+      ],
     };
     const { content } = mergeUnits(src, [unit], MIRROR);
     expect(content).toContain(`RETURN "hello"`);

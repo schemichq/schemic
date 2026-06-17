@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Diff, ResolvedConfig } from "@schemic/core";
-import type { SurrealParams } from "../config";
 import {
   type Filter,
   listMigrations,
@@ -9,6 +8,7 @@ import {
   parseFilter,
 } from "@schemic/core";
 import { escapeIdent, type Surreal } from "surrealdb";
+import type { SurrealParams } from "../config";
 import { type DefineStatement, overwriteStatement } from "../ddl";
 import { normalizeDb } from "./struct";
 import {

@@ -2,8 +2,8 @@
 // Zod drop-in philosophy (s.* is a Zod superset with the canonical type set). Shared suite lives in
 // @schemic/core/testing; each driver wires it to its own s / driver / defineTable.
 import {
-  describeDriverConformance,
   type DriverConformanceOptions,
+  describeDriverConformance,
 } from "@schemic/core/testing";
 import { defineTable, s, surrealDriver } from "@schemic/surrealdb";
 
