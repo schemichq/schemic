@@ -25,6 +25,7 @@ import {
   surql,
   surrealDriver,
 } from "@schemic/surrealdb";
+import { decompose } from "../../src/kinds/explode";
 import { lowerAll, surrealKinds } from "../../src/kinds/registry";
 
 // Lib-authored tables/defs vs the driver's src-typed signatures: cast at the seam (as buildSnapshot does).
@@ -382,6 +383,84 @@ describe("fn:: dependency ordering (function emits before its caller)", () => {
     expect(fnIdx(up)).toBeGreaterThanOrEqual(0);
     expect(fnIdx(up)).toBeLessThan(
       up.findIndex((l) => /^DEFINE ACCESS acct/.test(l)),
+    );
+  });
+});
+
+// The FACADE path the flip will use: Driver.diff(prev,next) = buildKindDiff(registry,
+// decompose(prevDb), decompose(nextDb)). decompose takes a fixed-slot PortableDb (the snapshot/lowered
+// side), so this exercises the real adapter — not just the authoring `explode`. Must equal surrealDriver.diff.
+describe("facade decompose parity (PortableDb -> registry)", () => {
+  const facade = (
+    prevT: AnyArr,
+    nextT: AnyArr,
+    prevD: AnyArr = [],
+    nextD: AnyArr = [],
+  ) => {
+    const prevDb = surrealDriver.lower(prevT, prevD);
+    const nextDb = surrealDriver.lower(nextT, nextD);
+    const d = buildKindDiff(surrealKinds, decompose(prevDb), decompose(nextDb));
+    return { up: d.up, down: d.down };
+  };
+  const facadeParity = (
+    prevT: AnyArr,
+    nextT: AnyArr,
+    prevD: AnyArr = [],
+    nextD: AnyArr = [],
+  ) =>
+    expect(facade(prevT, nextT, prevD, nextD)).toEqual(
+      legacy(prevT, nextT, prevD, nextD),
+    );
+
+  test("field change", () => {
+    facadeParity(
+      [defineTable("user", { id: s.string(), name: s.string() })],
+      [defineTable("user", { id: s.string(), name: s.string().optional() })],
+    );
+  });
+
+  test("add a table", () => {
+    facadeParity(
+      [User()],
+      [User(), defineTable("post", { id: s.string(), title: s.string() })],
+    );
+  });
+
+  test("add an index", () => {
+    facadeParity(
+      [defineTable("t", { id: s.string(), code: s.string() })],
+      [defineTable("t", { id: s.string(), code: s.string().unique() })],
+    );
+  });
+
+  test("add an event", () => {
+    facadeParity(
+      [defineTable("user", { id: s.string(), n: s.int() })],
+      [
+        defineTable("user", { id: s.string(), n: s.int() }).event("on_n", {
+          // biome-ignore lint/suspicious/noThenProperty: event DSL "then" clause, not a thenable.
+          then: surql`UPDATE $after.id SET touched = true`,
+        }),
+      ],
+    );
+  });
+
+  test("change a function", () => {
+    const a = defineFunction("add", { a: s.int(), b: s.int() })
+      .returns(s.int())
+      .body(surql`RETURN $a + $b`);
+    const b = defineFunction("add", { a: s.int(), b: s.int() })
+      .returns(s.int())
+      .body(surql`RETURN $a * $b`);
+    facadeParity([], [], [a], [b]);
+  });
+
+  test("add an access", () => {
+    facadeParity(
+      [],
+      [],
+      [],
+      [defineAccess("acct").record().signin(surql`SELECT 1`)],
     );
   });
 });
