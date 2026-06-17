@@ -6,8 +6,14 @@
 //   table       — the structured kind: columns (substrate) + PK + table CHECKs; CREATE TABLE; field-
 //                 level overwrite. A FK COLUMN stays a plain `text` column here; the FK CONSTRAINT is
 //                 its own kind (below) so the dependency graph can break mutual-FK cycles.
-//   index       — own kind, deps+owner -> its table; CREATE [UNIQUE] INDEX.
+//   index       — own kind, deps -> its table (no `owner`); CREATE [UNIQUE] INDEX.
 //   constraint  — own kind (FK first), deps -> [its table, the referenced table]; ALTER ADD CONSTRAINT.
+//
+// index/constraint DECLINE `owner` (opt-in clustering): without it the spine falls back to ordinal+name,
+// so the emit order is all tables -> all indexes -> all constraints (pg's rank-grouped convention),
+// not clustered per-table. Cross-table FK is then byte-identical to the fixed-slot pgEmit; a mixed
+// FK+index multi-table emit differs only in the fk-vs-index sub-order (same SET, deps-correct) — which
+// is why the live Driver stays fixed-slot until the coordinated Option-A flip (no double golden churn).
 //
 // `decompose` splits a normalized PortableDb into these kind objects — the Option-B facade adapter
 // (see ./index.ts): Driver.emit = emitKinds(registry, decompose(db)); Driver.diff = buildKindDiff(
@@ -194,9 +200,10 @@ const indexEngine: KindEngine<PgIndexPortable, PgIndexPortable> = {
     `CREATE ${i.unique ? "UNIQUE " : ""}INDEX ${escId(i.name)} ON ${escId(i.table)} (${i.cols.map(escId).join(", ")});`,
   ],
   remove: (i) => [`DROP INDEX IF EXISTS ${escId(i.name)};`],
-  // An index emits AFTER (and clusters next to) its table.
+  // An index emits AFTER its table (deps), but NO `owner` -> no clustering: the spine then falls back
+  // to ordinal+name, so all indexes emit as a rank group after all tables (pg's emit convention),
+  // rather than clustered next to each table. owner is opt-in readability we deliberately decline.
   deps: (i) => [tableRef(i.table)],
-  owner: (i) => tableRef(i.table),
   // no overwrite: an index change is a drop+recreate (the spine's default).
 };
 
@@ -215,12 +222,12 @@ const constraintEngine: KindEngine<PgConstraintPortable, PgConstraintPortable> =
     ],
     remove: (c) => [dropFkSql(c.table, c.column)],
     // A FK emits AFTER both its own table and the referenced table — this is what breaks mutual-FK
-    // cycles (tables have no deps, so they create first, then the constraints between them).
+    // cycles (tables have no deps, so they create first, then the constraints between them). NO
+    // `owner`: like the index kind, constraints emit as a rank group after all tables (pg convention).
     deps: (c) =>
       c.refTable === c.table
         ? [tableRef(c.table)]
         : [tableRef(c.table), tableRef(c.refTable)],
-    owner: (c) => tableRef(c.table),
     // no overwrite: a FK change is drop+recreate (the spine's default).
   };
 

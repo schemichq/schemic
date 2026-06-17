@@ -92,7 +92,7 @@ describe("emitKinds parity vs the fixed-slot pgEmit", () => {
     expect(emitK(db)).toEqual(emitFixed(db));
   });
 
-  test("cross-table FK: same statement SET as pgEmit, and the FK emits after both CREATEs", () => {
+  test("cross-table FK is byte-identical (no owner -> rank-grouped: tables, then constraints)", () => {
     const db = pdb([
       tbl("post", [
         f("title", scalar("string")),
@@ -100,9 +100,9 @@ describe("emitKinds parity vs the fixed-slot pgEmit", () => {
       ]),
       tbl("user", [f("name", scalar("string"))]),
     ]);
-    // Ordering convention differs (spine clusters per table; pgEmit groups by rank) — so the SET is
-    // equal even when the order isn't.
-    expect([...emitK(db)].sort()).toEqual([...emitFixed(db)].sort());
+    // With `owner` declined, the spine emits all CREATEs then all constraints (by name) — exactly
+    // pgEmit's rank grouping. The FK still emits after BOTH its table and the referenced table.
+    expect(emitK(db)).toEqual(emitFixed(db));
     const out = emitK(db);
     const fk = out.findIndex((s) => s.includes("ADD CONSTRAINT"));
     expect(
