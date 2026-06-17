@@ -169,3 +169,41 @@ This is where the honesty lives — projections, redactions, and emit-but-don't-
 | Access/Auth (RECORD) | `[x]` |
 | Access/Auth (JWT, BEARER) | `[~]` — secrets redacted |
 | DB-level (param/sequence/analyzer/user/config/api/bucket/model) | `[ ]` |
+
+---
+
+## Kind inventory (core-v2 kind-registry migration)
+
+Tracks the migration of this driver's object kinds onto the `@schemic/core` **kind registry**
+(`packages/core/docs/kind-registry-contract.md`). Lists **every** kind SurrealDB has — including ones
+not registered yet — so the gaps stay visible. `field` is **substrate nested in `table`**, not a kind.
+
+A kind is `[x]` in a column only when that capability round-trips through the **registry path**
+(`KindEngine` on `src/kinds/`), independently of the still-live fixed-slot path.
+
+**Status:** slice 2 (`table` + `index` + `event`) is **parity-green** — the registry path reproduces
+`surrealDriver.diff` byte-for-byte across add/change/remove of every column, asserted in
+`test/unit/kind-parity.test.ts`. The kinds run **alongside** the legacy `Driver` (not yet wired in):
+the Option-B facade (route `Driver.diff/emit` through the registry via a `PortableDb ↔ PortableObject[]`
+adapter, snapshot unchanged) and per-kind `introspect` land next, then the coordinated Option-A flip.
+
+| Kind | Registered | `emit` | `overwrite`/diff | `introspect` | Notes |
+|---|---|---|---|---|---|
+| `table` (NORMAL/ANY/RELATION) | `[x]` | `[x]` | `[x]` | `[ ]` | fields nested; field+head ALTER inside `overwrite` (delegates to `diffSnapshots`); RELATION in/out → `deps` |
+| `field` *(substrate, nested in `table`)* | n/a | `[x]` | `[x]` | `[ ]` | `PortableField` clauses carried verbatim; **not** its own kind |
+| `index` (plain/UNIQUE/composite/COUNT) | `[x]` | `[x]` | `[x]` | `[ ]` | own kind; `deps`/`owner` → table; change = recreate (REMOVE + DEFINE) |
+| `event` | `[x]` | `[x]` | `[x]` | `[ ]` | own kind; `deps`/`owner` → table; change = `DEFINE EVENT OVERWRITE` |
+| `function` (`fn::`) | `[ ]` | `[ ]` | `[ ]` | `[ ]` | opaque kind, later slice; still on the fixed-slot path |
+| `access` (RECORD/JWT/BEARER) | `[ ]` | `[ ]` | `[ ]` | `[ ]` | opaque kind, later slice; still on the fixed-slot path |
+| `param` (`DEFINE PARAM`) | `[ ]` | `[ ]` | `[ ]` | `[ ]` | not yet in the driver at all |
+| `analyzer` (`DEFINE ANALYZER`) | `[ ]` | `[ ]` | `[ ]` | `[ ]` | needed for SEARCH indexes (`index` → `deps` → analyzer) |
+| `user` (`DEFINE USER`) | `[ ]` | `[ ]` | `[ ]` | `[ ]` | not yet in the driver |
+| `model` (`DEFINE MODEL`) | `[ ]` | `[ ]` | `[ ]` | `[ ]` | not yet in the driver |
+| `config` (`DEFINE CONFIG GRAPHQL/API`) | `[ ]` | `[ ]` | `[ ]` | `[ ]` | 3.x; not yet in the driver |
+| `api` / `bucket` (3.x) | `[ ]` | `[ ]` | `[ ]` | `[ ]` | not yet in the driver |
+
+**Deferred (tracked):** per-kind `introspect` (slice one memoized `INFO … STRUCTURE` read across kinds,
+§5) is not yet on the engines — live reads still go through the legacy `introspectStructured`. `deps`
+currently carries RELATION in/out edges; the `fn::` edges from field `VALUE`/`ASSERT`/`DEFAULT`,
+table/field `PERMISSIONS`, and access `SIGNIN`/`AUTHENTICATE` (and SEARCH `index` → `analyzer`) land
+when `function`/`analyzer` register (they only affect ordering, so parity holds without them today).
