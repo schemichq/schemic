@@ -184,20 +184,30 @@ A kind is `[x]` in a column only when that capability round-trips through the **
 **Status:** every kind SurrealDB currently emits — `table`, `index`, `event`, `function`, `access` — is
 **registry-complete + parity-green**: the registry path reproduces `surrealDriver.diff` byte-for-byte
 across add/change/remove of every one, asserted in `test/unit/kind-parity.test.ts`. The kinds run
-**alongside** the legacy `Driver` (facade-test phase — not wired into production). The facade adapter
-(`decompose`: `PortableDb → PortableObject[]`) is built + parity-tested — `buildKindDiff(registry,
-decompose(prev), decompose(next))` equals `surrealDriver.diff`, so the path `Driver.diff` will route
-through at the flip is proven. What's left: wire that facade into the production `Driver` and add
-`introspectAll` (one `INFO STRUCTURE` read fanned per kind), then the coordinated Option-A flip.
+**alongside** the legacy `Driver` (facade-test phase — not wired into production). Built + proven:
+- the facade adapter (`decompose`: `PortableDb → PortableObject[]`) — `buildKindDiff(registry,
+  decompose(prev), decompose(next))` equals `surrealDriver.diff` on `up`/`down`;
+- the reverse hook (`introspectAll`) — live round-trips on SurrealDB 3.1.3 (zero phantom diff).
+
+Wiring the facade into the production `Driver` is **deferred to the coordinated Option-A flip**: the
+registry's diff `up`/`down` is byte-exact, but its `items`/`full` are per-kind-object (a field change is
+one `table::user` item) where the legacy display is per-statement (`field:user:name`). Swapping
+`Driver.diff` now would change `schemic diff`'s display — a UX call being settled before the flip — so per
+the "residual delta → facade test-only" rule it stays test-only until then.
+
+Introspect is via the registry's reverse hook `introspectAll` (one `INFO … STRUCTURE` read fanned per
+kind, canonicalized through `structuredSnapshot` like `lower`), live-validated to round-trip on SurrealDB
+3.1.3 (`test/parity/introspect-kinds.test.ts`). It is not yet wired into the production `Driver.introspect`
+(that's the flip); the standalone hook round-trips today.
 
 | Kind | Registered | `emit` | `overwrite`/diff | `introspect` | Notes |
 |---|---|---|---|---|---|
-| `table` (NORMAL/ANY/RELATION) | `[x]` | `[x]` | `[x]` | `[ ]` | fields nested; field+head ALTER inside `overwrite` (delegates to `diffSnapshots`); RELATION in/out + `fn::` → `deps` |
-| `field` *(substrate, nested in `table`)* | n/a | `[x]` | `[x]` | `[ ]` | `PortableField` clauses carried verbatim; **not** its own kind |
-| `index` (plain/UNIQUE/composite/COUNT) | `[x]` | `[x]` | `[x]` | `[ ]` | own kind; `deps`/`owner` → table; change = recreate (REMOVE + DEFINE) |
-| `event` | `[x]` | `[x]` | `[x]` | `[ ]` | own kind; `deps`/`owner` → table + `fn::` callees; change = `DEFINE EVENT OVERWRITE` |
-| `function` (`fn::`) | `[x]` | `[x]` | `[x]` | `[ ]` | opaque kind; `deps` = other `fn::` it calls; change = `DEFINE FUNCTION OVERWRITE` |
-| `access` (RECORD/JWT/BEARER) | `[x]` | `[x]` | `[x]` | `[ ]` | opaque kind; `deps` = `fn::` in SIGNUP/SIGNIN/AUTHENTICATE; change = `DEFINE ACCESS OVERWRITE` |
+| `table` (NORMAL/ANY/RELATION) | `[x]` | `[x]` | `[x]` | `[x]` | fields nested; field+head ALTER inside `overwrite` (delegates to `diffSnapshots`); RELATION in/out + `fn::` → `deps` |
+| `field` *(substrate, nested in `table`)* | n/a | `[x]` | `[x]` | `[x]` | `PortableField` clauses carried verbatim; **not** its own kind |
+| `index` (plain/UNIQUE/composite/COUNT) | `[x]` | `[x]` | `[x]` | `[x]` | own kind; `deps`/`owner` → table; change = recreate (REMOVE + DEFINE) |
+| `event` | `[x]` | `[x]` | `[x]` | `[x]` | own kind; `deps`/`owner` → table + `fn::` callees; change = `DEFINE EVENT OVERWRITE` |
+| `function` (`fn::`) | `[x]` | `[x]` | `[x]` | `[x]` | opaque kind; `deps` = other `fn::` it calls; change = `DEFINE FUNCTION OVERWRITE` |
+| `access` (RECORD/JWT/BEARER) | `[x]` | `[x]` | `[x]` | `[~]` | opaque kind; `deps` = `fn::` in SIGNUP/SIGNIN/AUTHENTICATE; change = `DEFINE ACCESS OVERWRITE`; introspect partial (JWT/BEARER secrets redacted, as on the legacy path) |
 | `param` (`DEFINE PARAM`) | `[ ]` | `[ ]` | `[ ]` | `[ ]` | not yet in the driver at all |
 | `analyzer` (`DEFINE ANALYZER`) | `[ ]` | `[ ]` | `[ ]` | `[ ]` | needed for SEARCH indexes (`index` → `deps` → analyzer) |
 | `user` (`DEFINE USER`) | `[ ]` | `[ ]` | `[ ]` | `[ ]` | not yet in the driver |
@@ -215,7 +225,6 @@ to migrate; it's listed here only so the gap stays visible.
 references; each becomes a `deps → {kind:"function"}` so a called function emits **before** its caller
 (the function-before-table case the ordinal alone gets wrong). Asserted in the parity suite.
 
-**Deferred (tracked):** per-kind `introspect` (one memoized `INFO … STRUCTURE` read across kinds, §5) is
-not yet on the engines — live reads still go through the legacy `introspectStructured`; it reuses the
-existing `introspect → decompose` path and lands with the facade. SEARCH `index` → `analyzer` edges land
-when the `analyzer` kind is implemented.
+**Deferred (tracked):** SEARCH `index` → `analyzer` dependency edges land when the `analyzer` kind is
+implemented. The display-granularity decision (per-statement vs per-kind-object `items`/`full`) is a UX
+call owned by core/Manuel, settled before the flip.

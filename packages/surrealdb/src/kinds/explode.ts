@@ -18,10 +18,11 @@
 // is harmless. (SEARCH index -> analyzer edges land when the analyzer kind is registered.)
 
 import type { AnyTable, AuthoredDef, PortableDb, Ref } from "@schemic/core";
+import type { Surreal } from "surrealdb";
 import { schemaStruct } from "../cli/lower";
 import { normalizeDb } from "../cli/struct";
 import type { DbStructured } from "../cli/structure";
-import { structuredSnapshot } from "../cli/structure";
+import { introspectStructured, structuredSnapshot } from "../cli/structure";
 import type { DefineStatement } from "../ddl";
 import { lowerDb } from "../driver/surreal-ir";
 import type { Shape, StandaloneDef, TableDef } from "../pure";
@@ -135,4 +136,19 @@ export function explodeSchema(
  */
 export function decompose(db: PortableDb): SurrealPortable[] {
   return fromStructured(normalizeDb(lowerDb(db)));
+}
+
+/**
+ * The reverse path (flip-plan §4): a live connection -> per-kind portable objects, via ONE
+ * `INFO … STRUCTURE` read (`introspectStructured`) fanned across every kind. Normalized the same way as
+ * {@link decompose}/{@link explodeSchema} (`normalizeDb` → canonical `structuredSnapshot`), so an
+ * introspected schema canonicalizes IDENTICALLY to a lowered one — no introspect phantom-diffs. This is
+ * the COMPLETE introspection the flip needs: it returns objects for every registered kind that round-
+ * trips (table/index/event/function/access). `exclude` drops tables by name (e.g. the migrations table).
+ */
+export async function introspectAll(
+  conn: Surreal,
+  exclude?: Set<string>,
+): Promise<SurrealPortable[]> {
+  return fromStructured(normalizeDb(await introspectStructured(conn, exclude)));
 }
