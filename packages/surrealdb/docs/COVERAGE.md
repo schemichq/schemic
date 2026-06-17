@@ -184,9 +184,11 @@ A kind is `[x]` in a column only when that capability round-trips through the **
 **Status:** every kind SurrealDB currently emits — `table`, `index`, `event`, `function`, `access` — is
 **registry-complete + parity-green**: the registry path reproduces `surrealDriver.diff` byte-for-byte
 across add/change/remove of every one, asserted in `test/unit/kind-parity.test.ts`. The kinds run
-**alongside** the legacy `Driver` (facade-test phase — not wired into production). What's left before
-the coordinated Option-A flip: the Option-B facade (route `Driver.diff/emit` through the registry via a
-`PortableDb ↔ PortableObject[]` adapter, snapshot unchanged) and per-kind `introspect`.
+**alongside** the legacy `Driver` (facade-test phase — not wired into production). The facade adapter
+(`decompose`: `PortableDb → PortableObject[]`) is built + parity-tested — `buildKindDiff(registry,
+decompose(prev), decompose(next))` equals `surrealDriver.diff`, so the path `Driver.diff` will route
+through at the flip is proven. What's left: wire that facade into the production `Driver` and add
+`introspectAll` (one `INFO STRUCTURE` read fanned per kind), then the coordinated Option-A flip.
 
 | Kind | Registered | `emit` | `overwrite`/diff | `introspect` | Notes |
 |---|---|---|---|---|---|

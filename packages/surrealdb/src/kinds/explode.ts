@@ -17,10 +17,13 @@
 // calling another fn::). Edges to functions outside the diff are ignored by the spine, so over-reporting
 // is harmless. (SEARCH index -> analyzer edges land when the analyzer kind is registered.)
 
-import type { AnyTable, AuthoredDef, Ref } from "@schemic/core";
+import type { AnyTable, AuthoredDef, PortableDb, Ref } from "@schemic/core";
 import { schemaStruct } from "../cli/lower";
+import { normalizeDb } from "../cli/struct";
+import type { DbStructured } from "../cli/structure";
 import { structuredSnapshot } from "../cli/structure";
 import type { DefineStatement } from "../ddl";
+import { lowerDb } from "../driver/surreal-ir";
 import type { Shape, StandaloneDef, TableDef } from "../pure";
 import type { SurrealPortable } from "./portable";
 
@@ -49,19 +52,14 @@ function depsOf(ddls: string[], base: Ref[] = [], self?: string): Ref[] {
 }
 
 /**
- * Flatten authored tables (+ standalone defs) into per-kind portable objects: a {@link PTable} per
- * table (head + nested fields), a {@link PIndex} per index, a {@link PEvent} per event, and the db-level
- * {@link PFunction}/{@link PAccess} objects. Params mirror `buildSnapshot`'s public bound
- * (`AnyTable`/`AuthoredDef`) and cast to the src `TableDef` the canonical pipeline reads.
+ * The shared core: a NORMALIZED Struct IR -> per-kind portable objects. Renders each object's canonical
+ * `DEFINE` statement(s) via `structuredSnapshot`, then partitions: a {@link PTable} per table (head +
+ * nested fields), a {@link PIndex} per index, a {@link PEvent} per event, and the db-level
+ * {@link PFunction}/{@link PAccess} objects — each carrying its `fn::`/endpoint dependency edges.
+ * Both entry points ({@link explodeSchema} from authoring, {@link decompose} from a {@link PortableDb})
+ * feed their normalized Struct here, so they produce byte-identical portable objects.
  */
-export function explodeSchema(
-  tables: AnyTable[],
-  defs: AuthoredDef[] = [],
-): SurrealPortable[] {
-  const db = schemaStruct(
-    tables as unknown as TableDef<string, Shape>[],
-    defs as unknown as StandaloneDef[],
-  );
+function fromStructured(db: DbStructured): SurrealPortable[] {
   const stmts = Object.values(structuredSnapshot(db).statements);
   const of = (kind: DefineStatement["kind"]) =>
     stmts.filter((s) => s.kind === kind);
@@ -110,4 +108,31 @@ export function explodeSchema(
     out.push({ kind: "access", name: s.name, stmt: s, deps: depsOf([s.ddl]) });
 
   return out;
+}
+
+/**
+ * Authoring -> per-kind portable objects (what `Driver.lower` wraps around `lowerSchema`). Params mirror
+ * `buildSnapshot`'s public bound (`AnyTable`/`AuthoredDef`) and cast to the src `TableDef` the canonical
+ * pipeline reads. `schemaStruct` already normalizes (events attached, functions/accesses resolved).
+ */
+export function explodeSchema(
+  tables: AnyTable[],
+  defs: AuthoredDef[] = [],
+): SurrealPortable[] {
+  return fromStructured(
+    schemaStruct(
+      tables as unknown as TableDef<string, Shape>[],
+      defs as unknown as StandaloneDef[],
+    ),
+  );
+}
+
+/**
+ * The FACADE adapter: a fixed-slot {@link PortableDb} -> per-kind portable objects. This is what
+ * `Driver.diff(prev, next)` will route through at the flip — `buildKindDiff(registry, decompose(prev),
+ * decompose(next))`. We normalize the same way the legacy snapshot does (`normalizeDb(lowerDb(db))`) so
+ * a decomposed `PortableDb` and an `explodeSchema`'d authoring side converge to identical objects.
+ */
+export function decompose(db: PortableDb): SurrealPortable[] {
+  return fromStructured(normalizeDb(lowerDb(db)));
 }
