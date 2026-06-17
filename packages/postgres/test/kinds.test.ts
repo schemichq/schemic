@@ -290,4 +290,36 @@ describe("kind path round-trips through a real engine", () => {
       await conn.close();
     }
   });
+
+  test("a unique index round-trips (introspectAll reads it -> the index kind has no phantom)", async () => {
+    const desired = pdb([
+      tbl("account", [f("email", scalar("string"))], {
+        indexes: [
+          { name: "account_email_key", cols: ["email"], spec: "UNIQUE" },
+        ],
+      }),
+    ]);
+    const conn = (await driver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
+    try {
+      await driver.apply(conn, emitK(desired));
+      const live = await driver.introspect(conn);
+      // The index is read back (pg_index), so decompose(live) has the matching index object — no
+      // presence phantom. No normalize (it would zero indexes).
+      const { up, down } = buildKindDiff(
+        registry,
+        decompose(live),
+        decompose(desired),
+      );
+      expect({ up, down }).toEqual({ up: [], down: [] });
+      // sanity: introspect actually surfaced the unique index
+      const acct = live.tables.find((t) => t.name === "account");
+      expect(acct?.indexes).toEqual([
+        { name: "account_email_key", cols: ["email"], spec: "UNIQUE" },
+      ]);
+    } finally {
+      await conn.close();
+    }
+  });
 });

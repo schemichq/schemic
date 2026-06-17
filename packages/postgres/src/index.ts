@@ -31,6 +31,7 @@ import type {
   MigrationStore,
   PortableDb,
   PortableField,
+  PortableIndex,
   PortableTable,
   PortableType,
   ResolveContext,
@@ -410,6 +411,11 @@ interface PkRow {
   table_name: string;
   column_name: string;
 }
+interface IdxRow {
+  table_name: string;
+  index_name: string;
+  column_name: string;
+}
 
 const nativeT = (name: string, params?: (string | number)[]): PortableType =>
   params && params.length > 0
@@ -516,6 +522,21 @@ async function pgIntrospect(
       WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = 'public'
       ORDER BY kcu.ordinal_position`,
   );
+  // UNIQUE secondary indexes (NOT the PK's implicit index, NOT expression indexes) — the ones this
+  // driver emits via $unique/.index({unique}). Columns kept in index order. Required so the `index`
+  // kind ROUND-TRIPS (the registry diffs by presence; an un-introspected index would phantom-add).
+  const { rows: idxs } = await conn.query<IdxRow>(
+    `SELECT t.relname AS table_name, i.relname AS index_name, a.attname AS column_name
+       FROM pg_class t
+       JOIN pg_namespace n ON n.oid = t.relnamespace AND n.nspname = 'public'
+       JOIN pg_index ix ON ix.indrelid = t.oid AND ix.indisunique AND NOT ix.indisprimary
+       JOIN pg_class i ON i.oid = ix.indexrelid
+       JOIN LATERAL unnest(string_to_array(ix.indkey::text, ' ')::int[])
+            WITH ORDINALITY AS k(attnum, ord) ON true
+       JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+      WHERE t.relkind = 'r'
+      ORDER BY t.relname, i.relname, k.ord`,
+  );
 
   const fkBy = new Map<string, FkRow>();
   for (const f of fks) fkBy.set(`${f.table_name}.${f.column_name}`, f);
@@ -564,13 +585,28 @@ async function pgIntrospect(
     byTable.set(c.table_name, list);
   }
 
+  // Group index rows -> PortableIndex[] per table (columns in index order, dedup by index name).
+  const idxBy = new Map<string, Map<string, PortableIndex>>();
+  for (const r of idxs) {
+    if (skip.has(r.table_name)) continue;
+    const byName = idxBy.get(r.table_name) ?? new Map<string, PortableIndex>();
+    const ix = byName.get(r.index_name) ?? {
+      name: r.index_name,
+      cols: [],
+      spec: "UNIQUE",
+    };
+    ix.cols.push(r.column_name);
+    byName.set(r.index_name, ix);
+    idxBy.set(r.table_name, byName);
+  }
+
   const tables: PortableTable[] = [...seen].map((name) => {
     const t: PortableTable = {
       name,
       kind: { kind: "NORMAL" },
       schemafull: true,
       fields: byTable.get(name) ?? [],
-      indexes: [],
+      indexes: [...(idxBy.get(name)?.values() ?? [])],
       events: [],
     };
     if (!isImplicit(name)) {
