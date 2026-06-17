@@ -260,6 +260,8 @@ export function fromTableDef(t: TableDef<string, Shape>): StructTable {
   if (cfg.permissions !== undefined) {
     out.permissions = lowerPermissions(cfg.permissions, TABLE_PERM_OPS);
   }
+  // A pre-computed VIEW — the inlined `SELECT …` (without the `AS ` keyword; canonical adds it).
+  if (cfg.view !== undefined) out.view = eventClause(cfg.view);
   return out;
 }
 

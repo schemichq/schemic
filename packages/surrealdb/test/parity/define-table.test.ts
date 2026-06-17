@@ -9,7 +9,7 @@
  *   - PULL: introspect -> `renderPerFile` regenerates the authoring call for the clause (so a `pull`
  *     reproduces the table faithfully).
  *
- * `AS SELECT` (pre-computed view tables) is the one unsupported clause — tracked as a `todo`.
+ * `AS SELECT` pre-computed view tables (`defineView`) are covered too — the full `DEFINE TABLE` head.
  * Skipped automatically when no SurrealDB is reachable (CI), isolated in a scratch namespace/db reset
  * before each test.
  */
@@ -21,7 +21,13 @@ import { introspectStructured } from "../../src/cli/structure";
 import { emitTable } from "../../src/ddl";
 import { introspectAll } from "../../src/kinds/explode";
 import { lowerAll, surrealKinds } from "../../src/kinds/registry";
-import { defineRelation, defineTable, s, type TableDef } from "../../src/pure";
+import {
+  defineRelation,
+  defineTable,
+  defineView,
+  s,
+  type TableDef,
+} from "../../src/pure";
 
 const NS = "__sz_deftable";
 const DB = "deftable";
@@ -274,8 +280,39 @@ live("combinations", () => {
   });
 });
 
-// --- the one gap -------------------------------------------------------------------------------
+// --- AS SELECT (pre-computed view tables) ------------------------------------------------------
 
-live("unsupported", () => {
-  test.todo("AS SELECT (pre-computed view table) — DEFINE TABLE … AS SELECT … not yet supported (see docs/COVERAGE.md)", () => {});
+live("AS SELECT (pre-computed view)", () => {
+  const Person = () =>
+    defineTable("dt_person", {
+      id: s.string(),
+      name: s.string(),
+      age: s.int(),
+    });
+
+  test("a plain projection view round-trips; pull renders defineView()", async () => {
+    const view = defineView(
+      "dt_adults",
+      surql`SELECT name, age FROM dt_person WHERE age >= 18`,
+    );
+    const { pulled } = await roundTrip([Person(), view], "dt_adults");
+    expect(pulled).toContain("defineView(");
+    expect(pulled).toContain("SELECT name, age FROM dt_person WHERE age >= 18");
+    // a view's TS uses no `s.*` — only the factory + surql are imported.
+    expect(pulled).toContain(
+      'import { defineView } from "@schemic/surrealdb";',
+    );
+    expect(pulled).not.toContain(".schemaless()");
+  });
+
+  test("an aggregate view (GROUP BY) + .comment() round-trips", async () => {
+    const view = defineView(
+      "dt_by_name",
+      surql`SELECT name, count() AS total FROM dt_person GROUP BY name`,
+    ).comment("name counts");
+    const { pulled } = await roundTrip([Person(), view], "dt_by_name");
+    expect(pulled).toContain("defineView(");
+    expect(pulled).toContain("GROUP BY name");
+    expect(pulled).toContain('.comment("name counts")');
+  });
 });

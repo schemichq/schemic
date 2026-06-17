@@ -78,6 +78,7 @@ export {
   defineFunction,
   defineRelation,
   defineTable,
+  defineView,
   EventDef,
   FunctionDef,
   formatForAssert,

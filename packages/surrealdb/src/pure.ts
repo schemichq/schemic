@@ -1338,6 +1338,11 @@ export interface TableConfig {
   events?: TableEvent[];
   /** `CHANGEFEED <dur> [INCLUDE ORIGINAL]`. See `.changefeed(dur, opts?)`. */
   changefeed?: { expiry: string; includeOriginal?: boolean };
+  /**
+   * A pre-computed (materialized) VIEW — `AS <SELECT …>`. When set, the table is computed from the
+   * query (forced `TYPE ANY SCHEMALESS`, no authored fields). See {@link defineView}.
+   */
+  view?: Expr;
 }
 
 /** A table index definition (single- or multi-field, or a row-count index). */
@@ -2318,6 +2323,29 @@ export function defineRelation<Name extends string, S extends Shape = {}>(
   fields?: S & RejectNoDdl<S>,
 ): RelationDef<Name, S> {
   return new RelationDef(name, (fields ?? {}) as S);
+}
+
+/**
+ * Define a pre-computed (materialized) VIEW table — `DEFINE TABLE <name> TYPE ANY SCHEMALESS AS
+ * <query>`. Its rows are computed from the SELECT (SurrealDB keeps them in sync as the source tables
+ * change), so a view has NO authored fields/id. Chain `.permissions()` / `.comment()` / `.changefeed()`
+ * as on any table:
+ *
+ * ```ts
+ * export const Adults = defineView("adults", surql`SELECT name, age FROM person WHERE age >= 18`);
+ * ```
+ */
+export function defineView<Name extends string>(
+  name: Name,
+  // biome-ignore lint/complexity/noBannedTypes: an empty shape — a view has no authored fields.
+  query: Expr,
+): TableDef<Name, {}> {
+  // biome-ignore lint/complexity/noBannedTypes: see above.
+  return new TableDef<Name, {}>(name, {} as Fields<{}>, {
+    schemafull: false,
+    type: "any",
+    view: query,
+  });
 }
 
 /**

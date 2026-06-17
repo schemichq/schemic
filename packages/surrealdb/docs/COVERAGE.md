@@ -26,8 +26,12 @@ live parity suites (`test/parity/{struct,live,canonical}-parity.test.ts`) and th
 - [x] table `PERMISSIONS FOR select/create/update/delete [WHERE …]` — `.permissions(spec)`
 - [x] `CHANGEFEED <dur> [INCLUDE ORIGINAL]` — `.changefeed(expiry, opts?)` (emitted + introspected)
 - [x] `DROP`-marked tables — `.drop(true)`
-- [ ] `DEFINE TABLE … AS SELECT …` (views / computed/materialized tables) — no builder; not introspected
+- [x] `TYPE RELATION … ENFORCED` — `defineRelation().enforced()` (round-trips: introspect + canonical + pull)
+- [x] `DEFINE TABLE … AS SELECT …` (pre-computed/materialized view tables) — `defineView(name, surql\`SELECT …\`)`
 - [ ] `ALTER TABLE` / table-level `CHANGEFEED` drop semantics beyond redefine
+
+> The **full `DEFINE TABLE` head round-trips** (push + pull) — every permutation is exercised live in
+> `test/parity/define-table.test.ts` against SurrealDB 3.1.3.
 
 ## Fields & types
 
@@ -160,7 +164,7 @@ This is where the honesty lives — projections, redactions, and emit-but-don't-
 
 | Area | Status |
 |---|---|
-| Tables (schema mode, type, perms, changefeed, comment, drop, relations) | `[x]` — views `[ ]` |
+| Tables (schema mode, type, perms, changefeed, comment, drop, relations, views) | `[x]` — full `DEFINE TABLE` head |
 | Field types (scalars, geometry, containers, records, literals, unions, tuples, optionality) | `[x]` — range/regex `[ ]`, object-unions/open-maps `[~]` |
 | Field clauses (default/value/computed/assert/readonly/comment/flexible/permissions/reference) | `[x]` |
 | Indexes (plain, unique, composite, count) | `[x]` — full-text/vector/modifiers `[ ]` |

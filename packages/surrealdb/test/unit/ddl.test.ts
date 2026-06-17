@@ -5,6 +5,7 @@ import { emitField, emitTable, renderPermissions } from "../../src/ddl";
 import {
   defineRelation,
   defineTable,
+  defineView,
   SField,
   type Shape,
   s,
@@ -508,6 +509,29 @@ describe("emitTable", () => {
   test("typeAny -> TYPE ANY (default is TYPE NORMAL)", () => {
     expect(emitTable(User).split("\n")[0]).toContain("TYPE NORMAL");
     expect(emitTable(User.typeAny()).split("\n")[0]).toContain("TYPE ANY");
+  });
+
+  test("defineView -> TYPE ANY SCHEMALESS AS <SELECT>, no DEFINE FIELD", () => {
+    const v = defineView(
+      "adults",
+      surql`SELECT name, age FROM person WHERE age >= 18`,
+    );
+    const out = emitTable(v);
+    expect(out).toBe(
+      "DEFINE TABLE adults TYPE ANY SCHEMALESS AS SELECT name, age FROM person WHERE age >= 18;",
+    );
+    // a view is computed — it emits no DEFINE FIELD statements (not even the implicit id).
+    expect(out).not.toContain("DEFINE FIELD");
+  });
+
+  test("a view carries .comment()/.changefeed() onto the DEFINE TABLE head", () => {
+    const v = defineView("v", surql`SELECT * FROM person`)
+      .comment("a view")
+      .changefeed("1h");
+    const head = emitTable(v).split("\n")[0];
+    expect(head).toContain("AS SELECT * FROM person");
+    expect(head).toContain('COMMENT "a view"');
+    expect(head).toContain("CHANGEFEED 1h");
   });
 
   test("object .loose()/.flexible() -> FLEXIBLE; .strict()/default -> not", () => {

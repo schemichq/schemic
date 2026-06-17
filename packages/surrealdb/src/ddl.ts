@@ -688,6 +688,9 @@ export function emitStatements(
   const clauses: Record<string, string> = { TYPE: `TYPE ${type}` };
   if (t.config.drop) clauses.DROP = "DROP";
   clauses.SCHEMA = t.config.schemafull ? "SCHEMAFULL" : "SCHEMALESS";
+  // A pre-computed VIEW: `AS <SELECT …>` (the query is inlined like any other expression).
+  if (t.config.view !== undefined)
+    clauses.AS = `AS ${eventClause(t.config.view)}`;
   if (t.config.changefeed) {
     clauses.CHANGEFEED = `CHANGEFEED ${t.config.changefeed.expiry}${
       t.config.changefeed.includeOriginal ? " INCLUDE ORIGINAL" : ""
@@ -714,10 +717,12 @@ export function emitStatements(
       clauses,
     },
   ];
-  for (const [name, field] of Object.entries(t.fields)) {
-    if (implicit.has(name)) continue;
-    out.push(...emitFieldStatements(name, t.name, field as SField, opts));
-  }
+  // A view's rows are computed from its query — it has no DEFINE FIELD statements.
+  if (!t.config.view)
+    for (const [name, field] of Object.entries(t.fields)) {
+      if (implicit.has(name)) continue;
+      out.push(...emitFieldStatements(name, t.name, field as SField, opts));
+    }
   // Composite indexes declared via `.index(name, fields, …)`. A `count` index has no FIELDS.
   for (const idx of t.config.indexes ?? []) {
     const spec = idx.count
@@ -846,6 +851,7 @@ const TABLE_CLAUSE_ORDER = [
   "TYPE",
   "DROP",
   "SCHEMA",
+  "AS",
   "CHANGEFEED",
   "COMMENT",
   "PERMISSIONS",

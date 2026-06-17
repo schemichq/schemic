@@ -469,6 +469,24 @@ function renderTableConst(
   t: StructTable,
   ctx: RenderCtx,
 ): { code: string; factory: string } {
+  // A pre-computed VIEW: `defineView(name, surql\`SELECT …\`)` — no fields, then the common table
+  // config (comment / permissions / changefeed); TYPE ANY + SCHEMALESS are implied by defineView.
+  if (t.view !== undefined) {
+    let code = `export const ${ctx.constOf(t.name)} = defineView(${JSON.stringify(t.name)}, surql\`${t.view}\`)`;
+    if (t.comment) code += `\n  .comment(${JSON.stringify(t.comment)})`;
+    const vperm = renderPerms(
+      t.permissions,
+      ["select", "create", "update", "delete"],
+      false,
+    );
+    if (vperm) code += `\n  .permissions(${vperm})`;
+    if (t.changefeed) {
+      const incl = t.changefeed.original ? ", { includeOriginal: true }" : "";
+      code += `\n  .changefeed(${JSON.stringify(t.changefeed.expiry)}${incl})`;
+    }
+    return { code: `${code};`, factory: "defineView" };
+  }
+
   const isRelation = t.kind.kind === "RELATION";
   const fields = t.fields.map((f) => ({
     name: unescapeName(f.name),
@@ -551,7 +569,11 @@ function unitModule(u: RenderedUnit): string {
 /** The rendered unit (const statement + the imports it needs) for one table/relation. */
 function tableUnit(t: StructTable, ctx: RenderCtx): RenderedUnit {
   const { code, factory } = renderTableConst(t, ctx);
-  const imports = [`import { s, ${factory} } from "@schemic/surrealdb";`];
+  // A view's code uses no `s.*` builder — import only the factory then (avoids an unused `s` import).
+  const needsS = t.view === undefined && code.includes("s.");
+  const imports = [
+    `import { ${needsS ? "s, " : ""}${factory} } from "@schemic/surrealdb";`,
+  ];
   // Cross-table value imports (one per referenced table, sorted, self excluded).
   for (const dep of [...ctx.imports].filter((d) => d !== t.name).sort()) {
     imports.push(`import { ${ctx.constOf(dep)} } from "./${dep}";`);
