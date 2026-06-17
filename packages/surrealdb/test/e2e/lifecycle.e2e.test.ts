@@ -2,6 +2,9 @@
 // CLI end to end against a throwaway in-memory SurrealDB.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { Glob } from "bun";
 import { E2E_ENABLED, type Harness, startHarness } from "./harness";
 
 const e2e = describe.skipIf(!E2E_ENABLED);
@@ -42,9 +45,15 @@ e2e("lifecycle: init -> gen -> migrate -> status -> diff -> check", () => {
       const gen = await run(["gen", "init_schema", "-y"]);
       expect(gen.code).toBe(0);
       expect(gen.out).toContain("to migrate");
-      // Migration files are idempotent: added objects are emitted as DEFINE … OVERWRITE.
-      expect(gen.out).toContain("DEFINE TABLE OVERWRITE user");
+      // gen PREVIEWS the logical change (plain DEFINE, the diff form).
+      expect(gen.out).toContain("DEFINE TABLE user");
       expect(gen.out).toContain("init_schema");
+      // …and writes an IDEMPOTENT migration FILE — added objects as DEFINE … OVERWRITE.
+      const migRel = [...new Glob("**/*_init_schema.surql").scanSync(root)][0];
+      expect(migRel).toBeDefined();
+      expect(readFileSync(join(root, migRel), "utf8")).toContain(
+        "DEFINE TABLE OVERWRITE user",
+      );
 
       // status: one pending migration (nothing applied yet).
       const statusPending = await run(["status"]);

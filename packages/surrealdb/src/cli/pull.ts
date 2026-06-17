@@ -498,11 +498,13 @@ function renderTableConst(
     const to = wireEndpoints(t.kind.out ?? [], ctx);
     if (from) close += `\n  .from(${from})`;
     if (to) close += `\n  .to(${to})`;
+    if (t.kind.enforced) close += `\n  .enforced()`;
   } else if (t.kind.kind === "ANY") {
     close += `\n  .typeAny()`;
   }
   // Common table config (applies to tables and relations alike).
   if (!t.schemafull) close += `\n  .schemaless()`;
+  if (t.drop) close += `\n  .drop()`;
   if (t.comment) close += `\n  .comment(${JSON.stringify(t.comment)})`;
   const tperm = renderPerms(
     t.permissions,

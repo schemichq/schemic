@@ -134,7 +134,12 @@ export interface StructTable {
 
 interface DbStructure {
   tables?: (Omit<StructTable, "fields" | "indexes" | "kind"> & {
-    kind: { kind: StructTableKind["kind"]; in?: unknown[]; out?: unknown[] };
+    kind: {
+      kind: StructTableKind["kind"];
+      in?: unknown[];
+      out?: unknown[];
+      enforced?: boolean;
+    };
     id?: number;
   })[];
   functions?: StructFunction[];
@@ -295,6 +300,7 @@ function tableHeadClauses(t: StructTable): Record<string, string> {
     type = "RELATION";
     if (k.in?.length) type += ` FROM ${k.in.join(" | ")}`;
     if (k.out?.length) type += ` TO ${k.out.join(" | ")}`;
+    if (k.enforced) type += " ENFORCED";
   } else {
     type = k.kind;
   }
@@ -552,6 +558,7 @@ export async function introspectStructured(
         kind: t.kind.kind,
         in: t.kind.in?.map(endpointName),
         out: t.kind.out?.map(endpointName),
+        enforced: t.kind.enforced,
       },
       schemafull: t.schemafull,
       drop: t.drop,
