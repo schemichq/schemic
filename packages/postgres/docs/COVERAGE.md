@@ -16,23 +16,25 @@ round-trip (author `s.*` → lower → emit → introspect → diff = 0) · `[n/
 > Per the kind-registry contract (`packages/core/docs/kind-registry-contract.md`): core no longer
 > hard-codes object kinds — each driver **registers** its kinds on a per-driver `KindRegistry` and core
 > orchestrates generically. This table tracks **every** PostgreSQL object kind, its registration status,
-> and round-trip coverage, so gaps stay visible. **Migration has not started yet** — the driver still
-> runs entirely on the fixed-slot `Driver` path (untouched + green); the `emit`/`introspect`/`diff`
-> columns therefore reflect what the *current fixed-slot path* does today, and `createKind'd?` is `[ ]`
-> across the board until each kind is flipped onto the registry. Order (per contract): `table` first,
-> then `index`/`constraint`, then opaque/native kinds.
+> and round-trip coverage, so gaps stay visible. **Slice 2 in progress:** `table`/`index`/`constraint`
+> are registered (`src/kinds.ts`) and **parity-green** — `emitKinds`/`buildKindDiff` over `decompose`
+> reproduce the fixed-slot `pgEmit`/`pgDiff` (`test/kinds.test.ts`), validated through a real PGlite
+> round-trip. The kinds run behind the **Option-B facade** (a temporary `PortableDb`↔`PortableObject[]`
+> adapter); the live `Driver`/CLI/snapshot path is still the fixed-slot one (untouched + green) until
+> the coordinated **Option-A flip** wires the spine into the CLI. Per-kind `KindEngine.introspect` is
+> deferred — the facade reuses the existing `pgIntrospect` (→ `PortableDb` → `decompose`).
 >
 > `column` and the field-level clauses are **substrate** (shared `PortableField`/`PortableType`), nested
-> inside the `table` kind — **not a kind**. Inline FK/UNIQUE/CHECK/index will be **driver-side exploded**
-> out of `PgTableDef` in `Driver.lower` into their own kind objects (`deps`→table(s)), per core-dev's
-> sanctioned explode pattern — this is what lets the dependency graph break FK cycles.
+> inside the `table` kind — **not a kind**. Inline FK/UNIQUE/CHECK/index are **driver-side exploded**
+> out of the table by `decompose` into their own kind objects (`deps`→table(s)), per core-dev's
+> sanctioned explode pattern — this is what lets the dependency graph break mutual-FK cycles.
 
 | kind | `createKind'd?` | emit | introspect | diff | notes |
 |---|---|---|---|---|---|
-| `table` | [ ] | [x] | [x] | [~] | first kind to flip (slice 2); columns nest as substrate; `overwrite` does clause-level column ALTER |
-| `column`* (substrate) | [n/a] | [x] | [x] | [~] | not a kind — `PortableField`/`PortableType` nested in `table`; substrate keeps `native{params}`+`check` |
-| `index` | [ ] | [~] | [ ] | [ ] | own kind, `deps`→table; today only UNIQUE index emits (`$unique`/`.index`), not introspected back |
-| `constraint` (PK/FK/UNIQUE/CHECK/EXCLUDE) | [ ] | [~] | [~] | [ ] | own kind, `deps`→table(s) to break FK cycles; PK+FK emit inline today; CHECK emit-only (excluded from equality); EXCLUDE not impl |
+| `table` | [x] | [x] | [~] | [x] | registered + parity-green; columns nest as substrate; `overwrite` = clause-level column ALTER (type/null/default/comment), recreate-fallback for identity/generated/CHECK/PK; introspect via facade |
+| `column`* (substrate) | [n/a] | [x] | [x] | [x] | not a kind — `PortableField`/`PortableType` nested in `table`; substrate keeps `native{params}`+`check` |
+| `index` | [x] | [x] | [ ] | [~] | registered; `deps`+`owner`→table; emits `CREATE [UNIQUE] INDEX`; change = drop+recreate; not introspected back yet |
+| `constraint` (FK; PK/UNIQUE/CHECK/EXCLUDE TBD) | [x] | [x] | [~] | [~] | FK registered + parity-green; `deps`→[table, refTable] breaks mutual-FK cycles; change = drop+recreate; PK is table substrate; UNIQUE rides `index`; CHECK/EXCLUDE TBD |
 | `view` | [ ] | [ ] | [ ] | [ ] | not implemented |
 | `materialized_view` | [ ] | [ ] | [ ] | [ ] | not implemented |
 | `sequence` (standalone) | [ ] | [ ] | [ ] | [ ] | identity-backed sequences are implicit today; standalone `CREATE SEQUENCE` not impl |
