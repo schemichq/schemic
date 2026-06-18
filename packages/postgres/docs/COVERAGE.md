@@ -9,6 +9,11 @@
 **Legend:** `[ ]` not implemented · `[~]` partial (emit-only / no introspect / known gap) · `[x]` full
 round-trip (author `s.*` → lower → emit → introspect → diff = 0) · `[n/a]` no analogue
 
+> **Verified example cookbook:** `examples/reference/*.ts` — authoring paired with its EXACT emitted
+> DDL golden, asserted pure (`emit(defs) === ddl`) by `test/examples/reference.test.ts` so it can't
+> drift. The drift-proof source for landing/docs snippets. See
+> `packages/core/docs/EXAMPLE-COOKBOOK-CONVENTION.md`.
+
 ---
 
 ## Kind inventory (registry migration)
