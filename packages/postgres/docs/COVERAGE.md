@@ -54,7 +54,8 @@ round-trip (author `s.*` → lower → emit → introspect → diff = 0) · `[n/
 - [x] `PgField extends SFieldBase` — Zod drop-in + `PgMeta` side-channel; full Zod wrapper/passthrough chain, type-preserving
 - [x] `defineTable(name, { col: s.* })` → `PgTableDef` (an `Authored`); `.primaryKey(...)`, `.check(expr)`, `.index([...])`
 - [x] `postgresDriver.lower(tables, defs)` → portable IR (replaces the old `throw`)
-- [x] `s.$postgres(pgType, codec)` escape hatch (Zod codec App-side, stored as the given pg type)
+- [x] `s.$postgres(pgType, codec)` escape-hatch FACTORY (Zod codec App-side, stored as the given pg type)
+- [x] `.$postgres(wire, codec?)` chainable escape-hatch METHOD on a field — attach a pg storage type + codec to an otherwise-unmappable App value (e.g. `s.instanceof(Money).$postgres(s.varchar(32), {encode,decode})`); mirrors surreal's `.$surreal`. Column emits as the wire type; codec maps app<->wire. (Wire-side codec types are loose today because the `s.*` leaf factories return a wide `PgField<ZodType>` — see gap below.)
 
 ### Tables & schemas
 - [x] `CREATE TABLE` (in `public`); implicit `"id" text PRIMARY KEY` when no custom PK

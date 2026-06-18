@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { buildKindDiff, emitKinds } from "@schemic/core";
+import * as z from "zod";
 import {
   defineTable,
   type PgConn,
+  PgField,
   postgresDriver,
   s,
   sqlExpr,
@@ -221,6 +223,37 @@ describe("round-trip: author -> emit -> PGlite -> introspectAll -> diff = 0", ()
     const codec = s.$postgres("text", s.text().schema);
     expect(await roundtripEmpty(defineTable("blob", { raw: codec }))).toBe(
       true,
+    );
+  });
+
+  test("chainable .$postgres(wire, codec) stores via the wire type + round-trips", async () => {
+    class Money {
+      constructor(public cents: number) {}
+    }
+    // App value (Money) stored as a varchar(32) wire column via a codec.
+    const amount = new PgField(z.instanceof(Money), {}).$postgres(
+      s.varchar(32),
+      {
+        encode: (m: Money) => String(m.cents),
+        decode: (v) => new Money(Number(v as string)),
+      },
+    );
+    const tx = defineTable("tx", { amount });
+
+    // Column emits as the WIRE type, not the App type.
+    expect(ddl(tx)).toContain('"amount" varchar(32) NOT NULL');
+    // Codec maps app <-> wire both ways.
+    expect(amount.encode(new Money(1299))).toBe("1299");
+    expect(amount.decode("1299")).toBeInstanceOf(Money);
+    expect((amount.decode("1299") as Money).cents).toBe(1299);
+    // And it round-trips through a real engine.
+    expect(await roundtripEmpty(tx)).toBe(true);
+  });
+
+  test("chainable .$postgres(wire) without a codec is an identity mapping", async () => {
+    const slug = new PgField(z.string(), {}).$postgres(s.varchar(64));
+    expect(ddl(defineTable("p", { slug }))).toContain(
+      '"slug" varchar(64) NOT NULL',
     );
   });
 });

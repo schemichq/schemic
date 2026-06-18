@@ -12,7 +12,12 @@
 //  - DX FIRST: native types + `$`-methods ($default/$check/$generated/$identity/$unique/$primaryKey/
 //    $references/$comment) + the full Zod wrapper/passthrough chain, all type-preserving.
 
-import { type AnyField, SFieldBase, toZod } from "@schemic/core/authoring";
+import {
+  type AnyField,
+  type SchemaOf,
+  SFieldBase,
+  toZod,
+} from "@schemic/core/authoring";
 import * as z from "zod";
 
 // --- PgMeta: the pg-native metadata bag carried on every field ----------------------------------
@@ -136,6 +141,34 @@ export class PgField<
   /** `COMMENT ON COLUMN`. */
   $comment(text: string): PgField<S, Flags> {
     return this.with({ comment: text });
+  }
+
+  /**
+   * ESCAPE HATCH (chainable form) — teach the driver how to STORE this field's value in Postgres:
+   * give the **wire type** as an `s.*`/Zod field (its pg column type is taken from it) plus a codec
+   * (`encode`: app -> wire, `decode`: wire -> app). This turns an otherwise-unmappable App value
+   * (e.g. `s.instanceof(Money)`) into a real pg column. Omit the codec for an identity mapping (the
+   * app value is stored as-is). Mirrors SurrealDB's `.$surreal(wire, codec)`; the standalone
+   * {@link s.$postgres} factory is the from-scratch equivalent. `$`-prefixed to avoid clashing with Zod.
+   */
+  $postgres<WF extends AnyField | z.ZodType, A = z.output<S>>(
+    wire: WF,
+    codec?: {
+      encode: (app: A) => z.output<SchemaOf<WF>>;
+      decode: (wire: z.output<SchemaOf<WF>>) => A;
+    },
+  ): PgField<z.ZodCodec<SchemaOf<WF>, S>, Flags> {
+    const wireSchema = toZod(wire) as SchemaOf<WF>;
+    const c = z.codec(wireSchema, this.schema, {
+      decode: (w) => (codec ? codec.decode(w as never) : w) as never,
+      encode: (a) => (codec ? codec.encode(a as A) : a) as never,
+    });
+    // The stored pg type comes from the WIRE field (its column type); App typing comes from `this`.
+    const wirePg = wire instanceof PgField ? wire.native.pg : undefined;
+    return new PgField<z.ZodCodec<SchemaOf<WF>, S>, Flags>(c, {
+      ...this.native,
+      ...(wirePg ? { pg: wirePg } : {}),
+    });
   }
 }
 
