@@ -32,16 +32,17 @@ const examples = [
 DEFINE FIELD price ON TABLE wallet TYPE string;`,
   }),
   ex({
-    title: ".$surreal on s.custom — store a Set as array<string>",
-    code: `defineTable("bag", {
+    title: ".$surreal on s.custom — store an app-only type (URL) as a string",
+    note: "URL has no native SurrealQL type, so it needs a wire type + codec. (A JS Set, by contrast, is native: use s.set() -> set<T>.)",
+    code: `defineTable("site", {
   id: s.string(),
-  tags: s.custom<Set<string>>().$surreal(s.array(s.string()), {
-    encode: (set) => [...set],
-    decode: (arr) => new Set(arr),
+  homepage: s.custom<URL>().$surreal(s.string(), {
+    encode: (u) => u.href,
+    decode: (v) => new URL(v),
   }),
 })`,
-    ddl: `DEFINE TABLE bag TYPE NORMAL SCHEMAFULL;
-DEFINE FIELD tags ON TABLE bag TYPE array<string>;`,
+    ddl: `DEFINE TABLE site TYPE NORMAL SCHEMAFULL;
+DEFINE FIELD homepage ON TABLE site TYPE string;`,
   }),
   ex({
     title: ".$internal() — DB-managed, client-hidden field (PERMISSIONS NONE)",
