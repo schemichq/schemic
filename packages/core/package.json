@@ -2,12 +2,25 @@
   "name": "@schemic/core",
   "version": "0.1.0-alpha.0",
   "description": "The dialect-neutral engine for Schemic — Driver contract, portable schema IR, and the migration/diff/snapshot engine.",
+  "license": "MIT",
+  "author": "Vertio Solutions",
+  "homepage": "https://schemic.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/schemichq/schemic.git",
+    "directory": "packages/core"
+  },
   "type": "module",
+  "sideEffects": false,
   "module": "lib/index.js",
   "types": "lib/index.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "lib",
-    "src"
+    "src",
+    "LICENSE"
   ],
   "exports": {
     ".": {
@@ -71,7 +84,6 @@
   "devDependencies": {
     "@biomejs/biome": "^2.3.11",
     "@electric-sql/pglite": "^0.5.2",
-    "@schemic/postgres": "workspace:*",
     "@types/bun": "latest",
     "surrealdb": "^2.0.3",
     "tsup": "^8",
