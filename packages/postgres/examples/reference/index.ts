@@ -17,7 +17,7 @@ import { group as relations } from "./06-relations";
 import { group as escapeHatch } from "./07-escape-hatch";
 
 export type { Definable, Example, ExampleGroup } from "./_kit";
-export { emit } from "./_kit";
+export { emit, evalDefs, Money } from "./_kit";
 
 /** Every example group, in reading order. The reference test iterates this. */
 export const allGroups: ExampleGroup[] = [
