@@ -12,6 +12,8 @@
   DDL → introspect back → diff to zero. Authoring-only / emit-only / no-introspect is `[~]`.
 - Update it whenever you add or change a capability. Reference the `s.*` builder or driver capability
   where useful, and call out anything the driver deliberately drops, projects, or can't round-trip.
+- Pair this map with a **verified example cookbook** (`examples/reference/*.ts`) — authoring + exact
+  emitted DDL goldens, drift-proof. See `EXAMPLE-COOKBOOK-CONVENTION.md`.
 
 **Legend:** `[ ]` not implemented · `[~]` partial (authoring-only / emit-only / no introspect / known
 gaps) · `[x]` full round-trip (author → emit → introspect → diff = zero)
