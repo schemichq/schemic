@@ -81,8 +81,10 @@ emits one flat catalog:
 }
 ```
 
-- **Generated, never hand-edited.** Regenerated from the cookbooks; the same
-  `emit === ddl` assertion that guards the cookbooks guards the manifest.
+- **Generated, never hand-edited.** Built by `scripts/gen-examples-manifest.ts`
+  (`bun run gen:examples`), which re-asserts `emit(defs) === ddl` for every entry
+  as it writes — the same honesty check the cookbooks carry. **Regenerate and
+  commit `examples-manifest.json` whenever a cookbook changes** (no CI guard yet).
 - **`source` header** stamps the generating commit + a content hash, so a
   consumer that **vendors** a copy (e.g. the `schemichq/web` repo commits it under
   `packages/landing/`) can spot staleness at a glance and re-sync deliberately.

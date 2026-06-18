@@ -3,6 +3,9 @@
     "packages/*"
   ],
   "version": "0.0.1-0",
+  "scripts": {
+    "gen:examples": "bun run scripts/gen-examples-manifest.ts"
+  },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.2"
   }
