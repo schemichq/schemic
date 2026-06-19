@@ -2,14 +2,27 @@
   "name": "@schemic/cli",
   "version": "0.1.0-alpha.0",
   "description": "The Schemic CLI — driver-agnostic schema migrations (gen/migrate/diff/push/pull/check).",
+  "license": "MIT",
+  "author": "Vertio Solutions",
+  "homepage": "https://schemic.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/schemichq/schemic.git",
+    "directory": "packages/cli"
+  },
   "type": "module",
+  "sideEffects": false,
   "bin": {
     "schemic": "lib/cli.js",
     "sc": "lib/cli.js"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "lib",
-    "src"
+    "src",
+    "LICENSE"
   ],
   "exports": {
     "./package.json": "./package.json"
