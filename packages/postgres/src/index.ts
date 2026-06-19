@@ -468,6 +468,7 @@ const recordInsert = (table: string, r: MigrationRecord) =>
   `INSERT INTO ${escId(table)} (${escId("tag")}, ${escId("file")}, ${escId("checksum")}) VALUES (${sqlStr(r.tag)}, ${sqlStr(r.file)}, ${sqlStr(r.checksum)});`;
 
 const migrations: MigrationStore<PgConn> = {
+  extension: ".sql",
   render: renderMigration,
   ensure: ensureMigTable,
 
