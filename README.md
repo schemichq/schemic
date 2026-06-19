@@ -9,7 +9,7 @@
 
 [Docs](https://schemic.dev) &nbsp;•&nbsp; [Drivers](#drivers) &nbsp;•&nbsp; [GitHub](https://github.com/schemichq/schemic)
 
-<!-- add npm-version / license / CI badges once the packages are public -->
+[![npm](https://img.shields.io/npm/v/@schemic/cli)](https://www.npmjs.com/package/@schemic/cli) &nbsp; [![license: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 </div>
 
