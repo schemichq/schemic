@@ -277,13 +277,15 @@ export interface Driver<
 
 // --- Registry -----------------------------------------------------------------------------------
 
-// Keyed on `globalThis` so the registry is shared even when more than one copy of `@schemic/core` is
-// loaded (e.g. the CLI run via `bunx` resolves its own core, while a driver loaded from the user's
-// project resolves the project's core) — otherwise the driver self-registers in one Map and the CLI
-// reads an empty one. One process => one driver registry, regardless of how many core instances exist.
+// Shared across every loaded copy of `@schemic/core` so the registry is process-global — the CLI run
+// via `bunx` resolves its own core, while a driver loaded from the user's project resolves the
+// project's core; without sharing, the driver self-registers in one Map and the CLI reads an empty
+// one. Keyed by a REGISTERED symbol (`Symbol.for`) — same key in every instance, but no string-keyed
+// `globalThis` pollution and namespaced so it can't collide.
+const REGISTRY_KEY = Symbol.for("@schemic/core.driverRegistry");
 const REGISTRY: Map<string, Driver<unknown>> = ((
-  globalThis as { __schemicDriverRegistry__?: Map<string, Driver<unknown>> }
-).__schemicDriverRegistry__ ??= new Map<string, Driver<unknown>>());
+  globalThis as Record<symbol, Map<string, Driver<unknown>> | undefined>
+)[REGISTRY_KEY] ??= new Map<string, Driver<unknown>>());
 
 /** Register a driver under its `name` (idempotent; last write wins). */
 export function registerDriver(driver: Driver<unknown>): void {
