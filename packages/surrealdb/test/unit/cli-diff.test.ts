@@ -18,6 +18,7 @@ import {
   diffSnapshots,
   renderMigration,
 } from "../../src/cli/surreal-diff";
+import { surrealKinds } from "../../src/kinds/registry";
 
 const User = defineTable("user", { id: s.string(), name: s.string() });
 
@@ -316,8 +317,11 @@ describe("indexes", () => {
   });
 
   test("summarizeKinds counts indexes", () => {
-    const up = diffSnapshots(EMPTY_SNAPSHOT, buildSnapshot([Indexed])).up;
-    expect(summarizeKinds(up)).toBe("1 table, 4 fields, 3 indexes");
+    const items =
+      diffSnapshots(EMPTY_SNAPSHOT, buildSnapshot([Indexed])).items ?? [];
+    expect(summarizeKinds(surrealKinds, items)).toBe(
+      "1 Table, 4 Fields, 3 Indexes",
+    );
   });
 });
 
@@ -374,8 +378,11 @@ describe("events", () => {
   });
 
   test("summarizeKinds counts events", () => {
-    const up = diffSnapshots(EMPTY_SNAPSHOT, buildSnapshot([Evented])).up;
-    expect(summarizeKinds(up)).toBe("1 table, 2 fields, 2 events");
+    const items =
+      diffSnapshots(EMPTY_SNAPSHOT, buildSnapshot([Evented])).items ?? [];
+    expect(summarizeKinds(surrealKinds, items)).toBe(
+      "1 Table, 2 Fields, 2 Events",
+    );
   });
 
   test("standalone defineEvent compiles to the same statement as inline .event()", () => {
@@ -458,8 +465,9 @@ describe("functions", () => {
 
   test("summarizeKinds counts functions", () => {
     const fn = defineFunction("f", {}).body(surql`RETURN 1`);
-    const up = diffSnapshots(EMPTY_SNAPSHOT, buildSnapshot([], [fn])).up;
-    expect(summarizeKinds(up)).toBe("1 function");
+    const items =
+      diffSnapshots(EMPTY_SNAPSHOT, buildSnapshot([], [fn])).items ?? [];
+    expect(summarizeKinds(surrealKinds, items)).toBe("1 Function");
   });
 });
 
@@ -492,8 +500,9 @@ describe("access", () => {
 
   test("summarizeKinds counts access", () => {
     const a = defineAccess("a").record().signin(surql`SELECT 1`);
-    const up = diffSnapshots(EMPTY_SNAPSHOT, buildSnapshot([], [a])).up;
-    expect(summarizeKinds(up)).toBe("1 access");
+    const items =
+      diffSnapshots(EMPTY_SNAPSHOT, buildSnapshot([], [a])).items ?? [];
+    expect(summarizeKinds(surrealKinds, items)).toBe("1 Access");
   });
 
   test("TYPE JWT with alg + key, and with a JWKS url", () => {

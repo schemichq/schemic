@@ -2,7 +2,8 @@
 // diffSnapshots/renderMigration) lives in `./surreal-diff` and is invoked through the driver; this
 // module is what the CLI shell uses to RENDER any driver's Diff (git-style file groups, word-diff,
 // unified patch, kind summaries). Dialect-free: `kind` is an opaque string, not a Surreal kind union.
-import { colorEnabled, plural, style } from "./style";
+import type { KindRegistry } from "../kind";
+import { colorEnabled, style } from "./style";
 
 /**
  * One object's change, for display. `kind` is the object kind, `table` its owner (a table name,
@@ -209,44 +210,21 @@ export function formatDiff(
   return out;
 }
 
-/** The kind of object a statement targets, for count summaries. */
-type CountKind =
-  | "table"
-  | "field"
-  | "index"
-  | "event"
-  | "function"
-  | "access"
-  | "other";
-function kindOf(stmt: string): CountKind {
-  const m =
-    /^(?:DEFINE|REMOVE|ALTER)\s+(TABLE|FIELD|INDEX|EVENT|FUNCTION|ACCESS)\b/.exec(
-      stmt,
-    );
-  return m ? (m[1].toLowerCase() as CountKind) : "other";
-}
-
-/** A per-kind breakdown of a set of statements, e.g. `1 table, 2 fields`. */
-export function summarizeKinds(stmts: string[]): string {
-  const counts = {
-    table: 0,
-    field: 0,
-    index: 0,
-    event: 0,
-    function: 0,
-    access: 0,
-    other: 0,
-  };
-  for (const s of stmts) counts[kindOf(s)]++;
+/**
+ * A per-kind breakdown of a set of changes, e.g. `1 Table, 2 Fields`. Counts each item by its
+ * structured `kind` and labels it from the registry's per-kind {@link KindRegistry.display} (singular
+ * when the count is one), so the summary is correct for every dialect — no DDL parsing.
+ */
+export function summarizeKinds(
+  registry: KindRegistry,
+  items: readonly { kind: string }[],
+): string {
+  const counts = new Map<string, number>();
+  for (const it of items) counts.set(it.kind, (counts.get(it.kind) ?? 0) + 1);
   const parts: string[] = [];
-  if (counts.table) parts.push(plural(counts.table, "table"));
-  if (counts.field) parts.push(plural(counts.field, "field"));
-  if (counts.index)
-    parts.push(plural(counts.index, "index").replace("indexs", "indexes"));
-  if (counts.event) parts.push(plural(counts.event, "event"));
-  if (counts.function) parts.push(plural(counts.function, "function"));
-  if (counts.access)
-    parts.push(plural(counts.access, "access").replace("accesss", "accesses"));
-  if (counts.other) parts.push(plural(counts.other, "object"));
+  for (const [kind, n] of counts) {
+    const d = registry.display(kind);
+    parts.push(`${n} ${n === 1 ? d.label : d.plural}`);
+  }
   return parts.join(", ");
 }

@@ -18,9 +18,11 @@ export {
 } from "./plan";
 export {
   type Definable,
+  type KindDisplay,
   type KindEngine,
   KindRegistry,
   type KindSpec,
   type PortableObject,
   type Ref,
+  type ResolvedDisplay,
 } from "./registry";

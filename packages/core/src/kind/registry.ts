@@ -109,7 +109,26 @@ export interface KindEngine<
    * kind isn't introspectable (diff/emit still work from authored state).
    */
   introspect?(conn: unknown): Promise<P[]>;
+  /**
+   * How this kind is PRESENTED — its human labels and the folder its objects render into. All optional
+   * with sensible defaults off the kind name (see {@link KindRegistry.display}), so a kind only declares
+   * what the defaults get wrong (e.g. `plural: "Indexes"`, or `folder: "access"`). DISPLAY ONLY.
+   */
+  display?: KindDisplay;
 }
+
+/** Per-kind presentation metadata (labels + output folder). All optional; core fills defaults. */
+export interface KindDisplay {
+  /** Title-Case singular, e.g. `"Table"`, `"Field"`. Default: the kind name, capitalized. */
+  label?: string;
+  /** Title-Case plural, e.g. `"Tables"`, `"Indexes"`. Default: the English plural of `label`. */
+  plural?: string;
+  /** The directory this kind's objects render into. Default: the lowercase slug of `plural`. */
+  folder?: string;
+}
+
+/** A kind's resolved presentation — every field filled (the shape {@link KindRegistry.display} returns). */
+export type ResolvedDisplay = Required<KindDisplay>;
 
 /** A kind's full spec: its `name`, its `build` (the driver's authoring entry), and its engine. */
 export type KindSpec<
@@ -117,6 +136,26 @@ export type KindSpec<
   A extends Definable,
   P extends PortableObject,
 > = { name: string; build: Build } & KindEngine<A, P>;
+
+/** `"table"` -> `"Table"`. */
+function capitalize(s: string): string {
+  return s ? s[0].toUpperCase() + s.slice(1) : s;
+}
+
+/** A plain English pluralizer for kind labels: `Index` -> `Indexes`, `Policy` -> `Policies`. */
+function pluralize(s: string): string {
+  if (/[^aeiou]y$/i.test(s)) return `${s.slice(0, -1)}ies`;
+  if (/(s|x|z|ch|sh)$/i.test(s)) return `${s}es`;
+  return `${s}s`;
+}
+
+/** `"Tables"` -> `"tables"`; collapses non-alphanumerics to single dashes (a filesystem-safe folder). */
+function slugify(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
 
 /**
  * A driver's set of registered kinds + the generic behavior the spine reads off them. Built once per
@@ -149,6 +188,18 @@ export class KindRegistry {
   // biome-ignore lint/suspicious/noExplicitAny: the engine erases at this seam (see `kinds`).
   engine(kind: string): KindEngine<any, any> | undefined {
     return this.kinds.get(kind);
+  }
+
+  /**
+   * A kind's resolved presentation — `label`/`plural`/`folder`, with defaults derived from the kind
+   * name for whatever the driver left unset. Works for unregistered display sub-kinds too (e.g. the
+   * `"field"` items a table's `displayItems` emits) — they just get the name-derived defaults.
+   */
+  display(kind: string): ResolvedDisplay {
+    const d = this.kinds.get(kind)?.display ?? {};
+    const label = d.label ?? capitalize(kind);
+    const plural = d.plural ?? pluralize(label);
+    return { label, plural, folder: d.folder ?? slugify(plural) };
   }
 
   /** Registered kind names, in registration order (== ordinal order). */

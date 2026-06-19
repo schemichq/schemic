@@ -155,6 +155,9 @@ surrealKinds.define({
 surrealKinds.define({
   name: "access",
   build: (a: PAccess) => a,
+  // The generic pluralizer would make "access" -> "Accesses"/"accesses"; SurrealQL's noun is
+  // invariant ("Access") and the dir is `access/`, so pin both.
+  display: { plural: "Access", folder: "access" },
   ...accessEngine,
 });
 surrealKinds.define({
