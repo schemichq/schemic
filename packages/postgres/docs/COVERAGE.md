@@ -37,7 +37,7 @@ round-trip (author `s.*` → lower → emit → introspect → diff = 0) · `[n/
 |---|---|---|---|---|---|
 | `table` | [x] | [x] | [x] | [x] | registered; columns nest as substrate; `overwrite` = clause-level column ALTER (type/null/default/comment), recreate-fallback for identity/generated/CHECK/PK; **`canonical` excludes DEFAULT/CHECK/GENERATED/COMMENT + table-CHECK from change-detection** (emit stays faithful; no phantom-diff vs introspect); **`displayItems` = per-field, grouped under the table** |
 | `column`* (substrate) | [n/a] | [x] | [x] | [x] | not a kind — `PortableField`/`PortableType` nested in `table`; substrate keeps `native{params}`+`check` |
-| `index` | [x] | [x] | [x] | [x] | registered; `deps`→table (no `owner`, rank-grouped); emits `CREATE [UNIQUE] INDEX`; change = drop+recreate. **UNIQUE indexes introspect (pg_index, excl. PK/expression) → full round-trip, no phantom** (real index add/drop diffs). Non-unique / partial / method indexes (gin/gist/…) not yet emitted or read |
+| `index` | [x] | [x] | [x] | [x] | registered; `deps`→table (no `owner`, rank-grouped); emits `CREATE [UNIQUE] INDEX`; change = drop+recreate. **Plain btree indexes — UNIQUE and NON-unique — introspect (pg_index, excl. PK / partial / expression / non-btree) → full round-trip, no phantom** (real index add/drop diffs). Partial / expression / method indexes (gin/gist/brin/hash) still not emitted or read |
 | `constraint` (FK; PK/UNIQUE/CHECK/EXCLUDE TBD) | [x] | [x] | [x] | [~] | FK registered; `deps`→[table, refTable] breaks mutual-FK cycles; change = drop+recreate; FK + actions introspect (canonicalized UPPERCASE, no phantom); PK is table substrate; UNIQUE rides `index`; CHECK/EXCLUDE TBD |
 | `view` | [ ] | [ ] | [ ] | [ ] | not implemented |
 | `materialized_view` | [ ] | [ ] | [ ] | [ ] | not implemented |
@@ -99,8 +99,9 @@ round-trip (author `s.*` → lower → emit → introspect → diff = 0) · `[n/
 - [~] `DEFAULT <expr>` (`$default`) — **emitted faithfully** (literal or `sqlExpr(...)`), excluded from equality (Postgres rewrites it)
 - [~] field `CHECK` (`$check`) and table `CHECK` (`.check`) — emitted, excluded from equality (expr rewrite)
 - [~] `GENERATED ALWAYS AS (expr) STORED` (`$generated`) — emitted, excluded from equality
-- [~] `UNIQUE` (`$unique` / `.index({unique})`) → `CREATE UNIQUE INDEX` — emitted, not introspected back yet
-- [~] column `COMMENT` (`$comment`) — emitted (`COMMENT ON COLUMN`), not introspected back yet
+- [x] `UNIQUE` (`$unique` / `.index({unique})`) → `CREATE UNIQUE INDEX` — emitted AND introspected (full round-trip)
+- [x] secondary `.index([...])` (non-unique) → `CREATE INDEX` — emitted AND introspected (full round-trip)
+- [~] column `COMMENT` (`$comment`) — emitted (`COMMENT ON COLUMN`), not introspected back (excluded from drift, so no phantom)
 - [ ] secondary index methods (gin/gist/brin/hash), partial/expression indexes
 - [ ] `EXCLUDE` constraints
 
@@ -131,7 +132,8 @@ round-trip (author `s.*` → lower → emit → introspect → diff = 0) · `[n/
 ### Driver semantics / known gaps (where the honesty lives)
 - **option/nullable collapse** — both indistinguishable as pg columns; `normalize` folds option → nullable.
 - **expression clauses don't round-trip** — default/check/generated emit but are excluded from equality (pg rewrites them); see the note above.
-- **unique index + comment emit but aren't introspected back yet** — so they're `[~]`, not `[x]`.
+- **comment emits but isn't introspected back** — `[~]`; but `COMMENT` is excluded from drift detection, so it doesn't phantom-diff (plain + unique indexes now DO round-trip).
+- **overriding the implicit `id`** — declare your own PK column (`id: s.uuid().$primaryKey()`, `s.serial()`, `.primaryKey("col")`) to replace the `id text` default; uuid/serial/bigint id overrides + composite/natural keys all round-trip. (A PK column literally named `id` of type `text` is treated as the implicit one — name it otherwise if you want an authored text id.)
 - **objects are opaque** — nested objects collapse to a single `jsonb` column; sub-structure lives App-side (Zod), not in the IR.
 - **arrays of pg-native element types** — round-trip only for canonical element types (udt-name vs type-name mismatch otherwise).
 - **diff predates authoring** — the field-level diff doesn't yet handle identity/PK/clause changes; the round-trip path (emit/introspect/equal) does.

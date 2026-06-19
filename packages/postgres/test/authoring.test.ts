@@ -219,6 +219,43 @@ describe("round-trip: author -> emit -> PGlite -> introspectAll -> diff = 0", ()
     ).toBe(true);
   });
 
+  test("non-unique secondary index round-trips (introspected, not just unique)", async () => {
+    expect(
+      await roundtripEmpty(
+        defineTable("post", { title: s.text() }).index(["title"]),
+      ),
+    ).toBe(true);
+  });
+
+  test("overridden id column (uuid / serial / bigint PK) round-trips", async () => {
+    expect(
+      await roundtripEmpty(
+        defineTable("a", { id: s.uuid().$primaryKey(), name: s.text() }),
+      ),
+    ).toBe(true);
+    expect(
+      await roundtripEmpty(
+        defineTable("b", { id: s.serial().$primaryKey(), name: s.text() }),
+      ),
+    ).toBe(true);
+    expect(
+      await roundtripEmpty(
+        defineTable("c", { id: s.bigint(), name: s.text() }).primaryKey("id"),
+      ),
+    ).toBe(true);
+  });
+
+  test("implicit id + composite PK still round-trip (no regression)", async () => {
+    expect(await roundtripEmpty(defineTable("d", { name: s.text() }))).toBe(
+      true,
+    );
+    expect(
+      await roundtripEmpty(
+        defineTable("e", { a: s.text(), b: s.text() }).primaryKey("a", "b"),
+      ),
+    ).toBe(true);
+  });
+
   test("$postgres escape hatch round-trips as its native pg type", async () => {
     const codec = s.$postgres("text", s.text().schema);
     expect(await roundtripEmpty(defineTable("blob", { raw: codec }))).toBe(

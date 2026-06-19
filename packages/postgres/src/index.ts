@@ -88,6 +88,7 @@ interface IdxRow {
   table_name: string;
   index_name: string;
   column_name: string;
+  is_unique: boolean;
 }
 
 const nativeT = (name: string, params?: (string | number)[]): PortableType =>
@@ -195,15 +196,21 @@ async function pgIntrospect(
       WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = 'public'
       ORDER BY kcu.ordinal_position`,
   );
-  // UNIQUE secondary indexes (NOT the PK's implicit index, NOT expression indexes) — the ones this
-  // driver emits via $unique/.index({unique}). Columns kept in index order. Required so the `index`
-  // kind ROUND-TRIPS (the registry diffs by presence; an un-introspected index would phantom-add).
+  // Secondary indexes this driver can author — plain btree over real columns, UNIQUE or not (the ones
+  // emitted via $unique / .index([...])). Excludes the PK's implicit index, partial indexes
+  // (indpred), expression indexes (indexprs), and non-btree methods (gin/gist/…), which the driver
+  // can't emit — reading those back would phantom-REMOVE. `is_unique` distinguishes the two forms.
+  // Required so the `index` kind ROUND-TRIPS: the registry diffs by presence, so an un-introspected
+  // index phantom-adds and a non-emittable one phantom-removes.
   const { rows: idxs } = await conn.query<IdxRow>(
-    `SELECT t.relname AS table_name, i.relname AS index_name, a.attname AS column_name
+    `SELECT t.relname AS table_name, i.relname AS index_name, a.attname AS column_name,
+            ix.indisunique AS is_unique
        FROM pg_class t
        JOIN pg_namespace n ON n.oid = t.relnamespace AND n.nspname = 'public'
-       JOIN pg_index ix ON ix.indrelid = t.oid AND ix.indisunique AND NOT ix.indisprimary
+       JOIN pg_index ix ON ix.indrelid = t.oid AND NOT ix.indisprimary
+            AND ix.indpred IS NULL AND ix.indexprs IS NULL
        JOIN pg_class i ON i.oid = ix.indexrelid
+       JOIN pg_am am ON am.oid = i.relam AND am.amname = 'btree'
        JOIN LATERAL unnest(string_to_array(ix.indkey::text, ' ')::int[])
             WITH ORDINALITY AS k(attnum, ord) ON true
        JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
@@ -219,10 +226,18 @@ async function pgIntrospect(
     list.push(p.column_name);
     pkBy.set(p.table_name, list);
   }
-  // The implicit key is the lone `id text` PK pgEmit adds; a custom/composite PK is anything else.
+  // The `id` column per table (to tell the IMPLICIT id apart from an overridden one).
+  const idColBy = new Map<string, ColRow>();
+  for (const c of cols)
+    if (c.column_name === "id") idColBy.set(c.table_name, c);
+  // The implicit key is the EXACT `id text` PK pgEmit adds (no PK authored). A lone `id` PK whose
+  // column was overridden — uuid / serial (identity) / bigint / etc. — is a real authored column that
+  // must round-trip, so it is NOT implicit (kept as a column + recorded as the table's primaryKey).
   const isImplicit = (table: string) => {
     const pk = pkBy.get(table);
-    return pk?.length === 1 && pk[0] === "id";
+    if (!(pk?.length === 1 && pk[0] === "id")) return false;
+    const id = idColBy.get(table);
+    return !!id && id.data_type === "text" && id.is_identity !== "YES";
   };
 
   const seen = new Set<string>();
@@ -266,7 +281,7 @@ async function pgIntrospect(
     const ix = byName.get(r.index_name) ?? {
       name: r.index_name,
       cols: [],
-      unique: true,
+      unique: r.is_unique,
     };
     ix.cols.push(r.column_name);
     byName.set(r.index_name, ix);
