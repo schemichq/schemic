@@ -175,6 +175,27 @@ live("TYPE", () => {
     const { pulled } = await roundTrip([A, B, Edge], "dt_eedge");
     expect(pulled).toContain(".enforced()");
   });
+
+  test("NORMAL table with record fields named in/out round-trips; pull keeps them", async () => {
+    // NOT a relation — `in`/`out` are ordinary record fields here. They're only implicit endpoints
+    // on a RELATION, so pull must NOT strip them on a plain table. Mirrors a real-world `order` table
+    // (DEFINE TABLE order SCHEMAFULL with `in` record<person> / `out` record<product>).
+    const Person = Base("dt_person");
+    const Product = Base("dt_product");
+    const Order = defineTable("dt_io", {
+      id: s.string(),
+      currency: s.string(),
+      in: s.recordId("dt_person"),
+      out: s.recordId("dt_product"),
+    });
+    const { pulled } = await roundTrip([Person, Product, Order], "dt_io");
+    expect(pulled).toContain("defineTable(");
+    expect(pulled).not.toContain("defineRelation(");
+    // The endpoint tables are in the pull, so the record links render as typed `.record()` refs
+    // (same as any record field) — the point is `in`/`out` SURVIVE on a non-relation table.
+    expect(pulled).toContain("in: DtPerson.record()");
+    expect(pulled).toContain("out: DtProduct.record()");
+  });
 });
 
 // --- DROP / CHANGEFEED / COMMENT ---------------------------------------------------------------
