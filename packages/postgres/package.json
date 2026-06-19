@@ -11,7 +11,7 @@
     "directory": "packages/postgres"
   },
   "type": "module",
-  "sideEffects": false,
+  "sideEffects": ["./src/index.ts", "./lib/index.js"],
   "module": "lib/index.js",
   "types": "lib/index.d.ts",
   "publishConfig": {
