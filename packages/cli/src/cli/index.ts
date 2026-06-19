@@ -8,8 +8,8 @@ import {
   type DiffItem,
   type Driver,
   duplicateTables,
-  emitKinds,
   EMPTY_STORED,
+  emitKinds,
   existingTables,
   type FilterOpts,
   fail,
@@ -18,6 +18,7 @@ import {
   formatPatch,
   getDriver,
   isEmptyDiff,
+  type KindRegistry,
   kindFlags,
   lineDiff,
   listMigrations,
@@ -42,13 +43,6 @@ import {
 import { Command, Help, Option } from "commander";
 import { init } from "./init";
 import {
-  collectArg,
-  ensureDriver,
-  type ResolveOpts,
-  resolveOne,
-  resolveTargets,
-} from "./resolve";
-import {
   baseline,
   clearMigrationFiles,
   commitMigration,
@@ -63,6 +57,13 @@ import {
   unlock,
 } from "./migrate";
 import { portableDiff } from "./portable-diff";
+import {
+  collectArg,
+  ensureDriver,
+  type ResolveOpts,
+  resolveOne,
+  resolveTargets,
+} from "./resolve";
 
 /** The driver a resolved connection uses (its package is loaded by the resolution engine). */
 const activeDriver = (config: ResolvedConfig): Driver<unknown> =>
@@ -158,13 +159,14 @@ async function confirmPrompt(question: string): Promise<boolean> {
 
 /** The short dimmed summary under a diff (per-kind counts + optional pending count). */
 function diffSummary(
+  registry: KindRegistry,
   diff: Diff,
   opts: { live?: boolean },
   pending?: number,
 ): string {
   const summary: string[] = [];
   if (!isEmptyDiff(diff)) {
-    const kinds = summarizeKinds(diff.up);
+    const kinds = summarizeKinds(registry, diff.items ?? []);
     summary.push(
       `${plural(diff.up.length, "change")} ${opts.live ? "vs the live database" : "vs the snapshot"}${kinds ? ` — ${kinds}` : ""}.`,
     );
@@ -176,6 +178,7 @@ function diffSummary(
 
 /** Print a diff (inline word-diff) plus its summary. */
 function reportDiff(
+  registry: KindRegistry,
   diff: Diff,
   opts: { down?: boolean; live?: boolean; full?: boolean; inline?: boolean },
   pending?: number,
@@ -183,7 +186,7 @@ function reportDiff(
   console.log(
     formatDiff(diff, { down: opts.down, full: opts.full, inline: opts.inline }),
   );
-  const summary = diffSummary(diff, opts, pending);
+  const summary = diffSummary(registry, diff, opts, pending);
   if (summary) console.log(summary);
 }
 
@@ -429,10 +432,10 @@ kindFlags(
             const patch = formatPatch(diff);
             if (pager) await pipeThroughPager(pager, patch);
             else process.stdout.write(patch);
-            const summary = diffSummary(diff, opts, pending);
+            const summary = diffSummary(driver.registry, diff, opts, pending);
             if (summary) console.log(summary);
           } else {
-            reportDiff(diff, opts, pending);
+            reportDiff(driver.registry, diff, opts, pending);
           }
         };
         // Reuse one connection across watch runs for --live; otherwise connect per run.
@@ -443,13 +446,9 @@ kindFlags(
         const once = async () => {
           // TypeScript view: render both sides PER FILE (matching `pull`'s layout) and diff each.
           if (opts.ts) {
-            // Map each object to its source file (where it lives in the schema, else its kind folder).
+            // Map each object to its source file (where it lives in the schema, else its kind folder
+            // — the driver names the folder per kind via the registry's display metadata).
             const loc = await existingTables(config.schemaPath);
-            const folderOf: Record<string, string> = {
-              table: "tables",
-              function: "functions",
-              access: "access",
-            };
             const fileFor = (kind: string, name: string): string => {
               const abs = kind === "table" ? loc.get(name) : undefined;
               return abs
@@ -458,7 +457,7 @@ kindFlags(
                     config.root,
                     join(
                       config.schemaPath,
-                      folderOf[kind] ?? kind,
+                      driver.registry.display(kind).folder,
                       `${name}.ts`,
                     ),
                   );
@@ -623,7 +622,10 @@ const genAction = (
       console.log(ok("No schema changes — nothing to generate."));
       return;
     }
-    const kinds = summarizeKinds(plan.diff.up);
+    const kinds = summarizeKinds(
+      activeDriver(config).registry,
+      plan.diff.items ?? [],
+    );
     console.log(
       `${plural(plan.diff.up.length, "change")} to migrate${kinds ? ` — ${kinds}` : ""}.`,
     );
@@ -830,7 +832,8 @@ dbFlags(
     }
     const { tables, defs } = await loadDefs(config.schemaPath);
     const kinds = summarizeKinds(
-      emitKinds(driver.registry, lowerSchema(driver.registry, driver.explode(tables, defs))),
+      driver.registry,
+      lowerSchema(driver.registry, driver.explode(tables, defs)),
     );
     console.log(ok(`Schemas valid${kinds ? ` — ${kinds}` : " (no objects)"}.`));
     if (opts.schema) return;
@@ -855,7 +858,7 @@ dbFlags(
     );
     console.log(formatDiff(diff, {}));
     console.log(
-      `\n${style.dim(`${summarizeKinds(diff.up)} differ. \`schemic gen\` writes a migration to reconcile.`)}`,
+      `\n${style.dim(`${summarizeKinds(driver.registry, diff.items ?? [])} differ. \`schemic gen\` writes a migration to reconcile.`)}`,
     );
     process.exitCode = 1;
   });
@@ -1019,7 +1022,7 @@ kindFlags(
           (it: DiffItem) => opts.prune !== false || it.op !== "remove",
         );
         console.log(formatItems(items));
-        const kinds = summarizeKinds(stmts);
+        const kinds = summarizeKinds(driver.registry, items);
         if (opts.dryRun) {
           console.log(
             `\n${style.dim(`${plural(stmts.length, "change")}${kinds ? ` — ${kinds}` : ""} — run \`schemic push\` to apply.`)}`,

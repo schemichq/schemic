@@ -127,6 +127,7 @@ export {
   type Definable,
   emitKinds,
   introspectKinds,
+  type KindDisplay,
   type KindEngine,
   type KindPlan,
   KindRegistry,
@@ -138,6 +139,7 @@ export {
   type PortableObject,
   planKinds,
   type Ref,
+  type ResolvedDisplay,
   snapshotKinds,
   snapshotObjects,
 } from "./kind";
