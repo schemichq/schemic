@@ -100,4 +100,4 @@ part of the [Schemic](https://github.com/schemichq/schemic) toolkit.
 
 ## License
 
-[MIT](../../LICENSE) © Vertio Solutions
+[MIT](./LICENSE) © Vertio Solutions
