@@ -10,6 +10,9 @@
 // connects the sibling on demand (the dependency graph falls out of access; cycles error) and we close
 // anything it opened once resolution settles. The returned configs are connected FRESH by each command.
 
+import { createRequire } from "node:module";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   type ConnectionEntry,
   type ConnectionOverrides,
@@ -32,12 +35,23 @@ import {
 export async function ensureDriver(name: string): Promise<void> {
   if (driverNames().includes(name)) return;
   const pkg = `@schemic/${name}`;
+  // Resolve the driver from the USER's project (cwd) first, then fall back to the CLI's own location.
+  // The CLI is often run via `bunx`/`npx` from a temp dir, so a plain `import(pkg)` (resolved relative
+  // to the CLI module) would MISS a driver installed in the user's project — resolve from cwd instead.
   try {
-    await import(pkg);
-  } catch (e) {
-    throw new Error(
-      `could not load the "${name}" database driver (package ${pkg}). Install it (e.g. \`bun add ${pkg}\`).\n  ${e instanceof Error ? e.message : String(e)}`,
-    );
+    const fromCwd = createRequire(join(process.cwd(), "noop.js"));
+    await import(pathToFileURL(fromCwd.resolve(pkg)).href);
+  } catch {
+    try {
+      await import(pkg);
+    } catch (e) {
+      throw new Error(
+        `could not load the "${name}" database driver (package ${pkg}). ` +
+          `Install it in your project, then re-run:\n    bun add ${pkg}\n  (${
+            e instanceof Error ? e.message : String(e)
+          })`,
+      );
+    }
   }
   if (!driverNames().includes(name))
     throw new Error(`package ${pkg} did not register a "${name}" driver.`);
@@ -71,9 +85,13 @@ function parseArgs(arg: string[] | undefined): Record<string, string> {
 }
 
 /** Split a `<name>` / `<name>:<key>` address on the FIRST colon. */
-function splitAddress(address: string): [name: string, key: string | undefined] {
+function splitAddress(
+  address: string,
+): [name: string, key: string | undefined] {
   const i = address.indexOf(":");
-  return i < 0 ? [address, undefined] : [address.slice(0, i), address.slice(i + 1)];
+  return i < 0
+    ? [address, undefined]
+    : [address.slice(0, i), address.slice(i + 1)];
 }
 
 /**
@@ -120,7 +138,9 @@ export async function resolveTargets(
           : undefined;
     if (!picked) {
       if (key !== undefined)
-        throw new Error(`Connection "${name}" has no element with key "${key}".`);
+        throw new Error(
+          `Connection "${name}" has no element with key "${key}".`,
+        );
       throw new Error(
         `Connection "${name}" resolved to ${list.length} connections (a collection); address one with --connection ${name}:<key> or use --all.`,
       );

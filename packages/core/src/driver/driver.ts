@@ -277,7 +277,13 @@ export interface Driver<
 
 // --- Registry -----------------------------------------------------------------------------------
 
-const REGISTRY = new Map<string, Driver<unknown>>();
+// Keyed on `globalThis` so the registry is shared even when more than one copy of `@schemic/core` is
+// loaded (e.g. the CLI run via `bunx` resolves its own core, while a driver loaded from the user's
+// project resolves the project's core) — otherwise the driver self-registers in one Map and the CLI
+// reads an empty one. One process => one driver registry, regardless of how many core instances exist.
+const REGISTRY: Map<string, Driver<unknown>> = ((
+  globalThis as { __schemicDriverRegistry__?: Map<string, Driver<unknown>> }
+).__schemicDriverRegistry__ ??= new Map<string, Driver<unknown>>());
 
 /** Register a driver under its `name` (idempotent; last write wins). */
 export function registerDriver(driver: Driver<unknown>): void {
