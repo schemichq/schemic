@@ -603,7 +603,10 @@ const genAction = (
     // command to run.
     let squashed: string[] | null = null;
     if (opts.baseline) {
-      const existing = listMigrations(config.migrationsDir);
+      const existing = listMigrations(
+        config.migrationsDir,
+        activeDriver(config).migrations?.extension ?? ".surql",
+      );
       if (existing.length) {
         const migDir = relative(config.root, config.migrationsDir);
         const proceed =
@@ -723,7 +726,10 @@ configFlag(
     const config = await resolveOne(opts);
     writeSnapshot(config.metaDir, EMPTY_STORED);
     console.log(ok("Snapshot cleared."));
-    const existing = listMigrations(config.migrationsDir);
+    const existing = listMigrations(
+      config.migrationsDir,
+      activeDriver(config).migrations?.extension ?? ".surql",
+    );
     if (existing.length) {
       console.log(
         style.dim(

@@ -97,6 +97,8 @@ export interface MigrationRecord {
  * driver's own connection type.
  */
 export interface MigrationStore<Conn = unknown> {
+  /** This dialect's migration-file extension, e.g. `".surql"` (SurrealDB) or `".sql"` (Postgres). */
+  readonly extension: string;
   /** Render a diff as this dialect's migration-file body (e.g. SurrealQL `IF $direction` up/down). */
   render(tag: string, diff: Diff): string;
   /** Ensure the migrations-tracking table exists. */

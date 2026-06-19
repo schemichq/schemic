@@ -39,7 +39,8 @@ export interface Migration {
 }
 
 const SNAPSHOT_FILE = "_snapshot.json";
-const MIGRATION_EXT = ".surql";
+/** Fallback migration extension when a caller has no driver to hand (the driver provides the real one). */
+const DEFAULT_MIGRATION_EXT = ".surql";
 
 /** A fresh empty STORED snapshot. Fresh each call so callers can't alias shared empty state. */
 function emptyStored(): StoredSnapshot {
@@ -78,14 +79,18 @@ export function writeSnapshot(metaDir: string, snapshot: StoredSnapshot): void {
 /**
  * All migration files in `migrationsDir`, in apply order. Filenames are timestamp-prefixed, so
  * a plain ascending sort is chronological (and legacy `0001_` names sort before timestamped
- * ones). The `meta/` directory and any non-`.surql` files are ignored.
+ * ones). The `meta/` directory and any file not ending in `ext` (the driver's migration extension)
+ * are ignored.
  */
-export function listMigrations(migrationsDir: string): Migration[] {
+export function listMigrations(
+  migrationsDir: string,
+  ext: string = DEFAULT_MIGRATION_EXT,
+): Migration[] {
   if (!existsSync(migrationsDir)) return [];
   return readdirSync(migrationsDir)
-    .filter((f) => f.endsWith(MIGRATION_EXT))
+    .filter((f) => f.endsWith(ext))
     .sort()
-    .map((file) => ({ tag: file.slice(0, -MIGRATION_EXT.length), file }));
+    .map((file) => ({ tag: file.slice(0, -ext.length), file }));
 }
 
 /** A sortable UTC timestamp prefix for a new migration, e.g. `20260607153045`. */

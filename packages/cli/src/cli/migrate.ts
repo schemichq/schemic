@@ -79,6 +79,10 @@ function migStore(config: ResolvedConfig): MigrationStore<unknown> {
   return driver.migrations;
 }
 
+/** The driver's migration-file extension (e.g. `.surql` / `.sql`); falls back to `.surql`. */
+const migExt = (config: ResolvedConfig): string =>
+  getDriver(config.driver ?? "surrealdb").migrations?.extension ?? ".surql";
+
 /** Decorate diff items with their source file (from the snapshot `files` maps; driver leaves it unset). */
 function attachFiles(
   diff: Diff,
@@ -136,11 +140,11 @@ export async function planMigration(
  * already exists (two migrations in the same second), the timestamp is bumped a second at a time
  * so the result is unique and ordering stays monotonic.
  */
-function nextTag(migrationsDir: string, name: string): string {
+function nextTag(migrationsDir: string, name: string, ext: string): string {
   const s = slug(name);
   const date = new Date();
   let tag = `${timestamp(date)}_${s}`;
-  while (existsSync(join(migrationsDir, `${tag}.surql`))) {
+  while (existsSync(join(migrationsDir, `${tag}${ext}`))) {
     date.setUTCSeconds(date.getUTCSeconds() + 1);
     tag = `${timestamp(date)}_${s}`;
   }
@@ -166,10 +170,11 @@ export function prepareMigration(
   const { diff, next } = plan;
   if (isEmptyDiff(diff)) return null;
   mkdirSync(config.migrationsDir, { recursive: true });
-  const tag = nextTag(config.migrationsDir, name ?? "migration");
+  const ext = migExt(config);
+  const tag = nextTag(config.migrationsDir, name ?? "migration", ext);
   return {
     tag,
-    file: `${tag}.surql`,
+    file: `${tag}${ext}`,
     content: migStore(config).render(tag, diff),
     next,
     up: diff.up.length,
@@ -296,7 +301,7 @@ export async function baseline(
 
 /** Delete every migration `.surql` file (the `meta/` snapshot is left intact); returns removed tags. */
 export function clearMigrationFiles(config: ResolvedConfig): string[] {
-  const migs = listMigrations(config.migrationsDir);
+  const migs = listMigrations(config.migrationsDir, migExt(config));
   for (const m of migs)
     rmSync(join(config.migrationsDir, m.file), { force: true });
   return migs.map((m) => m.tag);
@@ -356,7 +361,7 @@ export async function migrate(
   const mig = migStore(config);
   const table = config.migrationsTable;
   await mig.ensure(db, table);
-  const migrations = listMigrations(config.migrationsDir);
+  const migrations = listMigrations(config.migrationsDir, migExt(config));
   const applied = await mig.applied(db, table);
   let pending = migrations.filter((m) => !applied.has(m.tag));
   if (opts.to) {
@@ -408,7 +413,7 @@ export async function status(
   const mig = migStore(config);
   await mig.ensure(db, config.migrationsTable);
   const applied = await mig.applied(db, config.migrationsTable);
-  const files = listMigrations(config.migrationsDir);
+  const files = listMigrations(config.migrationsDir, migExt(config));
   const fileTags = new Set(files.map((m) => m.tag));
   const rows: StatusRow[] = files.map((m) => {
     const appliedSum = applied.get(m.tag);
@@ -437,7 +442,7 @@ export async function rollback(
   const mig = migStore(config);
   const table = config.migrationsTable;
   await mig.ensure(db, table);
-  const migrations = listMigrations(config.migrationsDir);
+  const migrations = listMigrations(config.migrationsDir, migExt(config));
   const applied = await mig.applied(db, table);
   const appliedMigrations = migrations.filter((m) => applied.has(m.tag));
 
