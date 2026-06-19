@@ -86,6 +86,8 @@ async function ensureTrackTable(conn: Surreal, table: string): Promise<void> {
 const lockTableOf = (table: string) => `${table}_lock`;
 
 const migrations: MigrationStore<Surreal> = {
+  // SurrealDB migrations are SurrealQL scripts.
+  extension: ".surql",
   render: (tag, diff) => renderMigration(tag, diff),
   ensure: ensureTrackTable,
 
