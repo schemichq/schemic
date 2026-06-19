@@ -282,7 +282,7 @@ const program = new Command();
 program
   .name("schemic")
   .description(
-    "Author SurrealDB schemas with Zod — DDL generation + migrations",
+    "Schema-as-code migrations for any database — generate DDL, diff, and migrate via drivers",
   )
   .version("0.1.0-alpha.0")
   .showHelpAfterError("(run `schemic --help` for usage)")
@@ -367,7 +367,7 @@ kindFlags(
 )
   .option("--down", "also show the rollback (down) statements")
   .option("--live", "diff against the live database instead of the snapshot")
-  .option("--ts", "show the change as TypeScript schema instead of SurrealQL")
+  .option("--ts", "show the change as TypeScript schema instead of DDL")
   .option("--watch", "re-run on schema changes")
   .option("--full", "show the full schema SQL, not just the changed parts")
   .option(
