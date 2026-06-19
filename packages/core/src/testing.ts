@@ -3,7 +3,7 @@
 //
 //   import { describeDriverConformance } from "@schemic/core/testing";
 //   import { defineTable, s, surrealDriver } from "@schemic/surrealdb";
-//   describeDriverConformance({ name: "surrealdb", s, driver: surrealDriver, defineTable });
+//   describeDriverConformance({ name: "surrealdb", s, driver: surrealDriver, defineEntity: defineTable });
 //
 // WHY a test, not a type: the zod drop-in builders (`s.string()` = `new <D>Field(z.string())`) are
 // mechanically identical across drivers, but TypeScript has NO higher-kinded types, so a generic core
@@ -30,9 +30,13 @@ export interface DriverConformanceOptions {
   s: Authoring;
   /** The driver under test (already registered by importing its package). */
   driver: Driver<unknown>;
-  /** The driver's `defineTable(name, shape)` — used to lower a probe table. */
-  // biome-ignore lint/suspicious/noExplicitAny: dialect-specific table/shape types.
-  defineTable: (name: string, shape: Record<string, any>) => any;
+  /**
+   * Authors the driver's primary fielded definable — a table, collection, node-type, … — from a name
+   * and a field shape. Used to lower a probe object through the pipeline. Drivers pass their own
+   * `define*` for this (e.g. `defineEntity: defineTable`); the suite stays shape-agnostic.
+   */
+  // biome-ignore lint/suspicious/noExplicitAny: dialect-specific definable/shape types.
+  defineEntity: (name: string, shape: Record<string, any>) => any;
 }
 
 /**
@@ -84,7 +88,7 @@ function isField(v: unknown): boolean {
 export function describeDriverConformance(
   opts: DriverConformanceOptions,
 ): void {
-  const { name, s, driver, defineTable } = opts;
+  const { name, s, driver, defineEntity } = opts;
 
   describe(`driver conformance: ${name}`, () => {
     describe("Driver contract", () => {
@@ -95,7 +99,7 @@ export function describeDriverConformance(
       });
 
       test("exposes a kind registry + the schema/execution ops", () => {
-        // core-v2: schema ops are generic over `registry`; the driver provides the fan-out + execution.
+        // Schema ops are generic over `registry`; the driver provides the fan-out + execution.
         expect(driver.registry).toBeDefined();
         expect(typeof driver.registry.entries).toBe("function");
         expect(driver.registry.names().length).toBeGreaterThan(0);
@@ -150,14 +154,19 @@ export function describeDriverConformance(
     });
 
     describe("lowering (drop-in fields → kind registry)", () => {
-      test("a table of drop-in fields explodes + lowers + emits, carrying every field", () => {
+      test("an entity of drop-in fields explodes + lowers + emits, carrying every field", () => {
         const shape: Record<string, unknown> = {};
         for (const { key, build } of DROP_INS) shape[`f_${key}`] = build(s);
-        const table = defineTable("schemic_conformance_probe", shape);
+        const entity = defineEntity("schemic_conformance_probe", shape);
 
         // explode (authoring -> kinded definables) -> lowerSchema -> portable objects.
-        const portable = lowerSchema(driver.registry, driver.explode([table], []));
-        expect(portable.some((o) => o.kind === "table")).toBe(true);
+        const portable = lowerSchema(
+          driver.registry,
+          driver.explode([entity], []),
+        );
+        // Kind-agnostic: the probe lowers to at least one object (its kind is the driver's own —
+        // `table`, `collection`, …); the per-field check below is what proves lowering is faithful.
+        expect(portable.length).toBeGreaterThan(0);
 
         // The portable shape is the driver's own, but the emitted DDL is generic: every drop-in
         // field name must appear in it (lowering + emit carried it through).

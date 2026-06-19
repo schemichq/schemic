@@ -1,15 +1,15 @@
-// Slice 1 of core-v2 (docs/kind-registry.md): prove the generic kind registry + spine reproduce the
-// fixed-slot engine's behavior, with NO driver dependency. A throwaway in-test "driver" registers
-// THREE kinds against one KindRegistry — `table` (structured, field-level diff), `index` (owned,
-// clustered after its table), and `function` (opaque/native) — and we assert:
+// The generic kind registry + planning spine. An in-test "driver" registers three kinds against one
+// KindRegistry — `table` (structured, field-level diff), `index` (owned, clustered after its table),
+// and `function` (opaque/native) — exercising the engine with NO real driver dependency. It asserts:
 //   - the builder passthrough keeps each kind's own DX (shape-based table, chained function);
-//   - planKinds produces exactly the hand-written up/down DDL for add / change / remove (parity);
+//   - planKinds produces the expected up/down DDL for add / change / remove;
 //   - field-level diff happens INSIDE the table kind's overwrite;
-//   - cross-kind ordering is the dependency graph: an index follows its table, an FK child follows its
-//     parent, and a function emits BEFORE the table whose event calls it (the case an ordinal gets
-//     wrong) — exactly the ordering POC's proven output, now through the real planKinds;
+//   - cross-kind ordering follows the dependency graph: an index follows its table, an FK child follows
+//     its parent, and a function emits BEFORE the table whose event calls it;
 //   - drops reverse the order; down recreates parent-first;
 //   - introspect fans out across kinds off one connection.
+// The DDL strings below are a deliberately generic, made-up syntax: core is dialect-neutral and treats
+// every emitted statement as an opaque string — the real dialect lives entirely in the driver packages.
 
 import { describe, expect, test } from "bun:test";
 import {
@@ -20,14 +20,14 @@ import {
   KindRegistry,
   lowerSchema,
   orderObjects,
-  planKinds,
   type PortableObject,
+  planKinds,
   type Ref,
   snapshotKinds,
   snapshotObjects,
 } from "../../src/kind";
 
-// --- a throwaway driver: three kinds on one registry --------------------------------------------
+// --- an in-test driver: three kinds on one registry ---------------------------------------------
 
 interface PField {
   name: string;
@@ -57,23 +57,20 @@ const registry = new KindRegistry();
 const tableEngine: KindEngine<PTable, PTable> = {
   lower: (t) => t,
   emit: (t) => [
-    `DEFINE TABLE ${t.name}`,
-    ...t.fields.map(
-      (f) => `DEFINE FIELD ${f.name} ON ${t.name} TYPE ${f.type}`,
-    ),
+    `TABLE ${t.name}`,
+    ...t.fields.map((f) => `FIELD ${f.name}:${f.type} ON ${t.name}`),
   ],
-  remove: (t) => [`REMOVE TABLE ${t.name}`],
+  remove: (t) => [`DROP TABLE ${t.name}`],
   overwrite: (prev, next) => {
     const before = new Map(prev.fields.map((f) => [f.name, f.type]));
     const after = new Map(next.fields.map((f) => [f.name, f.type]));
     const lines: string[] = [];
     for (const [n, t] of after)
-      if (!before.has(n))
-        lines.push(`DEFINE FIELD ${n} ON ${next.name} TYPE ${t}`);
+      if (!before.has(n)) lines.push(`FIELD ${n}:${t} ON ${next.name}`);
       else if (before.get(n) !== t)
-        lines.push(`ALTER FIELD ${n} ON ${next.name} TYPE ${t}`);
+        lines.push(`ALTER FIELD ${n}:${t} ON ${next.name}`);
     for (const [n] of before)
-      if (!after.has(n)) lines.push(`REMOVE FIELD ${n} ON ${next.name}`);
+      if (!after.has(n)) lines.push(`DROP FIELD ${n} ON ${next.name}`);
     return lines;
   },
   deps: (t) => t.deps,
@@ -92,10 +89,8 @@ const defineTable = registry.define({
 // kind 2 (ordinal 1): index — owned by its table (clusters after it), depends on it.
 const indexEngine: KindEngine<PIndex, PIndex> = {
   lower: (i) => i,
-  emit: (i) => [
-    `DEFINE INDEX ${i.name} ON ${i.table} FIELDS ${i.cols.join(", ")}`,
-  ],
-  remove: (i) => [`REMOVE INDEX ${i.name} ON ${i.table}`],
+  emit: (i) => [`INDEX ${i.name} ON ${i.table}(${i.cols.join(", ")})`],
+  remove: (i) => [`DROP INDEX ${i.name} ON ${i.table}`],
   deps: (i) => [{ kind: "table", name: i.table }],
   owner: (i) => ({ kind: "table", name: i.table }),
 };
@@ -113,8 +108,8 @@ const defineIndex = registry.define({
 // kind 3 (ordinal 2): function — opaque/native, multi-stage chained authoring.
 const functionEngine: KindEngine<PFunction, PFunction> = {
   lower: (f) => f,
-  emit: (f) => [`DEFINE FUNCTION fn::${f.name} { ${f.body} }`],
-  remove: (f) => [`REMOVE FUNCTION fn::${f.name}`],
+  emit: (f) => [`FUNCTION ${f.name} { ${f.body} }`],
+  remove: (f) => [`DROP FUNCTION ${f.name}`],
   // no `overwrite` -> the spine recreates (remove + emit), the opaque-kind default.
 };
 const defineFunction = registry.define({
@@ -141,10 +136,10 @@ describe("createKind preserves each kind's authoring DX", () => {
   });
 });
 
-// --- parity: planKinds reproduces hand-written fixed-slot DDL ------------------------------------
+// --- planKinds: up/down DDL for add / change / remove -------------------------------------------
 
-describe("planKinds parity (add / change / remove)", () => {
-  test("adding a field -> DEFINE up, REMOVE down (field-level diff in the table kind)", () => {
+describe("planKinds (add / change / remove)", () => {
+  test("adding a field -> emit up, drop down (field-level diff in the table kind)", () => {
     const prev = [defineTable("user", [{ name: "name", type: "string" }])];
     const next = [
       defineTable("user", [
@@ -153,44 +148,35 @@ describe("planKinds parity (add / change / remove)", () => {
       ]),
     ];
     const { up, down } = planKinds(registry, prev, next);
-    expect(up).toEqual(["DEFINE FIELD age ON user TYPE int"]);
-    expect(down).toEqual(["REMOVE FIELD age ON user"]);
+    expect(up).toEqual(["FIELD age:int ON user"]);
+    expect(down).toEqual(["DROP FIELD age ON user"]);
   });
 
   test("changing a field type -> ALTER both ways", () => {
     const prev = [defineTable("user", [{ name: "age", type: "int" }])];
     const next = [defineTable("user", [{ name: "age", type: "float" }])];
     const { up, down } = planKinds(registry, prev, next);
-    expect(up).toEqual(["ALTER FIELD age ON user TYPE float"]);
-    expect(down).toEqual(["ALTER FIELD age ON user TYPE int"]);
+    expect(up).toEqual(["ALTER FIELD age:float ON user"]);
+    expect(down).toEqual(["ALTER FIELD age:int ON user"]);
   });
 
-  test("removing a table -> REMOVE up, full recreate down (table before its fields)", () => {
+  test("removing a table -> drop up, full recreate down (table before its fields)", () => {
     const prev = [
       defineTable("user", [{ name: "name", type: "string" }]),
       defineTable("post", [{ name: "title", type: "string" }]),
     ];
     const next = [defineTable("user", [{ name: "name", type: "string" }])];
     const { up, down } = planKinds(registry, prev, next);
-    expect(up).toEqual(["REMOVE TABLE post"]);
-    expect(down).toEqual([
-      "DEFINE TABLE post",
-      "DEFINE FIELD title ON post TYPE string",
-    ]);
+    expect(up).toEqual(["DROP TABLE post"]);
+    expect(down).toEqual(["TABLE post", "FIELD title:string ON post"]);
   });
 
   test("an opaque function change recreates (remove + emit), no overwrite", () => {
     const prev = [defineFunction("fmt").body("RETURN 1")];
     const next = [defineFunction("fmt").body("RETURN 2")];
     const { up, down } = planKinds(registry, prev, next);
-    expect(up).toEqual([
-      "REMOVE FUNCTION fn::fmt",
-      "DEFINE FUNCTION fn::fmt { RETURN 2 }",
-    ]);
-    expect(down).toEqual([
-      "REMOVE FUNCTION fn::fmt",
-      "DEFINE FUNCTION fn::fmt { RETURN 1 }",
-    ]);
+    expect(up).toEqual(["DROP FUNCTION fmt", "FUNCTION fmt { RETURN 2 }"]);
+    expect(down).toEqual(["DROP FUNCTION fmt", "FUNCTION fmt { RETURN 1 }"]);
   });
 
   test("identical schemas plan to nothing", () => {
@@ -202,14 +188,14 @@ describe("planKinds parity (add / change / remove)", () => {
   });
 });
 
-// --- cross-kind ordering: the graph, not an ordinal ---------------------------------------------
+// --- cross-kind ordering by the dependency graph ------------------------------------------------
 
 const headers = (ddl: string[]) =>
-  ddl.filter((l) => /^DEFINE (TABLE|INDEX|FUNCTION)/.test(l));
+  ddl.filter((l) => /^(TABLE|INDEX|FUNCTION) /.test(l));
 
 describe("cross-kind dependency ordering", () => {
-  // The ordering POC's scenario, now driven through the real planKinds:
-  //   user, user_email(idx), post(FK->user), post_author(idx), fmt(fn), audit(event calls fn::fmt)
+  // A schema exercising every ordering rule:
+  //   user, user_email(idx), post(FK->user), post_author(idx), fmt(fn), audit(event calls fmt)
   const schema = () => [
     defineTable("user", [{ name: "name", type: "string" }]),
     defineIndex("user_email", "user", ["name"]),
@@ -223,27 +209,27 @@ describe("cross-kind dependency ordering", () => {
     }),
   ];
 
-  test("emit order matches the proven layout (index after table, FK order, fn before its table)", () => {
+  test("emit order follows the graph (index after table, FK order, function before its table)", () => {
     const up = emitKinds(registry, schema());
     expect(headers(up)).toEqual([
-      "DEFINE TABLE user",
-      "DEFINE INDEX user_email ON user FIELDS name",
-      "DEFINE TABLE post",
-      "DEFINE INDEX post_author ON post FIELDS title",
-      "DEFINE FUNCTION fn::fmt { RETURN $v }",
-      "DEFINE TABLE audit",
+      "TABLE user",
+      "INDEX user_email ON user(name)",
+      "TABLE post",
+      "INDEX post_author ON post(title)",
+      "FUNCTION fmt { RETURN $v }",
+      "TABLE audit",
     ]);
   });
 
-  test("dropping the whole schema reverses the order (children/FKs first, fn after its table)", () => {
+  test("dropping the whole schema reverses the order (children/FKs first, function after its table)", () => {
     const { up } = planKinds(registry, schema(), []);
-    expect(up.filter((l) => /^REMOVE (TABLE|INDEX|FUNCTION)/.test(l))).toEqual([
-      "REMOVE TABLE audit",
-      "REMOVE FUNCTION fn::fmt",
-      "REMOVE INDEX post_author ON post",
-      "REMOVE TABLE post",
-      "REMOVE INDEX user_email ON user",
-      "REMOVE TABLE user",
+    expect(up.filter((l) => /^DROP (TABLE|INDEX|FUNCTION) /.test(l))).toEqual([
+      "DROP TABLE audit",
+      "DROP FUNCTION fmt",
+      "DROP INDEX post_author ON post",
+      "DROP TABLE post",
+      "DROP INDEX user_email ON user",
+      "DROP TABLE user",
     ]);
   });
 
@@ -363,17 +349,18 @@ describe("buildKindDiff produces up/down + display items + full", () => {
   test("`full` lists every desired object's DDL, ordered across kinds", () => {
     const full = buildKindDiff(registry, prev, next).full ?? [];
     expect(full.map((s) => s.key)).toEqual(["table::user", "function::fmt"]);
-    expect(full[0].ddl).toContain("DEFINE TABLE user");
-    expect(full[0].ddl).toContain("DEFINE FIELD age ON user TYPE int");
+    expect(full[0].ddl).toContain("TABLE user");
+    expect(full[0].ddl).toContain("FIELD age:int ON user");
   });
 });
 
 // --- canonical change-detection hook (emit faithful, equality normalized) ------------------------
 
 describe("KindEngine.canonical separates change-detection from faithful emit", () => {
-  // A kind whose emit is FAITHFUL (carries a COMMENT the DB never introspects), but whose canonical
+  // A kind whose emit is FAITHFUL (carries a comment the DB never reads back), but whose canonical
   // EXCLUDES it — so a comment-only delta, or a faithful-vs-introspected (comment-less) pair, is NOT a
-  // phantom change. Mirrors postgres: DEFAULT/CHECK/COMMENT emit-faithful but dropped from equality.
+  // phantom change. The same shape a SQL driver needs for DEFAULT / CHECK / COMMENT: emit-faithful, but
+  // dropped from equality.
   interface PDoc extends PortableObject {
     kind: "doc";
     name: string;
@@ -392,15 +379,13 @@ describe("KindEngine.canonical separates change-detection from faithful emit", (
     lower: (d: PDoc) => d,
     // emit is FAITHFUL — includes the comment (create-time).
     emit: (d: PDoc) => [
-      `DEFINE DOC ${d.name} BODY ${d.body}`,
-      ...(d.comment !== undefined
-        ? [`COMMENT ON DOC ${d.name} ${d.comment}`]
-        : []),
+      `DOC ${d.name} body=${d.body}`,
+      ...(d.comment !== undefined ? [`NOTE ON ${d.name}: ${d.comment}`] : []),
     ],
-    remove: (d: PDoc) => [`REMOVE DOC ${d.name}`],
-    overwrite: (_p: PDoc, n: PDoc) => [`REDEFINE DOC ${n.name} BODY ${n.body}`],
+    remove: (d: PDoc) => [`DROP DOC ${d.name}`],
+    overwrite: (_p: PDoc, n: PDoc) => [`ALTER DOC ${n.name} body=${n.body}`],
     // canonical EXCLUDES the comment — it's create-time-only, never a change.
-    canonical: (d: PDoc) => `DEFINE DOC ${d.name} BODY ${d.body}`,
+    canonical: (d: PDoc) => `DOC ${d.name} body=${d.body}`,
   });
 
   test("a comment-only delta is NOT a change (faithful emit, normalized equality)", () => {
@@ -421,11 +406,11 @@ describe("KindEngine.canonical separates change-detection from faithful emit", (
   test("a real body change IS detected (and emit stays faithful for a fresh apply)", () => {
     const prev = [defineDoc("a", "x", "a note")];
     const next = [defineDoc("a", "y", "a note")];
-    expect(planKinds(reg, prev, next).up).toEqual(["REDEFINE DOC a BODY y"]);
+    expect(planKinds(reg, prev, next).up).toEqual(["ALTER DOC a body=y"]);
     // fresh apply emits the comment (faithful), even though canonical ignores it.
     expect(emitKinds(reg, [defineDoc("a", "x", "a note")])).toEqual([
-      "DEFINE DOC a BODY x",
-      "COMMENT ON DOC a a note",
+      "DOC a body=x",
+      "NOTE ON a: a note",
     ]);
   });
 });
@@ -448,12 +433,10 @@ describe("KindEngine.displayItems decomposes a change into per-field items", () 
     }),
     lower: (t: PTbl) => t,
     emit: (t: PTbl) => [
-      `DEFINE TABLE ${t.name}`,
-      ...t.cols.map(
-        (c) => `DEFINE FIELD ${c.name} ON ${t.name} TYPE ${c.type}`,
-      ),
+      `TABLE ${t.name}`,
+      ...t.cols.map((c) => `FIELD ${c.name}:${c.type} ON ${t.name}`),
     ],
-    remove: (t: PTbl) => [`REMOVE TABLE ${t.name}`],
+    remove: (t: PTbl) => [`DROP TABLE ${t.name}`],
     overwrite: (_p: PTbl, n: PTbl) => [`ALTER TABLE ${n.name}`],
     // per-FIELD display items, each carrying its owning table for hierarchical grouping.
     displayItems: (prev: PTbl | undefined, next: PTbl | undefined) => {
@@ -464,7 +447,7 @@ describe("KindEngine.displayItems decomposes a change into per-field items", () 
       for (const [n, t] of after) {
         const b = before.get(n);
         const key = `field:${table}:${n}`;
-        const ddl = `DEFINE FIELD ${n} ON ${table} TYPE ${t}`;
+        const ddl = `FIELD ${n}:${t} ON ${table}`;
         if (b === undefined)
           out.push({ key, table, kind: "field", op: "add", ddl });
         else if (b !== t)
@@ -473,7 +456,7 @@ describe("KindEngine.displayItems decomposes a change into per-field items", () 
             table,
             kind: "field",
             op: "change",
-            before: `DEFINE FIELD ${n} ON ${table} TYPE ${b}`,
+            before: `FIELD ${n}:${b} ON ${table}`,
             after: ddl,
           });
       }
@@ -484,8 +467,8 @@ describe("KindEngine.displayItems decomposes a change into per-field items", () 
             table,
             kind: "field",
             op: "remove",
-            ddl: `REMOVE FIELD ${n} ON ${table}`,
-            old: `DEFINE FIELD ${n} ON ${table} TYPE ${t}`,
+            ddl: `DROP FIELD ${n} ON ${table}`,
+            old: `FIELD ${n}:${t} ON ${table}`,
           });
       return out;
     },
@@ -516,7 +499,7 @@ describe("KindEngine.displayItems decomposes a change into per-field items", () 
       "field:user:id",
       "field:user:name",
     ]);
-    expect(full[1].ddl).toBe("DEFINE FIELD name ON user TYPE string");
+    expect(full[1].ddl).toBe("FIELD name:string ON user");
   });
 });
 

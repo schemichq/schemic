@@ -1,6 +1,6 @@
-// The kind-registry filter (core-v2 flip): filterKinds over PortableObject[], where owned objects
-// (index/event with owner -> table) follow their table's inclusion and an event additionally honors
-// --events. A fake registry supplies the owner hooks the filter reads.
+// The kind filter: filterKinds over PortableObject[], where owned objects (index/event with
+// owner -> table) follow their table's inclusion and an event additionally honors --events.
+// A fake registry supplies the owner hooks the filter reads.
 
 import { describe, expect, test } from "bun:test";
 import { filterKinds, parseFilter, passesFilter } from "../../src/cli/filter";

@@ -8,5 +8,5 @@ describeDriverConformance({
   name: "postgres",
   s,
   driver: postgresDriver,
-  defineTable,
+  defineEntity: defineTable,
 });
