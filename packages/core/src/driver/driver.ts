@@ -12,10 +12,10 @@
 // `Authored`/`AuthoredDef` bounds — so the neutral engine never names a dialect's concrete builder
 // (`TableDef`/`StandaloneDef`).
 
-import type { ResolvedConfig } from "../cli/config";
-import type { Diff } from "../cli/diff";
-import type { Filter } from "../cli/filter";
-import type { PullPlan } from "../cli/merge";
+import type { ResolvedConfig } from "../cli-kit/config";
+import type { Diff } from "../cli-kit/diff";
+import type { Filter } from "../cli-kit/filter";
+import type { PullPlan } from "../cli-kit/merge";
 import type { Definable, KindRegistry, PortableObject } from "../kind";
 
 /**

@@ -14,7 +14,7 @@ export {
   makeJiti,
   type ResolvedConfig,
   resolveConnectionConfig,
-} from "./cli/config";
+} from "./cli-kit/config";
 // --- neutral diff display ---------------------------------------------------------------------
 export {
   type Diff,
@@ -25,7 +25,7 @@ export {
   isEmptyDiff,
   summarizeKinds,
   tokenDiff,
-} from "./cli/diff";
+} from "./cli-kit/diff";
 // --- neutral filtering ------------------------------------------------------------------------
 export {
   type Filter,
@@ -37,7 +37,7 @@ export {
   mergeStored,
   parseFilter,
   passesFilter,
-} from "./cli/filter";
+} from "./cli-kit/filter";
 // --- pull plan + magicast merge (neutral codegen support) -------------------------------------
 export {
   actionLabel,
@@ -51,7 +51,7 @@ export {
   type PullPlan,
   type RenderedUnit,
   unifiedDiff,
-} from "./cli/merge";
+} from "./cli-kit/merge";
 // --- snapshot + migration metadata ------------------------------------------------------------
 export {
   checksum,
@@ -63,9 +63,9 @@ export {
   slug,
   timestamp,
   writeSnapshot,
-} from "./cli/meta";
+} from "./cli-kit/meta";
 // --- pager + style ----------------------------------------------------------------------------
-export { pipeThroughPager, resolvePager } from "./cli/pager";
+export { pipeThroughPager, resolvePager } from "./cli-kit/pager";
 // --- jiti schema loader (loads a project's authored schema files agnostically) ----------------
 export {
   type AnyTable,
@@ -74,8 +74,8 @@ export {
   loadDefs,
   loadSchemas,
   scanLocalEntities,
-} from "./cli/schema";
-export { colorEnabled, fail, ok, plural, style } from "./cli/style";
+} from "./cli-kit/schema";
+export { colorEnabled, fail, ok, plural, style } from "./cli-kit/style";
 // --- multi-connection contract (docs/MULTI-CONNECTION.md) -------------------------------------
 export {
   type ConnectionConfigBase,

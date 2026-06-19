@@ -45,7 +45,7 @@ export interface Ref {
 
 // `DiffItem` is a type-only import (erased at compile) — the display contract the `displayItems` hook
 // produces; no runtime cli->kind coupling, same arrangement as ./plan.ts.
-import type { DiffItem } from "../cli/diff";
+import type { DiffItem } from "../cli-kit/diff";
 
 /**
  * What core needs to orchestrate ONE kind generically — it never inspects the specifics. The

@@ -16,7 +16,7 @@
 
 // NOTE: `Diff`/`DiffItem` are a type-only import (erased at compile — no runtime cli->kind coupling),
 // the same arrangement as ./driver/portable-diff.ts.
-import type { Diff, DiffItem } from "../cli/diff";
+import type { Diff, DiffItem } from "../cli-kit/diff";
 import type {
   Definable,
   KindEngine,

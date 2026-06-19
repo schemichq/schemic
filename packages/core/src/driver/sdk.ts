@@ -7,8 +7,8 @@
 
 // Types a driver's ops reference (Driver.connect/diff) — re-exported so a driver imports them from
 // the one SDK entry rather than reaching into core's cli/* internals.
-export type { ResolvedConfig } from "../cli/config";
-export type { Diff, DiffItem } from "../cli/diff";
+export type { ResolvedConfig } from "../cli-kit/config";
+export type { Diff, DiffItem } from "../cli-kit/diff";
 // Multi-connection: the primitive each driver wraps in its typed `<driver>Connection(...)` factory.
 export {
   type ConnectionConfigBase,

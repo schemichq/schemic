@@ -3,7 +3,7 @@
 // A fake registry supplies the owner hooks the filter reads.
 
 import { describe, expect, test } from "bun:test";
-import { filterKinds, parseFilter, passesFilter } from "../../src/cli/filter";
+import { filterKinds, parseFilter, passesFilter } from "../../src/cli-kit/filter";
 import { KindRegistry, type PortableObject } from "../../src/kind";
 
 interface Owned extends PortableObject {
