@@ -29,10 +29,10 @@ import {
   mergeStored,
   parseFilter,
   readSnapshot,
-  snapshotKinds,
-  snapshotObjects,
   type StoredSnapshot,
   slug,
+  snapshotKinds,
+  snapshotObjects,
   timestamp,
   writeSnapshot,
 } from "@schemic/core";
@@ -466,26 +466,6 @@ export async function rollback(
     await mig.unlock(db, table);
   }
   return toRevert;
-}
-
-const SURQL_STUB = (tag: string) => `-- ${tag} — hand-written migration.
-IF $direction = "up" {
-    -- forward changes
-} ELSE {
-    -- rollback changes
-};
-`;
-
-/** Scaffold a blank, hand-written `.surql` migration with up/down branches. */
-export function newMigration(
-  config: ResolvedConfig,
-  name: string,
-): { tag: string; file: string } {
-  mkdirSync(config.migrationsDir, { recursive: true });
-  const tag = nextTag(config.migrationsDir, name);
-  const file = `${tag}.surql`;
-  writeFileSync(join(config.migrationsDir, file), SURQL_STUB(tag));
-  return { tag, file };
 }
 
 /** Run the project's seed script (`config.seed` or `database/seed.ts`) with a connected client. */

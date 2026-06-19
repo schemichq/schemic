@@ -263,6 +263,14 @@ export interface Driver<
    * Absent -> `schemic init` can't scaffold a project for this driver.
    */
   initScaffold?(): Record<string, string>;
+  /**
+   * Scaffold a NEW entity file's contents — the starter `s.*` / `define*` module for an object of
+   * `kind` named `name` (e.g. `("table", "user")` -> a `defineTable("user", { … })` module in this
+   * dialect's authoring). Returns the file text; the CLI writes it under the kind's
+   * {@link KindRegistry.display} folder. THROW for a kind this driver can't author (the CLI surfaces
+   * the message). Absent -> `schemic new` is unavailable for this driver.
+   */
+  scaffoldEntity?(kind: string, name: string): string;
 }
 
 // --- Registry -----------------------------------------------------------------------------------

@@ -1,5 +1,10 @@
-import { watch as fsWatch } from "node:fs";
-import { join, relative } from "node:path";
+import {
+  existsSync,
+  watch as fsWatch,
+  mkdirSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join, relative } from "node:path";
 import { createInterface } from "node:readline/promises";
 import {
   actionLabel,
@@ -47,7 +52,6 @@ import {
   clearMigrationFiles,
   commitMigration,
   migrate,
-  newMigration,
   planMigration,
   prepareMigration,
   reconcileBaseline,
@@ -960,14 +964,33 @@ dbFlags(
 
 configFlag(
   program
-    .command("new <name>")
-    .description("Scaffold a blank, hand-written .surql migration"),
-).action((name: string, opts: CommonOpts) => {
+    .command("new <kind> <name>")
+    .description(
+      "Scaffold a new schema file for an entity, e.g. `sc new table user`",
+    ),
+).action((kind: string, name: string, opts: CommonOpts) => {
   run(async () => {
     const config = await resolveOne(opts);
-    const { file } = newMigration(config, name);
+    const driver = activeDriver(config);
+    if (!driver.scaffoldEntity)
+      throw new Error(`the "${config.driver}" driver can't scaffold entities.`);
+    if (config.schemaIsFile)
+      throw new Error(
+        "`schemic new` needs a schema directory — your schema is a single file.",
+      );
+    // The driver authors the file (throws for a kind it can't); it lands under the kind's folder.
+    const content = driver.scaffoldEntity(kind, name);
+    const target = join(
+      config.schemaPath,
+      driver.registry.display(kind).folder,
+      `${name}.ts`,
+    );
+    if (existsSync(target))
+      throw new Error(`${relative(config.root, target)} already exists.`);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, content);
     console.log(
-      `${ok(file)}  ${style.dim("— edit it, then `schemic migrate`")}`,
+      `${ok(relative(config.root, target))}  ${style.dim("— author its fields, then `schemic gen`")}`,
     );
   });
 });
