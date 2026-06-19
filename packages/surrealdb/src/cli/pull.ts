@@ -530,7 +530,10 @@ function renderTableConst(
   }));
   const tree = fieldTree(fields);
   const fieldLines = [...tree.children]
-    .filter(([k]) => k !== "id" && k !== "in" && k !== "out")
+    // `id` is always implicit (re-added below for tables). `in`/`out` are the implicit endpoints of a
+    // RELATION (rendered via `.from()`/`.to()`) — but on a NORMAL table they're ordinary fields a user
+    // may have named `in`/`out` (e.g. `DEFINE FIELD in ON order TYPE record<person>`), so keep them.
+    .filter(([k]) => k !== "id" && (!isRelation || (k !== "in" && k !== "out")))
     .map(([k, node]) => `  ${ident(k)}: ${renderField(node, "  ", ctx)},`)
     .join("\n");
 

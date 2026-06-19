@@ -213,4 +213,53 @@ describe("pull reverses native codecs / string formats", () => {
     expect(out).toContain("doc: s.file()");
     expect(out).toContain('loc: s.geometry("point")');
   });
+
+  test("a NORMAL table keeps fields literally named `in`/`out`", () => {
+    // Regression: `in`/`out` are the implicit endpoints of a RELATION only. On a plain table a user
+    // can define record fields named `in`/`out` (`DEFINE FIELD in ON order TYPE record<person>`);
+    // pull was dropping them along with relation endpoints. They must survive on a NORMAL table.
+    const db: DbStructured = {
+      tables: [
+        t("order", [
+          f("currency", "string", "order"),
+          f("in", "record<person>", "order"),
+          f("out", "record<product>", "order"),
+        ]),
+      ],
+      functions: [],
+      accesses: [],
+      analyzers: [],
+    };
+    const out = renderPerFile(db, (_k, n) => `${n}.ts`).get("order.ts") ?? "";
+    expect(out).toContain("export const Order = defineTable(");
+    expect(out).toContain('in: s.recordId("person")');
+    expect(out).toContain('out: s.recordId("product")');
+  });
+
+  test("a RELATION still omits implicit in/out (endpoints render via from/to)", () => {
+    const db: DbStructured = {
+      tables: [
+        {
+          name: "likes",
+          kind: { kind: "RELATION", in: ["person"], out: ["product"] },
+          schemafull: true,
+          fields: [
+            f("since", "datetime", "likes"),
+            f("in", "record<person>", "likes"),
+            f("out", "record<product>", "likes"),
+          ],
+          indexes: [],
+          events: [],
+        },
+      ],
+      functions: [],
+      accesses: [],
+      analyzers: [],
+    };
+    const out = renderPerFile(db, (_k, n) => `${n}.ts`).get("likes.ts") ?? "";
+    expect(out).toContain("export const Likes = defineRelation(");
+    expect(out).toContain("since: s.datetime()");
+    expect(out).not.toContain("in: s.recordId");
+    expect(out).not.toContain("out: s.recordId");
+  });
 });
