@@ -375,6 +375,28 @@ export function defineEnum<const V extends readonly [string, ...string[]]>(
   return new PgEnumDef(name, values);
 }
 
+// --- defineView: a pg VIEW (CREATE VIEW … AS <select>) ------------------------------------------
+
+/**
+ * A Postgres view — `CREATE VIEW <name> AS <sql>`, where `sql` is a raw SELECT statement (no bind
+ * params; views are static). A standalone def (the `kind` marker routes it to the driver's `explode`).
+ * NOTE: Postgres rewrites a view's stored definition (expands `SELECT *`, strips qualifiers, reformats),
+ * so the body can't byte-round-trip — the view's PRESENCE round-trips, but a body edit isn't
+ * auto-diffed yet (see docs/COVERAGE.md). Drop+recreate or re-gen to change a view's SELECT.
+ */
+export class PgViewDef {
+  readonly kind = "view" as const;
+  constructor(
+    readonly name: string,
+    readonly sql: string,
+  ) {}
+}
+
+/** Declare a pg view: `export const activeUsers = defineView("active_users", 'SELECT id, name FROM "user" WHERE active')`. */
+export function defineView(name: string, sql: string): PgViewDef {
+  return new PgViewDef(name, sql);
+}
+
 // --- App/Wire type inference (DX) --------------------------------------------------------------
 
 /** The decoded (App-land) row type of a table — `z.output` of each field's schema. */

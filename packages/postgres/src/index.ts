@@ -42,9 +42,9 @@ import {
   nullable,
   registerDriver,
 } from "@schemic/core/driver";
-import type { PgEnumDef, PgTableDef } from "./authoring";
+import type { PgEnumDef, PgTableDef, PgViewDef } from "./authoring";
 import { escId, type PgIndexInfo, type PgTable } from "./emit";
-import { enumPortable, registry, splitTables } from "./kinds";
+import { enumPortable, registry, splitTables, viewPortable } from "./kinds";
 import { pgLower } from "./lower";
 
 // The pg-native authoring surface (`s.*`, defineTable, PgField, $postgres escape hatch, …).
@@ -185,12 +185,17 @@ async function pgIntrospect(
   const skip = new Set(exclude);
   for (const t of exclude) skip.add(`${t}_lock`);
   const { rows: cols } = await conn.query<ColRow>(
-    `SELECT table_name, column_name, data_type, udt_name, is_nullable,
-            is_identity, identity_generation,
-            character_maximum_length, numeric_precision, numeric_scale
-       FROM information_schema.columns
-      WHERE table_schema = 'public'
-      ORDER BY table_name, ordinal_position`,
+    // BASE TABLE only — exclude views (their columns also live in information_schema.columns); views
+    // are introspected separately as the `view` kind (pgIntrospectViews).
+    `SELECT c.table_name, c.column_name, c.data_type, c.udt_name, c.is_nullable,
+            c.is_identity, c.identity_generation,
+            c.character_maximum_length, c.numeric_precision, c.numeric_scale
+       FROM information_schema.columns c
+       JOIN information_schema.tables t
+         ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+        AND t.table_type = 'BASE TABLE'
+      WHERE c.table_schema = 'public'
+      ORDER BY c.table_name, c.ordinal_position`,
   );
   const { rows: fks } = await conn.query<FkRow>(
     `SELECT tc.table_name, kcu.column_name, ccu.table_name AS foreign_table_name,
@@ -340,6 +345,20 @@ async function pgIntrospectEnums(
   return [...byName.entries()].map(([name, values]) =>
     enumPortable(name, values),
   );
+}
+
+/** Read views (CREATE VIEW) from pg_views -> `view` kind objects (definition is pg's rewritten form). */
+async function pgIntrospectViews(
+  conn: PgConn,
+  exclude: Set<string> = new Set(),
+): Promise<PortableObject[]> {
+  const { rows } = await conn.query<{ name: string; definition: string }>(
+    `SELECT viewname AS name, definition
+       FROM pg_views WHERE schemaname = 'public' ORDER BY viewname`,
+  );
+  return rows
+    .filter((r) => !exclude.has(r.name))
+    .map((r) => viewPortable(r.name, (r.definition ?? "").trim()));
 }
 
 // --- connection (PGlite, embedded) --------------------------------------------------------------
@@ -586,23 +605,34 @@ export const postgresDriver: Driver<PgConn> = {
 
   // Authoring -> kinded Definables. Tables: lower each to the driver's `PgTable` IR (./lower.ts) then
   // split into [table, ...index, ...constraint] (./kinds.ts splitTable). Standalone `defs`: native
-  // `enum` types (defineEnum -> { kind: "enum" }) become `enum` kind objects. Core then runs
+  // `enum` types (defineEnum) + `view`s (defineView) become their kind objects. Core then runs
   // lowerSchema(registry, explode(...)).
-  explode: (tables, defs): Definable[] => [
-    ...splitTables(pgLower(tables as unknown as PgTableDef[])),
-    ...(defs as unknown as Array<{ kind?: string }>)
-      .filter((d) => d?.kind === "enum")
-      .map((d) => {
-        const e = d as unknown as PgEnumDef;
-        return enumPortable(e.name, e.values);
-      }),
-  ],
+  explode: (tables, defs): Definable[] => {
+    const standalone = defs as unknown as Array<{ kind?: string }>;
+    return [
+      ...splitTables(pgLower(tables as unknown as PgTableDef[])),
+      ...standalone
+        .filter((d) => d?.kind === "enum")
+        .map((d) => {
+          const e = d as unknown as PgEnumDef;
+          return enumPortable(e.name, e.values);
+        }),
+      ...standalone
+        .filter((d) => d?.kind === "view")
+        .map((d) => {
+          const v = d as unknown as PgViewDef;
+          return viewPortable(v.name, v.sql);
+        }),
+    ];
+  },
 
   // One pg_catalog/information_schema read -> ALL kind objects, canonicalized identically to lowering
-  // (a clean apply round-trips to a zero diff) and complete (enum + table + index + FK) so no phantom.
+  // (a clean apply round-trips to a zero diff) and complete (enum + table + index + FK + view) so no
+  // phantom (view bodies are name-only in `canonical` — see the view kind).
   introspectAll: async (conn, exclude) => [
     ...(await pgIntrospectEnums(conn, exclude)),
     ...splitTables(await pgIntrospect(conn, exclude)),
+    ...(await pgIntrospectViews(conn, exclude)),
   ],
 
   /**

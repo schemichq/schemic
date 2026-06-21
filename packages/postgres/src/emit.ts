@@ -265,3 +265,12 @@ export const dropEnumSql = (name: string) =>
 /** `ALTER TYPE "name" ADD VALUE 'x';` — append a label (non-destructive; appended values only). */
 export const addEnumValueSql = (name: string, value: string) =>
   `ALTER TYPE ${escId(name)} ADD VALUE ${enumLabel(value)};`;
+
+// --- view (CREATE VIEW … AS <select>) -----------------------------------------------------------
+
+/** `CREATE VIEW "name" AS <sql>;` — `sql` is the view's SELECT body, spliced verbatim. */
+export const createViewDdl = (name: string, sql: string) =>
+  `CREATE VIEW ${escId(name)} AS ${sql.trim().replace(/;\s*$/, "")};`;
+/** `DROP VIEW IF EXISTS "name";`. */
+export const dropViewSql = (name: string) =>
+  `DROP VIEW IF EXISTS ${escId(name)};`;

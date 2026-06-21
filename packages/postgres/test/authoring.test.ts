@@ -4,6 +4,7 @@ import * as z from "zod";
 import {
   defineEnum,
   defineTable,
+  defineView,
   type PgConn,
   PgField,
   postgresDriver,
@@ -328,5 +329,35 @@ describe("defineEnum: native CREATE TYPE", () => {
     const col = mood.column();
     expect(col.schema.parse("happy")).toBe("happy");
     expect(() => col.schema.parse("nope")).toThrow();
+  });
+});
+
+describe("defineView: CREATE VIEW", () => {
+  test("a view emits after its table + round-trips (presence) via explode/introspectAll", async () => {
+    const user = defineTable("vu", { name: s.text(), active: s.boolean() });
+    const active = defineView(
+      "vu_active",
+      'SELECT id, name FROM "vu" WHERE active',
+    );
+    const objs = postgresDriver.explode([user], [active]);
+    const out = emitKinds(registry, objs);
+    expect(
+      out.find((x) => x.startsWith('CREATE VIEW "vu_active"')),
+    ).toBeTruthy();
+    expect(out.findIndex((x) => x.includes('CREATE TABLE "vu"'))).toBeLessThan(
+      out.findIndex((x) => x.includes('CREATE VIEW "vu_active"')),
+    );
+
+    const conn = (await postgresDriver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
+    try {
+      await postgresDriver.apply(conn, out);
+      const live = await postgresDriver.introspectAll(conn);
+      const { up, down } = buildKindDiff(registry, live, objs);
+      expect({ up, down }).toEqual({ up: [], down: [] });
+    } finally {
+      await conn.close();
+    }
   });
 });

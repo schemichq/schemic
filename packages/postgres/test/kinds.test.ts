@@ -8,7 +8,12 @@ import {
 } from "@schemic/core/driver";
 import type { PgTable } from "../src/emit";
 import { type PgConn, postgresDriver } from "../src/index";
-import { enumPortable, registry, splitTables } from "../src/kinds";
+import {
+  enumPortable,
+  registry,
+  splitTables,
+  viewPortable,
+} from "../src/kinds";
 
 // The postgres kind registry, post Option-A flip. The driver speaks kinds: explode(authoring) +
 // introspectAll feed the generic spine (emitKinds/buildKindDiff). These tests drive that spine
@@ -37,13 +42,20 @@ const ud = (d: { up: string[]; down: string[] }) => ({
 // --- registration ------------------------------------------------------------------------------
 
 describe("postgres kind registry", () => {
-  test("registers enum/table/index/constraint coarse-to-fine (registration order == ordinal)", () => {
-    expect(registry.names()).toEqual(["enum", "table", "index", "constraint"]);
-    // enum FIRST so CREATE TYPE emits before the tables that use it.
+  test("registers enum/table/index/constraint/view coarse-to-fine (registration order == ordinal)", () => {
+    expect(registry.names()).toEqual([
+      "enum",
+      "table",
+      "index",
+      "constraint",
+      "view",
+    ]);
+    // enum FIRST (CREATE TYPE before tables); view LAST (reads tables, emits after them).
     expect(registry.ordinal("enum")).toBe(0);
     expect(registry.ordinal("table")).toBe(1);
     expect(registry.ordinal("index")).toBe(2);
     expect(registry.ordinal("constraint")).toBe(3);
+    expect(registry.ordinal("view")).toBe(4);
   });
 });
 
@@ -348,6 +360,70 @@ describe("enum kind", () => {
     try {
       await driver.apply(conn, ddl);
       const live = await driver.introspectAll(conn);
+      const { up, down } = buildKindDiff(registry, live, objs);
+      expect({ up, down }).toEqual({ up: [], down: [] });
+    } finally {
+      await conn.close();
+    }
+  });
+});
+
+// --- view kind (CREATE VIEW … AS <select>) ------------------------------------------------------
+
+describe("view kind", () => {
+  test("emits CREATE VIEW", () => {
+    expect(
+      emitKinds(registry, [viewPortable("v", 'SELECT id FROM "user"')]),
+    ).toEqual([`CREATE VIEW "v" AS SELECT id FROM "user";`]);
+  });
+
+  test("a new view diffs as add / drop", () => {
+    const { up, down } = buildKindDiff(
+      registry,
+      [],
+      [viewPortable("v", 'SELECT id FROM "user"')],
+    );
+    expect(up).toEqual([`CREATE VIEW "v" AS SELECT id FROM "user";`]);
+    expect(down).toEqual([`DROP VIEW IF EXISTS "v";`]);
+  });
+
+  test("body change is NOT a change (pg rewrites view definitions; name-only canonical)", () => {
+    const { up, down } = buildKindDiff(
+      registry,
+      [viewPortable("v", 'SELECT id FROM "user"')],
+      [viewPortable("v", 'SELECT id, name FROM "user" WHERE active')],
+    );
+    expect({ up, down }).toEqual({ up: [], down: [] });
+  });
+
+  test("table + view round-trips; view introspected as a view, not a table", async () => {
+    const objs = [
+      ...splitTables([
+        tbl("vrt_user", [
+          f("name", scalar("string")),
+          f("active", scalar("bool")),
+        ]),
+      ]),
+      viewPortable(
+        "vrt_active",
+        'SELECT id, name FROM "vrt_user" WHERE active',
+      ),
+    ];
+    const ddl = emitKinds(registry, objs);
+    expect(ddl[ddl.length - 1]).toContain('CREATE VIEW "vrt_active"');
+
+    const conn = (await driver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
+    try {
+      await driver.apply(conn, ddl);
+      const live = await driver.introspectAll(conn);
+      expect(
+        live.some((o) => o.kind === "view" && o.name === "vrt_active"),
+      ).toBe(true);
+      expect(
+        live.some((o) => o.kind === "table" && o.name === "vrt_active"),
+      ).toBe(false);
       const { up, down } = buildKindDiff(registry, live, objs);
       expect({ up, down }).toEqual({ up: [], down: [] });
     } finally {

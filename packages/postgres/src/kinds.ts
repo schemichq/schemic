@@ -33,9 +33,11 @@ import {
   canonField,
   createEnumDdl,
   createTableDdl,
+  createViewDdl,
   dropEnumSql,
   dropFkSql,
   dropTableSql,
+  dropViewSql,
   escId,
   fieldColumnDdl,
   fkActions,
@@ -347,6 +349,29 @@ const enumEngine: KindEngine<PgEnumPortable, PgEnumPortable> = {
   // before the CREATE TABLEs whose columns reference it (and drops last on the reverse).
 };
 
+// --- view kind (CREATE VIEW … AS <select>) ------------------------------------------------------
+
+/** The `view` kind's portable form: a view name + its SELECT body (verbatim authored / introspected). */
+export interface PgViewPortable extends PortableObject {
+  kind: "view";
+  name: string;
+  sql: string;
+}
+
+const viewEngine: KindEngine<PgViewPortable, PgViewPortable> = {
+  lower: (v) => v,
+  emit: (v) => [createViewDdl(v.name, v.sql)],
+  remove: (v) => [dropViewSql(v.name)],
+  // Change-detection by NAME only: Postgres rewrites a view's stored definition (expands `SELECT *`,
+  // strips qualifiers, reformats), so the body can't byte-match the authored SQL. Excluding the body
+  // from `canonical` means a clean apply round-trips with no phantom (presence matches); the tradeoff
+  // is that a view-BODY edit isn't auto-detected (documented — drop+recreate or re-gen). A future pass
+  // can normalize via the shadow engine (apply both, compare introspected definitions).
+  canonical: (v) => `view:${v.name}`,
+  // No overwrite: with the body excluded from diff, a detected view change is add/remove (presence).
+  // No deps: registered LAST (highest ordinal) so views emit after the tables/enums they read.
+};
+
 // --- the registry -------------------------------------------------------------------------------
 
 export const registry = new KindRegistry();
@@ -370,6 +395,12 @@ registry.define({
   name: "constraint",
   build: (c: PgConstraintPortable) => c,
   ...constraintEngine,
+});
+// view LAST (highest ordinal): a view reads tables/enums, so it must emit after them.
+registry.define({
+  name: "view",
+  build: (v: PgViewPortable) => v,
+  ...viewEngine,
 });
 
 // --- splitTable: the driver's table IR -> the registry's kind objects ----------------------------
@@ -435,3 +466,10 @@ export const enumPortable = (
   name: string,
   values: readonly string[],
 ): PgEnumPortable => ({ kind: "enum", name, values: [...values] });
+
+/** A view (authoring `PgViewDef` or introspected) -> its `view` kind object. */
+export const viewPortable = (name: string, sql: string): PgViewPortable => ({
+  kind: "view",
+  name,
+  sql,
+});
