@@ -1,6 +1,6 @@
 {
   "name": "@schemic/postgres",
-  "version": "0.1.0-alpha.7",
+  "version": "0.1.0-alpha.8",
   "description": "PostgreSQL driver for Schemic — emit/introspect/diff the portable IR against Postgres (PGlite).",
   "license": "MIT",
   "author": "Vertio Solutions",

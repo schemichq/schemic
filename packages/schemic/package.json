@@ -1,6 +1,6 @@
 {
   "name": "schemic",
-  "version": "0.1.0-alpha.7",
+  "version": "0.1.0-alpha.8",
   "description": "The Schemic CLI — schema-as-code migrations for any database. Alias for @schemic/cli (bunx schemic / npx schemic).",
   "license": "MIT",
   "author": "Vertio Solutions",
