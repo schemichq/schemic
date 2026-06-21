@@ -9,7 +9,7 @@
     },
     "packages/cli": {
       "name": "@schemic/cli",
-      "version": "0.1.0-alpha.10",
+      "version": "0.1.0-alpha.11",
       "bin": {
         "schemic": "lib/cli.js",
         "sc": "lib/cli.js",
@@ -32,7 +32,7 @@
     },
     "packages/core": {
       "name": "@schemic/core",
-      "version": "0.1.0-alpha.10",
+      "version": "0.1.0-alpha.11",
       "dependencies": {
         "commander": "^14.0.2",
         "jiti": "^2.4.2",
@@ -54,7 +54,7 @@
     },
     "packages/create-schemic": {
       "name": "create-schemic",
-      "version": "0.1.0-alpha.10",
+      "version": "0.1.0-alpha.11",
       "bin": {
         "create-schemic": "lib/index.js",
       },
@@ -87,7 +87,7 @@
     },
     "packages/postgres": {
       "name": "@schemic/postgres",
-      "version": "0.1.0-alpha.10",
+      "version": "0.1.0-alpha.11",
       "dependencies": {
         "@schemic/core": "workspace:*",
         "zod": "^4.3.5",
@@ -108,7 +108,7 @@
     },
     "packages/schemic": {
       "name": "schemic",
-      "version": "0.1.0-alpha.10",
+      "version": "0.1.0-alpha.11",
       "bin": {
         "schemic": "bin.mjs",
         "sc": "bin.mjs",
@@ -119,7 +119,7 @@
     },
     "packages/surrealdb": {
       "name": "@schemic/surrealdb",
-      "version": "0.1.0-alpha.10",
+      "version": "0.1.0-alpha.11",
       "dependencies": {
         "@schemic/core": "workspace:*",
         "surrealdb": "^2.0.3",
@@ -1043,7 +1043,7 @@
 
     "sitemap": ["sitemap@9.0.1", "", { "dependencies": { "@types/node": "^24.9.2", "@types/sax": "^1.2.1", "arg": "^5.0.0", "sax": "^1.4.1" }, "bin": { "sitemap": "dist/esm/cli.js" } }, "sha512-S6hzjGJSG3d6if0YoF5kTyeRJvia6FSTBroE5fQ0bu1QNxyJqhhinfUsXi9fH3MgtXODWvwo2BDyQSnhPQ88uQ=="],
 
-    "smol-toml": ["smol-toml@1.6.1", "", {}, "sha512-dWUG8F5sIIARXih1DTaQAX4SsiTXhInKf1buxdY9DIg4ZYPZK5nGM1VRIYmEbDbsHt7USo99xSLFu5Q1IqTmsg=="],
+    "smol-toml": ["smol-toml@1.7.0", "", {}, "sha512-aqVvWoyO21L23mb+drl4RmMXbf6N7FdHjAhTRA9ZBL7apWBgfWC16KjrASI+1p9GAroljyMHj6fK67i0UiTNvQ=="],
 
     "source-map": ["source-map@0.7.6", "", {}, "sha512-i5uvt8C3ikiWeNZSVZNWcfZPItFQOsYTUAOkcUPGd8DqDy1uOUikjt5dG+uRlwyvR108Fb9DOd4GvXfT0N2/uQ=="],
 
