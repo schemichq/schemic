@@ -44,6 +44,22 @@ describe("smart id", () => {
   });
 });
 
+describe("bare table (no shape)", () => {
+  test("defineTable(name) with no shape is a table with just the implicit id", () => {
+    // Regression: `shape` used to be required, so `defineTable("user")` was a type error AND threw
+    // `Object.entries(undefined)` at runtime. It's now optional (default `{}`), like defineRelation.
+    const User = defineTable("user");
+    expect(User.fields.id).toBeInstanceOf(RecordIdField);
+    expect(emitTable(User)).toBe("DEFINE TABLE user TYPE NORMAL SCHEMAFULL;");
+  });
+
+  test("chains still work on a bare table", () => {
+    expect(emitTable(defineTable("blob").schemaless())).toBe(
+      "DEFINE TABLE blob TYPE NORMAL SCHEMALESS;",
+    );
+  });
+});
+
 describe("table instance helpers", () => {
   const User = defineTable("user", { id: s.string(), name: s.string() });
 

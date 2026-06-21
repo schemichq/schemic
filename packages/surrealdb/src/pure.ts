@@ -2268,17 +2268,23 @@ type RejectBadId<S extends Shape> = "id" extends keyof S
       }
   : unknown;
 
-export function defineTable<Name extends string, S extends Shape>(
+// biome-ignore lint/complexity/noBannedTypes: `{}` is the empty default shape — a bare table (just `id`), like defineRelation.
+export function defineTable<Name extends string, S extends Shape = {}>(
   name: Name,
   // The object form is rejected at compile time (`RejectNoDdl` + `RejectBadId`); the callback form
   // keeps its precise `S` inference (a `& RejectNoDdl<S>` in a function-return position collapses it),
-  // so a no-DDL field there is caught by the runtime `inferField` backstop instead.
-  shape:
+  // so a no-DDL field there is caught by the runtime `inferField` backstop instead. Omitting `shape`
+  // gives a bare table (just the implicit `id`) — same as `defineRelation(name)`.
+  shape?:
     | (S & RejectNoDdl<S> & RejectBadId<S>)
     | ((self: RecordIdField<Name>) => S),
 ): TableDef<Name, WithSmartId<Name, S>> {
   const resolved =
-    typeof shape === "function" ? shape(new RecordIdField([name])) : shape;
+    shape === undefined
+      ? ({} as S)
+      : typeof shape === "function"
+        ? shape(new RecordIdField([name]))
+        : shape;
   return new TableDef(
     name,
     applySmartId(name, resolved) as unknown as Fields<WithSmartId<Name, S>>,
