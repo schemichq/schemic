@@ -779,7 +779,8 @@ export class SField<
    * name, or the `AnalyzerDef`), or an options object for scoring/highlights/a custom index name:
    *   `.$fulltext("english")` · `.$fulltext(english)` · `.$fulltext({ analyzer: english, bm25: true, highlights: true })`.
    * `bm25: true` is default scoring, `[k1, b]` tunes it; `highlights` enables `search::highlight`.
-   * Mutually exclusive with `.$unique()`.
+   * The DEFAULT bm25 is omitted from emitted DDL (SurrealDB always applies it) — see
+   * {@link FulltextOptions}. Mutually exclusive with `.$unique()`.
    */
   $fulltext(analyzer: string | AnalyzerDef): SField<S, Flags>;
   $fulltext(opts: FulltextFieldOptions): SField<S, Flags>;
@@ -1460,7 +1461,13 @@ export interface DiskannOptions {
   alpha?: number;
 }
 /** Options for a FULL-TEXT search index (`.index(name, [field], { fulltext: {…} })`). Needs a
- *  `defineAnalyzer` of the same name. `bm25: [k1, b]` tunes scoring; `true` uses the defaults. */
+ *  `defineAnalyzer` of the same name. `bm25: [k1, b]` tunes scoring; `true` uses the defaults.
+ *
+ *  NOTE ON BM25: SurrealDB enables BM25 on every full-text index and materializes the default
+ *  `BM25(1.2,0.75)` whether or not you ask for it — `INFO` reports it identically for `… ANALYZER a`
+ *  and `… ANALYZER a BM25`. So `bm25: true` (and an explicit `[1.2, 0.75]`) is the default and is
+ *  OMITTED from the generated DDL (the database applies it on apply regardless); only a NON-default
+ *  `bm25: [k1, b]` survives into the `DEFINE INDEX`. This keeps authoring and introspection in sync. */
 export interface FulltextOptions {
   analyzer: string;
   bm25?: boolean | [number, number];
@@ -1468,7 +1475,8 @@ export interface FulltextOptions {
 }
 
 /** Options for the field-level `.$fulltext({…})` form. `analyzer` accepts the `AnalyzerDef` or its
- *  name; `name` overrides the derived `<table>_<field>_idx` index name. See {@link SField.$fulltext}. */
+ *  name; `name` overrides the derived `<table>_<field>_idx` index name. The default `bm25` is omitted
+ *  from emitted DDL — see {@link FulltextOptions}. See {@link SField.$fulltext}. */
 export interface FulltextFieldOptions {
   analyzer: string | AnalyzerDef;
   bm25?: boolean | [number, number];

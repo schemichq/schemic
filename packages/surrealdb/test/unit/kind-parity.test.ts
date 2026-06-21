@@ -20,6 +20,7 @@ import {
 } from "@schemic/core";
 import {
   defineAccess,
+  defineAnalyzer,
   defineFunction,
   defineRelation,
   defineTable,
@@ -392,6 +393,38 @@ describe("fn:: dependency ordering (function emits before its caller)", () => {
     expect(fnIdx(up)).toBeGreaterThanOrEqual(0);
     expect(fnIdx(up)).toBeLessThan(
       up.findIndex((l) => /^DEFINE ACCESS acct/.test(l)),
+    );
+  });
+});
+
+describe("analyzer dependency ordering (analyzer emits before its FULLTEXT index)", () => {
+  // Regression: a minimal `… FULLTEXT ANALYZER eng;` (default BM25 stripped) put the `;` flush against
+  // the name, so the dep was parsed as `eng;` ≠ the `eng` analyzer — the edge was dropped and the index
+  // could emit before its analyzer (apply error). The dep must resolve so the analyzer comes first.
+  const eng = () => defineAnalyzer("eng", { tokenizers: ["blank"] });
+
+  test("table-level .index(fulltext) — analyzer before index", () => {
+    const t = defineTable("doc", { id: s.string(), body: s.string() }).index(
+      "ft",
+      ["body"],
+      { fulltext: { analyzer: "eng" } },
+    );
+    const up = emitKinds(surrealKinds, lowerAll([t], [eng()]));
+    const ai = up.findIndex((l) => /^DEFINE ANALYZER eng/.test(l));
+    const ii = up.findIndex((l) => /^DEFINE INDEX ft/.test(l));
+    expect(ai).toBeGreaterThanOrEqual(0);
+    expect(ii).toBeGreaterThanOrEqual(0);
+    expect(ai).toBeLessThan(ii);
+  });
+
+  test("field-level .$fulltext() — analyzer before index", () => {
+    const t = defineTable("doc2", {
+      id: s.string(),
+      body: s.string().$fulltext("eng"),
+    });
+    const up = emitKinds(surrealKinds, lowerAll([t], [eng()]));
+    expect(up.findIndex((l) => /^DEFINE ANALYZER eng/.test(l))).toBeLessThan(
+      up.findIndex((l) => /^DEFINE INDEX doc2_body_idx/.test(l)),
     );
   });
 });

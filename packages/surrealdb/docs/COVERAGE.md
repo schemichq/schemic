@@ -102,7 +102,7 @@ live parity suites (`test/parity/{struct,live,canonical}-parity.test.ts`) and th
 - [x] `COMMENT <string>` — `table.index(name, fields, { comment })`
 - [x] vector `HNSW DIMENSION … [DIST/TYPE/EFC/M]` — `field.$hnsw({…})` (single) / `table.index(name, [field], { hnsw: {…} })` (defaults stripped → round-trips)
 - [x] vector `DISKANN DIMENSION … [DIST/TYPE/DEGREE/L_BUILD/ALPHA]` — `field.$diskann({…})` (single) / `table.index(name, [field], { diskann: {…} })`
-- [x] `FULLTEXT ANALYZER … [BM25] [HIGHLIGHTS]` (full-text) — `field.$fulltext(analyzer | { analyzer, bm25?, highlights?, name? })` (single; overloaded — `analyzer` accepts a name string or the `AnalyzerDef`) / `table.index(name, [field], { fulltext: { analyzer, bm25?, highlights? } })` (with `defineAnalyzer`; `bm25: true` → bare `BM25`, the default, stripped on diff → round-trips)
+- [x] `FULLTEXT ANALYZER … [BM25] [HIGHLIGHTS]` (full-text) — `field.$fulltext(analyzer | { analyzer, bm25?, highlights?, name? })` (single; overloaded — `analyzer` accepts a name string or the `AnalyzerDef`) / `table.index(name, [field], { fulltext: { analyzer, bm25?, highlights? } })` (with `defineAnalyzer`). BM25 is always-on in SurrealDB (INFO always reports `BM25(1.2,0.75)`), so the DEFAULT bm25 (`true`/`[1.2,0.75]`) is OMITTED from the canonical/migration DDL (DB applies it on apply); a NON-default `[k,b]` is kept. Authoring `emit` still shows bare `BM25`. The index→analyzer dep is matched on the bare name (stops at `;`).
 - [n/a] index build hints `CONCURRENTLY` / `DEFER` — apply-time only; not part of the stored schema (`INFO` doesn't return them)
 
 ## Events

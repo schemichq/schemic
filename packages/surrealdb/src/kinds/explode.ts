@@ -97,8 +97,10 @@ export function fromStructured(db: DbStructured): SurrealPortable[] {
 
   for (const s of of("index")) {
     // A FULLTEXT index depends on its analyzer (so the analyzer emits first); all indexes -> their table.
+    // Stop the name at whitespace OR the statement terminator — a minimal `… ANALYZER eng;` (BM25
+    // default stripped) has the `;` flush against the name, so `\S+` would capture `eng;`.
     const deps: Ref[] = [{ kind: "table", name: s.table ?? "" }];
-    const ft = /FULLTEXT ANALYZER (\S+)/.exec(s.ddl);
+    const ft = /FULLTEXT ANALYZER ([^\s;]+)/.exec(s.ddl);
     if (ft) deps.push({ kind: "analyzer", name: ft[1] });
     out.push({
       kind: "index",
