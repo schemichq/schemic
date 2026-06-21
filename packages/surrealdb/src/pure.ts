@@ -775,18 +775,23 @@ export class SField<
   }
   /**
    * Full-text search index over this field — `… FIELDS <field> FULLTEXT ANALYZER <analyzer>
-   * [BM25[(k1,b)]] [HIGHLIGHTS]`. Requires a `defineAnalyzer(<analyzer>)` of the same name. `bm25: true`
-   * enables default scoring, `[k1, b]` tunes it; `highlights` enables `search::highlight`. `name`
-   * overrides the derived index name. Mutually exclusive with `.$unique()`.
+   * [BM25[(k1,b)]] [HIGHLIGHTS]`. Requires a `defineAnalyzer(<analyzer>)`. Pass the analyzer alone (its
+   * name, or the `AnalyzerDef`), or an options object for scoring/highlights/a custom index name:
+   *   `.$fulltext("english")` · `.$fulltext(english)` · `.$fulltext({ analyzer: english, bm25: true, highlights: true })`.
+   * `bm25: true` is default scoring, `[k1, b]` tunes it; `highlights` enables `search::highlight`.
+   * Mutually exclusive with `.$unique()`.
    */
+  $fulltext(analyzer: string | AnalyzerDef): SField<S, Flags>;
+  $fulltext(opts: FulltextFieldOptions): SField<S, Flags>;
   $fulltext(
-    analyzer: string,
-    opts: {
-      bm25?: boolean | [number, number];
-      highlights?: boolean;
-      name?: string;
-    } = {},
+    arg: string | AnalyzerDef | FulltextFieldOptions,
   ): SField<S, Flags> {
+    const opts: FulltextFieldOptions =
+      typeof arg === "string" || arg instanceof AnalyzerDef
+        ? { analyzer: arg }
+        : arg;
+    const analyzer =
+      opts.analyzer instanceof AnalyzerDef ? opts.analyzer.name : opts.analyzer;
     return this.withIndexSpec(
       buildIndexSpec({
         fulltext: { analyzer, bm25: opts.bm25, highlights: opts.highlights },
@@ -1445,6 +1450,15 @@ export interface FulltextOptions {
   analyzer: string;
   bm25?: boolean | [number, number];
   highlights?: boolean;
+}
+
+/** Options for the field-level `.$fulltext({…})` form. `analyzer` accepts the `AnalyzerDef` or its
+ *  name; `name` overrides the derived `<table>_<field>_idx` index name. See {@link SField.$fulltext}. */
+export interface FulltextFieldOptions {
+  analyzer: string | AnalyzerDef;
+  bm25?: boolean | [number, number];
+  highlights?: boolean;
+  name?: string;
 }
 
 /** Build the special index spec string (minimal — SurrealDB fills in the rest). */

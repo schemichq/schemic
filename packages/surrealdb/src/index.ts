@@ -39,8 +39,6 @@ export type {
 export type { SurrealConnectionConfig } from "./connection";
 /** Multi-connection factory: `defineConfig({ connections: { db: surrealConnection({ … }) } })`. */
 export { surrealConnection } from "./connection";
-/** Type a `database/seed/*.ts` default export: `export default defineSeed(async (db, ctx) => { … })`. */
-export { defineSeed, type SeedFn } from "./seed";
 export type { DefineOptions, DefineStatement, FieldInfo } from "./ddl";
 export {
   alterField,
@@ -66,6 +64,7 @@ export type {
   Create,
   DiskannOptions,
   Expr,
+  FulltextFieldOptions,
   FulltextOptions,
   HnswOptions,
   Shape,
@@ -99,3 +98,5 @@ export {
   surrealTypeRegistry,
   TableDef,
 } from "./pure";
+/** Type a `database/seed/*.ts` default export: `export default defineSeed(async (db, ctx) => { … })`. */
+export { defineSeed, type SeedFn } from "./seed";

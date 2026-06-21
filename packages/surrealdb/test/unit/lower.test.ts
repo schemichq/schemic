@@ -131,7 +131,9 @@ describe("fromTableDef", () => {
   test("field .$fulltext()/.$hnsw() lower to a structured index carrying the spec", () => {
     const t = defineTable("doc", {
       id: s.string(),
-      body: s.string().$fulltext("eng", { bm25: true, highlights: true }),
+      body: s
+        .string()
+        .$fulltext({ analyzer: "eng", bm25: true, highlights: true }),
       emb: s.array(s.float()).$hnsw({ dimension: 4 }),
     });
     const out = normalizeTable(fromTableDef(t));

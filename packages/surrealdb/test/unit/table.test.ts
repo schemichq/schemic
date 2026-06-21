@@ -2,7 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { DateTime, RecordId, surql, Table } from "surrealdb";
 import { z } from "zod";
 import { emitTable } from "../../src/ddl";
-import { defineRelation, defineTable, RecordIdField, s } from "../../src/pure";
+import {
+  defineAnalyzer,
+  defineRelation,
+  defineTable,
+  RecordIdField,
+  s,
+} from "../../src/pure";
 
 const defType = (s: z.ZodType) => (s._zod.def as { type: string }).type;
 
@@ -539,11 +545,13 @@ describe("field $unique / $index (DDL clauses are $-prefixed)", () => {
 });
 
 describe("field $fulltext / $hnsw / $diskann (single-field special indexes)", () => {
-  test("$fulltext() emits FULLTEXT; bm25:true is a bare BM25", () => {
+  test("$fulltext({…}) emits FULLTEXT; bm25:true is a bare BM25", () => {
     const ddl = emitTable(
       defineTable("doc", {
         id: s.string(),
-        body: s.string().$fulltext("eng", { bm25: true, highlights: true }),
+        body: s
+          .string()
+          .$fulltext({ analyzer: "eng", bm25: true, highlights: true }),
       }),
     );
     expect(ddl).toContain(
@@ -551,11 +559,32 @@ describe("field $fulltext / $hnsw / $diskann (single-field special indexes)", ()
     );
   });
 
+  test("$fulltext() overload: bare string, AnalyzerDef, and { analyzer } object are equivalent", () => {
+    const eng = defineAnalyzer("eng", { tokenizers: ["blank"] });
+    const fromString = emitTable(
+      defineTable("o", { id: s.string(), body: s.string().$fulltext("eng") }),
+    );
+    const fromDef = emitTable(
+      defineTable("o", { id: s.string(), body: s.string().$fulltext(eng) }),
+    );
+    const fromObject = emitTable(
+      defineTable("o", {
+        id: s.string(),
+        body: s.string().$fulltext({ analyzer: eng }),
+      }),
+    );
+    expect(fromString).toContain(
+      "DEFINE INDEX o_body_idx ON TABLE o FIELDS body FULLTEXT ANALYZER eng;",
+    );
+    expect(fromDef).toBe(fromString);
+    expect(fromObject).toBe(fromString);
+  });
+
   test("$fulltext() bm25 as [k1,b] tunes the scoring; omitted bm25 drops it", () => {
     const tuned = emitTable(
       defineTable("d2", {
         id: s.string(),
-        body: s.string().$fulltext("eng", { bm25: [1.5, 0.8] }),
+        body: s.string().$fulltext({ analyzer: "eng", bm25: [1.5, 0.8] }),
       }),
     );
     expect(tuned).toContain(

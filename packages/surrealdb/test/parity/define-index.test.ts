@@ -278,7 +278,8 @@ live("field-level special indexes (.$fulltext / .$hnsw / .$diskann)", () => {
     });
     const Doc = defineTable("ftf", {
       id: s.string(),
-      body: s.string().$fulltext("simple", { bm25: true, highlights: true }),
+      // object form + the AnalyzerDef passed directly (not its name string).
+      body: s.string().$fulltext({ analyzer: a, bm25: true, highlights: true }),
     });
     await applyEach(db!, emitDefStatement(a).ddl);
     await applyEach(db!, emitTable(Doc, { exists: "overwrite" }));

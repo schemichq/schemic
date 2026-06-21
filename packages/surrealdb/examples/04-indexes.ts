@@ -84,12 +84,12 @@ DEFINE INDEX ft ON TABLE doc FIELDS content FULLTEXT ANALYZER english HIGHLIGHTS
   }),
   ex({
     title: "FULLTEXT (single field, inline via field.$fulltext())",
-    note: "`bm25: true` emits a bare `BM25` (SurrealDB's default k1=1.2,b=0.75); the index name auto-derives `<table>_<field>_idx`. Needs a matching `defineAnalyzer`.",
+    note: "Overloaded: `.$fulltext(analyzer)` (the name or the `AnalyzerDef`) or `.$fulltext({ analyzer, bm25?, highlights?, name? })`. `bm25: true` emits a bare `BM25` (the default k1=1.2,b=0.75); the index name auto-derives `<table>_<field>_idx`. Needs a matching `defineAnalyzer`.",
     code: `[
   defineAnalyzer("simple", { tokenizers: ["blank"], filters: ["lowercase"] }),
   defineTable("doc2", {
     id: s.string(),
-    body: s.string().$fulltext("simple", { bm25: true, highlights: true }),
+    body: s.string().$fulltext({ analyzer: "simple", bm25: true, highlights: true }),
   }),
 ]`,
     ddl: `DEFINE ANALYZER simple TOKENIZERS BLANK FILTERS LOWERCASE;
