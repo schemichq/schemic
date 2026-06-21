@@ -17,7 +17,15 @@ function scaffold(args: string[]) {
   );
   const pkg = () => JSON.parse(readFileSync(join(app, "package.json"), "utf8"));
   const ts = () => JSON.parse(readFileSync(join(app, "tsconfig.json"), "utf8"));
-  return { root, app, status: r.status, stderr: r.stderr, pkg, ts };
+  // clack writes prompts/cancel to stdout, not stderr — check the combined output
+  return {
+    root,
+    app,
+    status: r.status,
+    out: `${r.stdout}${r.stderr}`,
+    pkg,
+    ts,
+  };
 }
 
 describe("create-schemic", () => {
@@ -67,7 +75,7 @@ describe("create-schemic", () => {
     const s = scaffold(["--driver", "mongodb"]);
     try {
       expect(s.status).not.toBe(0);
-      expect(s.stderr).toContain("Unknown driver");
+      expect(s.out).toContain("Unknown driver");
     } finally {
       rmSync(s.root, { recursive: true, force: true });
     }

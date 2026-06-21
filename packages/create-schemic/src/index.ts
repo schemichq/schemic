@@ -1,12 +1,14 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import { createInterface } from "node:readline/promises";
+import * as p from "@clack/prompts";
 // The @schemic versions this scaffolder pins are its OWN version (the packages release lockstep), so a
 // fresh project always gets a matching set. Inlined at build by tsup.
 import { version as SCHEMIC_VERSION } from "../package.json";
 
 const RANGE = `^${SCHEMIC_VERSION}`;
+const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
+const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
 
 /** Supported drivers: the package + the runtime deps a project authoring/connecting with it needs. */
 const DRIVERS: Record<
@@ -27,13 +29,6 @@ const DRIVERS: Record<
 const DRIVER_NAMES = Object.keys(DRIVERS);
 const PMS = ["bun", "npm", "pnpm", "yarn"] as const;
 type Pm = (typeof PMS)[number];
-
-const style = {
-  bold: (s: string) => `\x1b[1m${s}\x1b[0m`,
-  dim: (s: string) => `\x1b[2m${s}\x1b[0m`,
-  green: (s: string) => `\x1b[32m${s}\x1b[0m`,
-  red: (s: string) => `\x1b[31m${s}\x1b[0m`,
-};
 
 interface Options {
   dir?: string;
@@ -82,58 +77,13 @@ function detectPm(): Pm {
   return "npm";
 }
 
-function rl() {
-  return createInterface({ input: process.stdin, output: process.stdout });
-}
-async function ask(question: string, fallback: string): Promise<string> {
-  if (!process.stdin.isTTY) return fallback;
-  const i = rl();
-  try {
-    const a = (
-      await i.question(`${question} ${style.dim(`(${fallback})`)} `)
-    ).trim();
-    return a || fallback;
-  } finally {
-    i.close();
+/** Abort cleanly on Ctrl-C / cancel from any prompt. */
+function abortIfCancel<T>(value: T | symbol): T {
+  if (p.isCancel(value)) {
+    p.cancel("Cancelled.");
+    process.exit(1);
   }
-}
-async function confirm(question: string, fallback: boolean): Promise<boolean> {
-  if (!process.stdin.isTTY) return fallback;
-  const i = rl();
-  try {
-    const a = (
-      await i.question(
-        `${question} ${style.dim(fallback ? "(Y/n)" : "(y/N)")} `,
-      )
-    )
-      .trim()
-      .toLowerCase();
-    return a ? a === "y" || a === "yes" : fallback;
-  } finally {
-    i.close();
-  }
-}
-async function select(
-  question: string,
-  choices: string[],
-  fallback: string,
-): Promise<string> {
-  if (!process.stdin.isTTY) return fallback;
-  console.log(style.bold(question));
-  choices.forEach((c, n) =>
-    console.log(
-      `  ${n + 1}) ${c}${c === fallback ? style.dim(" (default)") : ""}`,
-    ),
-  );
-  const i = rl();
-  try {
-    const a = (await i.question(style.dim("> "))).trim();
-    const n = Number.parseInt(a, 10);
-    if (a && n >= 1 && n <= choices.length) return choices[n - 1];
-    return choices.includes(a) ? a : fallback;
-  } finally {
-    i.close();
-  }
+  return value as T;
 }
 
 // --- templates ---------------------------------------------------------------------------------
@@ -181,7 +131,7 @@ function tsconfig(): string {
         moduleDetection: "force",
         strict: true,
         skipLibCheck: true,
-        // for \`import sql from "./x.surql" with { type: "text" }\` + the scaffolded seeds.d.ts + JSON
+        // for `import sql from "./x.surql" with { type: "text" }` + the scaffolded seeds.d.ts + JSON
         resolveJsonModule: true,
         noEmit: true,
         lib: ["ESNext"],
@@ -202,63 +152,78 @@ const GITIGNORE = `node_modules/
 
 // --- write + run -------------------------------------------------------------------------------
 
-function writeIfAbsent(dir: string, file: string, content: string): boolean {
+function writeIfAbsent(dir: string, file: string, content: string): string {
   const path = join(dir, file);
-  if (existsSync(path)) {
-    console.log(style.dim(`  · ${file} (exists, skipped)`));
-    return false;
-  }
+  if (existsSync(path)) return dim(`· ${file} (exists, skipped)`);
   writeFileSync(path, content);
-  console.log(`  ${style.green("+")} ${file}`);
-  return true;
+  return `+ ${file}`;
 }
 
-function run(cmd: string, args: string[], cwd: string): boolean {
-  const r = spawnSync(cmd, args, { cwd, stdio: "inherit" });
-  return r.status === 0;
+function run(
+  cmd: string,
+  args: string[],
+  cwd: string,
+  capture = false,
+): { ok: boolean; out: string } {
+  const r = spawnSync(cmd, args, {
+    cwd,
+    stdio: capture ? "pipe" : "inherit",
+    encoding: "utf8",
+  });
+  return { ok: r.status === 0, out: `${r.stdout ?? ""}${r.stderr ?? ""}` };
 }
 
 async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2));
-  console.log(style.bold("\ncreate-schemic\n"));
+  const tty = !!process.stdin.isTTY && !opts.yes;
+
+  p.intro(bold("create-schemic"));
 
   // 1. directory / name
   let dir = opts.dir;
-  if (!dir)
-    dir = opts.yes
-      ? "schemic-app"
-      : await ask("Project directory:", "schemic-app");
+  if (!dir && tty) {
+    dir = abortIfCancel(
+      await p.text({
+        message: "Project directory",
+        placeholder: "schemic-app",
+        defaultValue: "schemic-app",
+      }),
+    );
+  }
+  dir ||= "schemic-app";
   const target = resolve(process.cwd(), dir);
   const name = basename(target);
   mkdirSync(target, { recursive: true });
-  if (readdirSync(target).length && !opts.yes) {
-    if (
-      !(await confirm(
-        `Directory ${style.bold(dir)} is not empty — continue?`,
-        false,
-      ))
-    ) {
-      console.log(style.dim("Aborted."));
+  if (readdirSync(target).length && tty) {
+    const ok = abortIfCancel(
+      await p.confirm({
+        message: `${bold(dir)} is not empty — continue?`,
+        initialValue: false,
+      }),
+    );
+    if (!ok) {
+      p.cancel("Aborted.");
       process.exit(1);
     }
   }
 
   // 2. driver
   let driver = opts.driver;
-  if (!driver)
-    driver = opts.yes
-      ? "surrealdb"
-      : await select(
-          "Which database driver?",
-          DRIVER_NAMES.map((n) => n),
-          "surrealdb",
-        );
-  if (!DRIVERS[driver]) {
-    console.error(
-      style.red(
-        `Unknown driver "${driver}". Known: ${DRIVER_NAMES.join(", ")}.`,
-      ),
+  if (!driver && tty) {
+    driver = abortIfCancel(
+      await p.select({
+        message: "Database driver",
+        options: DRIVER_NAMES.map((n) => ({
+          value: n,
+          label: DRIVERS[n].label,
+        })),
+        initialValue: "surrealdb",
+      }),
     );
+  }
+  driver ||= "surrealdb";
+  if (!DRIVERS[driver]) {
+    p.cancel(`Unknown driver "${driver}". Known: ${DRIVER_NAMES.join(", ")}.`);
     process.exit(1);
   }
 
@@ -266,38 +231,53 @@ async function main(): Promise<void> {
   const detected = detectPm();
   let install = opts.install;
   if (install === undefined)
-    install = opts.yes
-      ? true
-      : await confirm("Install dependencies now?", true);
+    install = tty
+      ? abortIfCancel(
+          await p.confirm({
+            message: "Install dependencies now?",
+            initialValue: true,
+          }),
+        )
+      : true;
   let pm: Pm = (opts.pm as Pm) ?? detected;
-  if (install && !opts.pm && !opts.yes)
-    pm = (await select(
-      "Install with which package manager?",
-      [detected, ...PMS.filter((p) => p !== detected)],
-      detected,
-    )) as Pm;
+  if (install && !opts.pm && tty) {
+    pm = abortIfCancel(
+      await p.select({
+        message: "Install with which package manager?",
+        options: [detected, ...PMS.filter((x) => x !== detected)].map((m) => ({
+          value: m,
+          label: m === detected ? `${m} (detected)` : m,
+        })),
+        initialValue: detected,
+      }),
+    ) as Pm;
+  }
 
   // 4. write the project envelope
-  console.log(`\nScaffolding ${style.bold(name)} (${DRIVERS[driver].label})\n`);
-  writeIfAbsent(target, "package.json", packageJson(name, driver, pm));
-  writeIfAbsent(target, "tsconfig.json", tsconfig());
-  writeIfAbsent(target, ".gitignore", GITIGNORE);
-
+  const written = [
+    writeIfAbsent(target, "package.json", packageJson(name, driver, pm)),
+    writeIfAbsent(target, "tsconfig.json", tsconfig()),
+    writeIfAbsent(target, ".gitignore", GITIGNORE),
+  ];
+  p.log.step(
+    `${bold(name)} ${dim(`(${DRIVERS[driver].label})`)}\n${written.join("\n")}`,
+  );
   if (opts.git && !existsSync(join(target, ".git")))
     run("git", ["init", "-q"], target);
 
   // 5. install + compose on `schemic init` (which scaffolds config + database/ via the driver)
   if (install) {
-    console.log(style.dim(`\nInstalling with ${pm}...`));
-    if (!run(pm, ["install"], target)) {
-      console.error(
-        style.red(
-          `\n${pm} install failed — fix it, then run \`schemic init\`.`,
-        ),
-      );
+    const s = p.spinner();
+    s.start(`Installing dependencies with ${pm}`);
+    const r = run(pm, ["install"], target, true);
+    if (!r.ok) {
+      s.stop(`${pm} install failed`);
+      p.log.error(r.out.trim().split("\n").slice(-8).join("\n"));
+      p.outro(`Fix the install, then run ${bold("schemic init")}.`);
       process.exit(1);
     }
-    console.log(style.dim("\nScaffolding the schema (schemic init)...\n"));
+    s.stop("Dependencies installed");
+    p.log.step("Scaffolding the schema");
     const runtime = pm === "bun" ? "bun" : "node";
     const cliJs = join(
       target,
@@ -311,20 +291,15 @@ async function main(): Promise<void> {
   }
 
   // 6. next steps
-  console.log(`\n${style.green("✓")} ${style.bold(name)} ready.\n`);
-  const cd = dir === "." ? "" : `  cd ${dir}\n`;
-  if (install) {
-    console.log(
-      `Next:\n${cd}  cp .env.example .env   ${style.dim("# set your connection")}\n  ${pm} run db:gen\n  ${pm} run db:migrate\n`,
-    );
-  } else {
-    console.log(
-      `Next:\n${cd}  ${pm} install\n  ${pm} exec schemic init --driver ${driver}\n  cp .env.example .env\n  ${pm} run db:gen\n`,
-    );
-  }
+  const cd = dir === "." ? "" : `cd ${dir}\n`;
+  const steps = install
+    ? `${cd}cp .env.example .env   ${dim("# set your connection")}\n${pm} run db:gen\n${pm} run db:migrate`
+    : `${cd}${pm} install\n${pm} exec schemic init --driver ${driver}\ncp .env.example .env\n${pm} run db:gen`;
+  p.note(steps, "Next steps");
+  p.outro(`${bold(name)} is ready.`);
 }
 
 main().catch((e: unknown) => {
-  console.error(style.red(`\n${e instanceof Error ? e.message : String(e)}`));
+  p.log.error(e instanceof Error ? e.message : String(e));
   process.exit(1);
 });
