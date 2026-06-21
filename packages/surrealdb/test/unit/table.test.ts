@@ -621,3 +621,33 @@ describe("field $fulltext / $hnsw / $diskann (single-field special indexes)", ()
     expect(diskann).not.toContain("vd_emb_idx");
   });
 });
+
+describe("table.index() renameable field-ref callback", () => {
+  test('(t) => [t.a, t.b] emits identically to the ["a","b"] string array', () => {
+    const cb = emitTable(
+      defineTable("p", { id: s.string(), a: s.string(), b: s.string() })
+        .index("ab", (t) => [t.a, t.b])
+        .index("uq", (t) => [t.a], { unique: true }),
+    );
+    const str = emitTable(
+      defineTable("p", { id: s.string(), a: s.string(), b: s.string() })
+        .index("ab", ["a", "b"])
+        .index("uq", ["a"], { unique: true }),
+    );
+    expect(cb).toBe(str);
+    expect(cb).toContain("DEFINE INDEX ab ON TABLE p FIELDS a, b;");
+    expect(cb).toContain("DEFINE INDEX uq ON TABLE p FIELDS a UNIQUE;");
+  });
+
+  test("the callback's t.<field> values are the field names", () => {
+    // Same accessor the LSP renames; at runtime each ref resolves to its own name.
+    defineTable("p", { id: s.string(), a: s.string(), b: s.string() }).index(
+      "ab",
+      (t) => {
+        expect(t.a).toBe("a");
+        expect(t.b).toBe("b");
+        return [t.a, t.b];
+      },
+    );
+  });
+});

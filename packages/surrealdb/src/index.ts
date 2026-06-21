@@ -64,6 +64,7 @@ export type {
   Create,
   DiskannOptions,
   Expr,
+  FieldRefs,
   FulltextFieldOptions,
   FulltextOptions,
   HnswOptions,

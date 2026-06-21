@@ -1388,6 +1388,21 @@ type PartialShape<S extends Shape> = {
 };
 type RequiredShape<S extends Shape> = { [K in keyof S]: Unwrap<Fields<S>[K]> };
 
+/**
+ * Renameable field-name refs for the `.index(name, t => [t.a, t.b])` callback form. A HOMOMORPHIC
+ * mapped type (`{ [K in keyof S]: K }`), so the LSP links each `t.<field>` back to its definition in
+ * the `defineTable(…)` shape — enabling go-to-definition and rename, which a `["a","b"]` string array
+ * cannot. Each property's value IS its own name, so the callback returns plain field-name strings.
+ */
+export type FieldRefs<S extends Shape> = { readonly [K in keyof S]: K };
+
+/** Build the runtime {@link FieldRefs} accessor: every field key mapped to itself. */
+function fieldRefs<S extends Shape>(fields: Fields<S>): FieldRefs<S> {
+  const out: Record<string, string> = {};
+  for (const k of Object.keys(fields)) out[k] = k;
+  return out as FieldRefs<S>;
+}
+
 export interface TableConfig {
   schemafull: boolean;
   /** Table `TYPE`: `normal` (default) or `any` (holds both records and graph edges). */
@@ -1459,6 +1474,20 @@ export interface FulltextFieldOptions {
   bm25?: boolean | [number, number];
   highlights?: boolean;
   name?: string;
+}
+
+/** Options for the composite `table.index(name, fields, opts)` — UNIQUE/COUNT/COMMENT or a vector/
+ *  full-text spec. See {@link TableDef.index}. */
+export interface IndexOptions {
+  unique?: boolean;
+  count?: boolean;
+  comment?: string;
+  /** A HNSW vector index over the field. */
+  hnsw?: HnswOptions;
+  /** A DISKANN vector index over the field. */
+  diskann?: DiskannOptions;
+  /** A full-text search index — needs a `defineAnalyzer` of `analyzer`'s name. */
+  fulltext?: FulltextOptions;
 }
 
 /** Build the special index spec string (minimal — SurrealDB fills in the rest). */
@@ -2021,25 +2050,33 @@ export class TableDef<Name extends string, S extends Shape> {
   /**
    * Add a composite index: `DEFINE INDEX <name> ON TABLE <table> FIELDS <fields> [UNIQUE]`, or a
    * materialized row-count index with `{ count: true }` (no fields → `DEFINE INDEX <name> … COUNT`).
+   *
+   * `fields` is either a plain name array (`["a", "b"]`) or a callback over the table's field refs
+   * (`(t) => [t.a, t.b]`). Prefer the callback: each `t.<field>` is a real property reference the LSP
+   * can rename and go-to-definition, so an index survives a field rename — a string array can't.
    */
   index(
     name: string,
-    fields: (keyof S & string)[],
-    opts: {
-      unique?: boolean;
-      count?: boolean;
-      comment?: string;
-      /** A HNSW vector index over the field. */
-      hnsw?: HnswOptions;
-      /** A DISKANN vector index over the field. */
-      diskann?: DiskannOptions;
-      /** A full-text search index — needs a `defineAnalyzer` of `analyzer`'s name. */
-      fulltext?: FulltextOptions;
-    } = {},
-  ) {
+    fields: readonly (keyof S & string)[],
+    opts?: IndexOptions,
+  ): TableDef<Name, S>;
+  index(
+    name: string,
+    fields: (t: FieldRefs<S>) => readonly (keyof S & string)[],
+    opts?: IndexOptions,
+  ): TableDef<Name, S>;
+  index(
+    name: string,
+    fields:
+      | readonly (keyof S & string)[]
+      | ((t: FieldRefs<S>) => readonly (keyof S & string)[]),
+    opts: IndexOptions = {},
+  ): TableDef<Name, S> {
+    const cols =
+      typeof fields === "function" ? fields(fieldRefs(this.fields)) : fields;
     const index: TableIndex = {
       name,
-      fields,
+      fields: [...cols],
       unique: opts.unique,
       count: opts.count,
       comment: opts.comment,
