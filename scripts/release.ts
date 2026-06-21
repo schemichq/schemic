@@ -27,7 +27,7 @@ if (!version || version.startsWith("-")) {
 const ROOT = join(import.meta.dir, "..");
 // core first (dependents pin it); create-schemic last — it has NO @schemic deps (it scaffolds version
 // strings), so it isn't pin-verified, just bumped + published lockstep so it scaffolds matching versions.
-const ORDER = ["core", "cli", "surrealdb", "postgres", "create-schemic"];
+const ORDER = ["core", "cli", "surrealdb", "postgres", "create-schemic", "schemic"];
 const DEPENDENTS = ["cli", "surrealdb", "postgres"];
 const pkgDir = (p: string) => join(ROOT, "packages", p);
 

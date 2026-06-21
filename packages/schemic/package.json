@@ -1,0 +1,28 @@
+{
+  "name": "schemic",
+  "version": "0.1.0-alpha.6",
+  "description": "The Schemic CLI — schema-as-code migrations for any database. Alias for @schemic/cli (bunx schemic / npx schemic).",
+  "license": "MIT",
+  "author": "Vertio Solutions",
+  "homepage": "https://schemic.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/schemichq/schemic.git",
+    "directory": "packages/schemic"
+  },
+  "type": "module",
+  "bin": {
+    "schemic": "bin.mjs",
+    "sc": "bin.mjs"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "bin.mjs",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@schemic/cli": "^0.1.0-alpha.6"
+  }
+}
