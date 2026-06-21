@@ -246,7 +246,11 @@ function canonicalPerms(
     const v = perms[op];
     if (isDefault(v)) continue;
     const body =
-      v === true ? "FULL" : v === false || v === undefined ? "NONE" : `WHERE ${v}`;
+      v === true
+        ? "FULL"
+        : v === false || v === undefined
+          ? "NONE"
+          : `WHERE ${v}`;
     const group = groups.get(body);
     if (group) group.push(op as string);
     else groups.set(body, [op as string]);
@@ -403,18 +407,21 @@ function normVector(algo: "HNSW" | "DISKANN", spec: string): string {
   return parts.join(" ");
 }
 
-/** Canonicalize a `FULLTEXT ANALYZER … [BM25[(k,b)]] [HIGHLIGHTS]` spec: drop the default BM25(1.2,0.75). */
+/** Canonicalize a `FULLTEXT [ANALYZER …] [BM25[(k,b)]] [HIGHLIGHTS]` spec: drop SurrealDB's
+ *  materialized defaults — the built-in `like` analyzer (injected when none is given) and BM25(1.2,0.75). */
 function normFulltext(spec: string): string {
-  const m = /^FULLTEXT ANALYZER (\S+)(.*)$/.exec(spec);
+  const m = /^FULLTEXT(?:\s+ANALYZER\s+(\S+))?(.*)$/.exec(spec);
   if (!m) return spec;
-  let out = `FULLTEXT ANALYZER ${m[1]}`;
-  const bm = /BM25(?:\(([^)]*)\))?/.exec(m[2]);
+  let out = "FULLTEXT";
+  if (m[1] && m[1] !== "like") out += ` ANALYZER ${m[1]}`; // a non-default analyzer is kept
+  const rest = m[2];
+  const bm = /BM25(?:\(([^)]*)\))?/.exec(rest);
   if (bm?.[1]) {
     const args = bm[1].split(",").map((a) => normNum(a.trim()));
     if (!(args.length === 2 && args[0] === "1.2" && args[1] === "0.75"))
       out += ` BM25(${args.join(",")})`; // a non-default BM25 is kept
   }
-  if (/\bHIGHLIGHTS\b/.test(m[2])) out += " HIGHLIGHTS";
+  if (/\bHIGHLIGHTS\b/.test(rest)) out += " HIGHLIGHTS";
   return out;
 }
 

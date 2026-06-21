@@ -486,9 +486,10 @@ function indexSpecOpts(spec: string): string | null {
     if (kv.ALPHA) f.push(`alpha: ${kv.ALPHA}`);
     return `${algo}: { ${f.join(", ")} }`;
   }
-  const ft = /^FULLTEXT ANALYZER (\S+)(.*)$/.exec(spec);
+  const ft = /^FULLTEXT(?:\s+ANALYZER\s+(\S+))?(.*)$/.exec(spec);
   if (ft) {
-    const f: string[] = [`analyzer: ${JSON.stringify(ft[1])}`];
+    const f: string[] = [];
+    if (ft[1]) f.push(`analyzer: ${JSON.stringify(ft[1])}`); // omitted -> SurrealDB's `like` default
     const bm = /BM25(?:\(([^)]*)\))?/.exec(ft[2]);
     if (bm?.[1]) {
       const [k, b] = bm[1].split(",").map((x) => x.trim());
@@ -497,7 +498,7 @@ function indexSpecOpts(spec: string): string | null {
       f.push("bm25: true"); // bare BM25 — default scoring
     }
     if (/\bHIGHLIGHTS\b/.test(ft[2])) f.push("highlights: true");
-    return `fulltext: { ${f.join(", ")} }`;
+    return f.length ? `fulltext: { ${f.join(", ")} }` : "fulltext: {}";
   }
   return null;
 }

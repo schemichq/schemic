@@ -580,6 +580,36 @@ describe("field $fulltext / $hnsw / $diskann (single-field special indexes)", ()
     expect(fromObject).toBe(fromString);
   });
 
+  test("$fulltext() analyzer is optional — bare FULLTEXT (SurrealDB injects `like`)", () => {
+    const noArg = emitTable(
+      defineTable("o", { id: s.string(), body: s.string().$fulltext() }),
+    );
+    expect(noArg).toContain(
+      "DEFINE INDEX o_body_idx ON TABLE o FIELDS body FULLTEXT;",
+    );
+    expect(noArg).not.toContain("ANALYZER");
+    // object without analyzer + table-level { fulltext: {} } emit the same bare FULLTEXT.
+    const objNoAnalyzer = emitTable(
+      defineTable("o", {
+        id: s.string(),
+        body: s.string().$fulltext({ highlights: true }),
+      }),
+    );
+    expect(objNoAnalyzer).toContain(
+      "DEFINE INDEX o_body_idx ON TABLE o FIELDS body FULLTEXT HIGHLIGHTS;",
+    );
+    const tableLevel = emitTable(
+      defineTable("d2", { id: s.string(), body: s.string() }).index(
+        "ft",
+        ["body"],
+        { fulltext: {} },
+      ),
+    );
+    expect(tableLevel).toContain(
+      "DEFINE INDEX ft ON TABLE d2 FIELDS body FULLTEXT;",
+    );
+  });
+
   test("$fulltext() bm25 as [k1,b] tunes the scoring; omitted bm25 drops it", () => {
     const tuned = emitTable(
       defineTable("d2", {

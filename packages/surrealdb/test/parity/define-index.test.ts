@@ -268,6 +268,32 @@ live("FULLTEXT search index + DEFINE ANALYZER", () => {
       .join("\n");
     expect(idx).toContain("bm25: [1.5, 0.5]");
   });
+
+  test("a bare FULLTEXT index (no analyzer) round-trips — `like` default stripped", async () => {
+    // SurrealDB injects its built-in `like` analyzer + BM25(1.2,0.75); both are stripped from the
+    // canonical form, so authored `FULLTEXT` matches the materialized `FULLTEXT ANALYZER like BM25(…)`.
+    const Doc = defineTable("ftbare", {
+      id: s.string(),
+      body: s.string(),
+    }).index("ft", ["body"], { fulltext: {} });
+    await applyEach(db!, emitTable(Doc, { exists: "overwrite" }));
+    const plan = planKinds(
+      surrealKinds,
+      await introspectAll(db!),
+      lowerAll([Doc]),
+    );
+    expect({ up: plan.up, down: plan.down }).toEqual({ up: [], down: [] });
+    // PULL renders the analyzer-less fulltext as `{ fulltext: {} }`.
+    const idx = (
+      renderPerFile(await introspectStructured(db!), (_k, n) => `${n}.ts`).get(
+        "ftbare.ts",
+      ) ?? ""
+    )
+      .split("\n")
+      .filter((l) => l.includes(".index("))
+      .join("\n");
+    expect(idx).toContain('.index("ft", ["body"], { fulltext: {} })');
+  });
 });
 
 live("field-level special indexes (.$fulltext / .$hnsw / .$diskann)", () => {
