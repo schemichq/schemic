@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { postgresDriver } from "../src/index";
+import { defineSeed, postgresDriver } from "../src/index";
 
 // `schemic new <kind> <name>` calls Driver.scaffoldEntity(kind, name) -> the starter module text.
 const scaffold = (kind: string, name: string): string => {
@@ -43,5 +43,24 @@ describe("scaffoldEntity", () => {
 
   test("unknown kind -> throws", () => {
     expect(() => scaffold("view", "x")).toThrow(/unknown entity kind "view"/);
+  });
+});
+
+describe("seed scaffold (defineSeed + ctx)", () => {
+  const files = postgresDriver.initScaffold?.() ?? {};
+
+  test("defineSeed is an identity wrapper (typing only)", () => {
+    const fn = async () => {};
+    expect(defineSeed(fn)).toBe(fn);
+  });
+
+  test("scaffolds database/seed/index.ts using defineSeed, no seeds.d.ts", () => {
+    expect(Object.keys(files)).toContain("database/seed/index.ts");
+    expect(Object.keys(files)).not.toContain("database/seed/seeds.d.ts");
+    const seed = files["database/seed/index.ts"] ?? "";
+    expect(seed).toContain('import { defineSeed } from "@schemic/postgres";');
+    expect(seed).toContain("export default defineSeed(async (db, ctx) =>");
+    expect(seed).toContain('ctx.file("schema.sql")');
+    expect(seed).not.toContain('with { type: "text" }');
   });
 });

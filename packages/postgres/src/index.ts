@@ -16,6 +16,7 @@
 //  - Surreal-only constructs (events, access, db functions, relations, changefeed, permissions) have
 //    no Postgres analogue and are dropped by `normalize` with no DDL emitted.
 
+import type { SeedContext } from "@schemic/core";
 import type {
   ApplyOptions,
   ConnectionConfigBase,
@@ -57,6 +58,18 @@ export interface PgConn {
   ): Promise<{ rows: T[] }>;
   exec(sql: string): Promise<unknown>;
   close(): Promise<void>;
+}
+
+/** A seed function: receives the live {@link PgConn} + the dialect-neutral {@link SeedContext}. */
+export type PgSeed = (db: PgConn, ctx: SeedContext) => void | Promise<void>;
+/**
+ * Type a `database/seed/*` module — an identity wrapper (like `defineConfig`) so a seed gets full
+ * typing for `(db, ctx)` with no imports of the connection/context types. The seed runner calls the
+ * default export as `seed(db, ctx)`; `ctx.file(name)` reads a supporting file (raw `.sql`, JSON, …)
+ * relative to the seed as a string, `ctx.dir` is its directory.
+ */
+export function defineSeed(fn: PgSeed): PgSeed {
+  return fn;
 }
 
 // --- introspect: information_schema -> portable IR ----------------------------------------------
@@ -625,7 +638,6 @@ export const postgresDriver: Driver<PgConn> = {
     "schemic.config.ts": INIT_CONFIG_TS,
     "database/schema/tables.ts": INIT_SCHEMA_TS,
     "database/seed/index.ts": INIT_SEED_TS,
-    "database/seed/seeds.d.ts": INIT_SEED_DTS,
     ".env.example": INIT_ENV,
   }),
 
@@ -666,23 +678,16 @@ export const user = defineTable("user", {
 });
 `;
 
-const INIT_SEED_TS = `import type { PgConn } from "@schemic/postgres";
+const INIT_SEED_TS = `import { defineSeed } from "@schemic/postgres";
 
-// Seed script — run with \`schemic seed\`. The default export receives the live connection.
-// This is a seed FOLDER: add more named seeds beside this file — \`schemic seed users\` runs
-// ./users.ts (or 01-users.ts), \`schemic seed --all\` runs them in filename order, and bare
-// \`schemic seed\` runs this index.ts. Load a raw .sql file as a string with an import attribute:
-//   import fixtures from "./fixtures.sql" with { type: "text" };
-export default async function seed(db: PgConn) {
+// Seed script — run with \`schemic seed\`. \`defineSeed\` types (db, ctx) for you (no imports of the
+// connection/context types needed). This is a seed FOLDER: add more named seeds beside this file —
+// \`schemic seed users\` runs ./users.ts (or 01-users.ts), \`schemic seed --all\` runs them in filename
+// order, and bare \`schemic seed\` runs this index.ts. Load a supporting file (raw .sql, JSON, …) next
+// to this seed with ctx.file(name), e.g. const schema = ctx.file("schema.sql").
+export default defineSeed(async (db, ctx) => {
   // await db.query('INSERT INTO "user" ("id", "email", "name") VALUES ($1, $2, $3)', [id, email, name]);
-}
-`;
-
-// Type the raw-SQL import attribute (\`import x from "./f.sql" with { type: "text" }\`) for seeds.
-const INIT_SEED_DTS = `declare module "*.sql" {
-  const sql: string;
-  export default sql;
-}
+});
 `;
 
 const INIT_ENV = `# A real Postgres server (uncomment to use instead of embedded PGlite):
