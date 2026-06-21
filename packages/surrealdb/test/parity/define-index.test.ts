@@ -269,3 +269,57 @@ live("FULLTEXT search index + DEFINE ANALYZER", () => {
     expect(idx).toContain("bm25: [1.5, 0.5]");
   });
 });
+
+live("field-level special indexes (.$fulltext / .$hnsw / .$diskann)", () => {
+  test(".$fulltext() round-trips identically to the table-level form", async () => {
+    const a = defineAnalyzer("simple", {
+      tokenizers: ["blank"],
+      filters: ["lowercase"],
+    });
+    const Doc = defineTable("ftf", {
+      id: s.string(),
+      body: s.string().$fulltext("simple", { bm25: true, highlights: true }),
+    });
+    await applyEach(db!, emitDefStatement(a).ddl);
+    await applyEach(db!, emitTable(Doc, { exists: "overwrite" }));
+    // PUSH: bare BM25 is the default, so no phantom diff.
+    const plan = planKinds(
+      surrealKinds,
+      await introspectAll(db!),
+      lowerAll([Doc], [a]),
+    );
+    expect({ up: plan.up, down: plan.down }).toEqual({ up: [], down: [] });
+    // PULL: renders as the table-level `.index()` with the derived `<table>_<field>_idx` name.
+    const idx = (
+      renderPerFile(await introspectStructured(db!), (_k, n) => `${n}.ts`).get(
+        "ftf.ts",
+      ) ?? ""
+    )
+      .split("\n")
+      .filter((l) => l.includes(".index("))
+      .join("\n");
+    expect(idx).toContain(
+      '.index("ftf_body_idx", ["body"], { fulltext: { analyzer: "simple", highlights: true } })',
+    );
+  });
+
+  test(".$hnsw() round-trips (derived name, defaults stripped)", async () => {
+    const t = defineTable("hnf", {
+      id: s.string(),
+      emb: s.array(s.float()).$hnsw({ dimension: 4, dist: "cosine" }),
+    });
+    expect(await roundTrip(t, "hnf")).toContain(
+      '.index("hnf_emb_idx", ["emb"], { hnsw: { dimension: 4, dist: "cosine" } })',
+    );
+  });
+
+  test(".$diskann() round-trips (derived name)", async () => {
+    const t = defineTable("dkf", {
+      id: s.string(),
+      emb: s.array(s.float()).$diskann({ dimension: 4 }),
+    });
+    expect(await roundTrip(t, "dkf")).toContain(
+      '.index("dkf_emb_idx", ["emb"], { diskann: { dimension: 4 } })',
+    );
+  });
+});

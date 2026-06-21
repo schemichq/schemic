@@ -127,6 +127,23 @@ describe("fromTableDef", () => {
     expect(out.comment).toBe("users");
     expect(out.changefeed).toEqual({ expiry: "1h", original: true });
   });
+
+  test("field .$fulltext()/.$hnsw() lower to a structured index carrying the spec", () => {
+    const t = defineTable("doc", {
+      id: s.string(),
+      body: s.string().$fulltext("eng", { bm25: true, highlights: true }),
+      emb: s.array(s.float()).$hnsw({ dimension: 4 }),
+    });
+    const out = normalizeTable(fromTableDef(t));
+    expect(out.indexes).toEqual([
+      {
+        name: "doc_body_idx",
+        cols: ["body"],
+        index: "FULLTEXT ANALYZER eng BM25 HIGHLIGHTS",
+      },
+      { name: "doc_emb_idx", cols: ["emb"], index: "HNSW DIMENSION 4" },
+    ]);
+  });
 });
 
 describe("fromStandalone", () => {

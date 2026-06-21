@@ -488,19 +488,33 @@ describe("relation builder", () => {
 
 describe("field $unique / $index (DDL clauses are $-prefixed)", () => {
   test("$unique() emits a UNIQUE index; $index() a plain index", () => {
-    const uq = emitTable(defineTable("u", { id: s.string(), email: s.string().$unique() }));
-    expect(uq).toContain("DEFINE INDEX u_email_idx ON TABLE u FIELDS email UNIQUE;");
-    const ix = emitTable(defineTable("d", { id: s.string(), code: s.string().$index() }));
+    const uq = emitTable(
+      defineTable("u", { id: s.string(), email: s.string().$unique() }),
+    );
+    expect(uq).toContain(
+      "DEFINE INDEX u_email_idx ON TABLE u FIELDS email UNIQUE;",
+    );
+    const ix = emitTable(
+      defineTable("d", { id: s.string(), code: s.string().$index() }),
+    );
     expect(ix).toContain("DEFINE INDEX d_code_idx ON TABLE d FIELDS code;");
     expect(ix).not.toContain("UNIQUE");
   });
 
   test("the deprecated .unique()/.index() aliases emit identically", () => {
-    const canonical = emitTable(defineTable("a", { id: s.string(), x: s.string().$unique() }));
-    const alias = emitTable(defineTable("a", { id: s.string(), x: s.string().unique() }));
+    const canonical = emitTable(
+      defineTable("a", { id: s.string(), x: s.string().$unique() }),
+    );
+    const alias = emitTable(
+      defineTable("a", { id: s.string(), x: s.string().unique() }),
+    );
     expect(alias).toBe(canonical);
-    const ci = emitTable(defineTable("b", { id: s.string(), x: s.string().$index() }));
-    const ai = emitTable(defineTable("b", { id: s.string(), x: s.string().index() }));
+    const ci = emitTable(
+      defineTable("b", { id: s.string(), x: s.string().$index() }),
+    );
+    const ai = emitTable(
+      defineTable("b", { id: s.string(), x: s.string().index() }),
+    );
     expect(ai).toBe(ci);
   });
 
@@ -512,12 +526,69 @@ describe("field $unique / $index (DDL clauses are $-prefixed)", () => {
         code: s.string().$index("code_ix"),
       }),
     );
-    expect(ddl).toContain("DEFINE INDEX email_uq ON TABLE u FIELDS email UNIQUE;");
+    expect(ddl).toContain(
+      "DEFINE INDEX email_uq ON TABLE u FIELDS email UNIQUE;",
+    );
     expect(ddl).toContain("DEFINE INDEX code_ix ON TABLE u FIELDS code;");
     expect(ddl).not.toContain("u_email_idx");
     // No name -> still the derived default.
     expect(
       emitTable(defineTable("d", { id: s.string(), x: s.string().$unique() })),
     ).toContain("DEFINE INDEX d_x_idx ON TABLE d FIELDS x UNIQUE;");
+  });
+});
+
+describe("field $fulltext / $hnsw / $diskann (single-field special indexes)", () => {
+  test("$fulltext() emits FULLTEXT; bm25:true is a bare BM25", () => {
+    const ddl = emitTable(
+      defineTable("doc", {
+        id: s.string(),
+        body: s.string().$fulltext("eng", { bm25: true, highlights: true }),
+      }),
+    );
+    expect(ddl).toContain(
+      "DEFINE INDEX doc_body_idx ON TABLE doc FIELDS body FULLTEXT ANALYZER eng BM25 HIGHLIGHTS;",
+    );
+  });
+
+  test("$fulltext() bm25 as [k1,b] tunes the scoring; omitted bm25 drops it", () => {
+    const tuned = emitTable(
+      defineTable("d2", {
+        id: s.string(),
+        body: s.string().$fulltext("eng", { bm25: [1.5, 0.8] }),
+      }),
+    );
+    expect(tuned).toContain(
+      "DEFINE INDEX d2_body_idx ON TABLE d2 FIELDS body FULLTEXT ANALYZER eng BM25(1.5,0.8);",
+    );
+    const plain = emitTable(
+      defineTable("d3", { id: s.string(), body: s.string().$fulltext("eng") }),
+    );
+    expect(plain).toContain(
+      "DEFINE INDEX d3_body_idx ON TABLE d3 FIELDS body FULLTEXT ANALYZER eng;",
+    );
+    expect(plain).not.toContain("BM25");
+  });
+
+  test("$hnsw() / $diskann() emit vector indexes; a custom name overrides the derived one", () => {
+    const hnsw = emitTable(
+      defineTable("vh", {
+        id: s.string(),
+        emb: s.array(s.float()).$hnsw({ dimension: 4, dist: "cosine" }),
+      }),
+    );
+    expect(hnsw).toContain(
+      "DEFINE INDEX vh_emb_idx ON TABLE vh FIELDS emb HNSW DIMENSION 4 DIST COSINE;",
+    );
+    const diskann = emitTable(
+      defineTable("vd", {
+        id: s.string(),
+        emb: s.array(s.float()).$diskann({ dimension: 8, name: "vec_dk" }),
+      }),
+    );
+    expect(diskann).toContain(
+      "DEFINE INDEX vec_dk ON TABLE vd FIELDS emb DISKANN DIMENSION 8;",
+    );
+    expect(diskann).not.toContain("vd_emb_idx");
   });
 });

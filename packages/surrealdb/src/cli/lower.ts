@@ -171,7 +171,8 @@ function lowerField(
       indexes.push({
         name: idxName,
         cols: [path],
-        index: surreal.index.unique ? "UNIQUE" : "",
+        // FULLTEXT/HNSW/DISKANN spec (`.$fulltext()`/`.$hnsw()`/`.$diskann()`) or UNIQUE/plain.
+        index: surreal.index.spec ?? (surreal.index.unique ? "UNIQUE" : ""),
       });
     }
   }

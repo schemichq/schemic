@@ -611,17 +611,22 @@ function emit(
   const ddl = `DEFINE FIELD ${prefix}${path} ON TABLE ${escapeIdent(table)} ${Object.values(clauses).join(" ")};`;
   out.push({ kind: "field", name: path, table, ddl, clauses });
 
-  // A single-field index defined via `.$index()` / `.$unique()` (custom name or the derived one).
+  // A single-field index via `.$index()`/`.$unique()` (plain/UNIQUE) or `.$fulltext()`/`.$hnsw()`/
+  // `.$diskann()` (a FULLTEXT/HNSW/DISKANN `spec`). `spec` and UNIQUE are mutually exclusive.
   if (surreal?.index) {
     const idxName =
       surreal.index.name ??
       `${table}_${path.replace(/[`]/g, "").replace(/[^a-zA-Z0-9]+/g, "_")}_idx`;
-    const unique = surreal.index.unique ? " UNIQUE" : "";
+    const tail = surreal.index.spec
+      ? ` ${surreal.index.spec}`
+      : surreal.index.unique
+        ? " UNIQUE"
+        : "";
     out.push({
       kind: "index",
       name: idxName,
       table,
-      ddl: `DEFINE INDEX ${existsPrefix(opts)}${escapeIdent(idxName)} ON TABLE ${escapeIdent(table)} FIELDS ${path}${unique};`,
+      ddl: `DEFINE INDEX ${existsPrefix(opts)}${escapeIdent(idxName)} ON TABLE ${escapeIdent(table)} FIELDS ${path}${tail};`,
     });
   }
 

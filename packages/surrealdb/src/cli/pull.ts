@@ -489,10 +489,12 @@ function indexSpecOpts(spec: string): string | null {
   const ft = /^FULLTEXT ANALYZER (\S+)(.*)$/.exec(spec);
   if (ft) {
     const f: string[] = [`analyzer: ${JSON.stringify(ft[1])}`];
-    const bm = /BM25\(([^)]*)\)/.exec(ft[2]);
-    if (bm) {
+    const bm = /BM25(?:\(([^)]*)\))?/.exec(ft[2]);
+    if (bm?.[1]) {
       const [k, b] = bm[1].split(",").map((x) => x.trim());
       f.push(`bm25: [${k}, ${b}]`);
+    } else if (bm) {
+      f.push("bm25: true"); // bare BM25 — default scoring
     }
     if (/\bHIGHLIGHTS\b/.test(ft[2])) f.push("highlights: true");
     return `fulltext: { ${f.join(", ")} }`;

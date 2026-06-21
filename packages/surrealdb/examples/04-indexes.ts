@@ -82,6 +82,36 @@ DEFINE TABLE doc TYPE NORMAL SCHEMAFULL;
 DEFINE FIELD content ON TABLE doc TYPE string;
 DEFINE INDEX ft ON TABLE doc FIELDS content FULLTEXT ANALYZER english HIGHLIGHTS;`,
   }),
+  ex({
+    title: "FULLTEXT (single field, inline via field.$fulltext())",
+    note: "`bm25: true` emits a bare `BM25` (SurrealDB's default k1=1.2,b=0.75); the index name auto-derives `<table>_<field>_idx`. Needs a matching `defineAnalyzer`.",
+    code: `[
+  defineAnalyzer("simple", { tokenizers: ["blank"], filters: ["lowercase"] }),
+  defineTable("doc2", {
+    id: s.string(),
+    body: s.string().$fulltext("simple", { bm25: true, highlights: true }),
+  }),
+]`,
+    ddl: `DEFINE ANALYZER simple TOKENIZERS BLANK FILTERS LOWERCASE;
+
+DEFINE TABLE doc2 TYPE NORMAL SCHEMAFULL;
+DEFINE FIELD body ON TABLE doc2 TYPE string;
+DEFINE INDEX doc2_body_idx ON TABLE doc2 FIELDS body FULLTEXT ANALYZER simple BM25 HIGHLIGHTS;`,
+  }),
+  ex({
+    title: "Vector HNSW (single field, inline via field.$hnsw())",
+    code: `defineTable("vh3", { id: s.string(), emb: s.array(s.float()).$hnsw({ dimension: 4, dist: "cosine" }) })`,
+    ddl: `DEFINE TABLE vh3 TYPE NORMAL SCHEMAFULL;
+DEFINE FIELD emb ON TABLE vh3 TYPE array<float>;
+DEFINE INDEX vh3_emb_idx ON TABLE vh3 FIELDS emb HNSW DIMENSION 4 DIST COSINE;`,
+  }),
+  ex({
+    title: "Vector DISKANN (single field, inline via field.$diskann())",
+    code: `defineTable("vd2", { id: s.string(), emb: s.array(s.float()).$diskann({ dimension: 4 }) })`,
+    ddl: `DEFINE TABLE vd2 TYPE NORMAL SCHEMAFULL;
+DEFINE FIELD emb ON TABLE vd2 TYPE array<float>;
+DEFINE INDEX vd2_emb_idx ON TABLE vd2 FIELDS emb DISKANN DIMENSION 4;`,
+  }),
 ];
 
 export const group: ExampleGroup = {

@@ -96,13 +96,13 @@ live parity suites (`test/parity/{struct,live,canonical}-parity.test.ts`) and th
 
 ## Indexes
 
-- [x] `DEFINE INDEX … FIELDS …` — `field.index()` (single) / `table.index(name, fields)` (composite)
-- [x] `UNIQUE` (single + composite) — `field.unique()` / `table.index(name, fields, { unique: true })`
+- [x] `DEFINE INDEX … FIELDS …` — `field.$index(name?)` (single) / `table.index(name, fields)` (composite)
+- [x] `UNIQUE` (single + composite) — `field.$unique(name?)` / `table.index(name, fields, { unique: true })`
 - [x] `COUNT` (materialized row-count, no `FIELDS`) — `table.index(name, [], { count: true })`
 - [x] `COMMENT <string>` — `table.index(name, fields, { comment })`
-- [x] vector `HNSW DIMENSION … [DIST/TYPE/EFC/M]` — `table.index(name, [field], { hnsw: {…} })` (defaults stripped → round-trips)
-- [x] vector `DISKANN DIMENSION … [DIST/TYPE/DEGREE/L_BUILD/ALPHA]` — `table.index(name, [field], { diskann: {…} })`
-- [x] `FULLTEXT ANALYZER … [BM25] [HIGHLIGHTS]` (full-text) — `table.index(name, [field], { fulltext: { analyzer, bm25?, highlights? } })` (with `defineAnalyzer`; default BM25 stripped → round-trips)
+- [x] vector `HNSW DIMENSION … [DIST/TYPE/EFC/M]` — `field.$hnsw({…})` (single) / `table.index(name, [field], { hnsw: {…} })` (defaults stripped → round-trips)
+- [x] vector `DISKANN DIMENSION … [DIST/TYPE/DEGREE/L_BUILD/ALPHA]` — `field.$diskann({…})` (single) / `table.index(name, [field], { diskann: {…} })`
+- [x] `FULLTEXT ANALYZER … [BM25] [HIGHLIGHTS]` (full-text) — `field.$fulltext(analyzer, { bm25?, highlights?, name? })` (single) / `table.index(name, [field], { fulltext: { analyzer, bm25?, highlights? } })` (with `defineAnalyzer`; `bm25: true` → bare `BM25`, the default, stripped on diff → round-trips)
 - [n/a] index build hints `CONCURRENTLY` / `DEFER` — apply-time only; not part of the stored schema (`INFO` doesn't return them)
 
 ## Events

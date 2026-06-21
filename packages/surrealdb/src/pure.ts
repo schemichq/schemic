@@ -85,9 +85,11 @@ export interface SurrealMeta {
   /** DB-managed, client-hidden: still emits DEFINE FIELD (+ PERMISSIONS NONE) but is
    * excluded from the public app/create/update surface. See `.$internal()` / `.system`. */
   internal?: boolean;
-  /** Single-field index: `.$index()` (normal) / `.$unique()` (uniqueness), with an optional custom
-   * `name`. Emits `DEFINE INDEX <name ?? <table>_<field>_idx> ON TABLE <table> FIELDS <field> [UNIQUE]`. */
-  index?: { unique?: boolean; name?: string };
+  /** Single-field index: `.$index()` (normal) / `.$unique()` (uniqueness) / `.$fulltext()` /
+   * `.$hnsw()` / `.$diskann()`, with an optional custom `name`. Emits `DEFINE INDEX
+   * <name ?? <table>_<field>_idx> ON TABLE <table> FIELDS <field> <UNIQUE | spec>`. `spec` carries a
+   * FULLTEXT/HNSW/DISKANN clause (built via `buildIndexSpec`); it is mutually exclusive with `unique`. */
+  index?: { unique?: boolean; name?: string; spec?: string };
   /** `REFERENCE [ON DELETE …]` on a record-link field. See `.reference()`. */
   reference?:
     | true
@@ -771,6 +773,49 @@ export class SField<
       },
     });
   }
+  /**
+   * Full-text search index over this field — `… FIELDS <field> FULLTEXT ANALYZER <analyzer>
+   * [BM25[(k1,b)]] [HIGHLIGHTS]`. Requires a `defineAnalyzer(<analyzer>)` of the same name. `bm25: true`
+   * enables default scoring, `[k1, b]` tunes it; `highlights` enables `search::highlight`. `name`
+   * overrides the derived index name. Mutually exclusive with `.$unique()`.
+   */
+  $fulltext(
+    analyzer: string,
+    opts: {
+      bm25?: boolean | [number, number];
+      highlights?: boolean;
+      name?: string;
+    } = {},
+  ): SField<S, Flags> {
+    return this.withIndexSpec(
+      buildIndexSpec({
+        fulltext: { analyzer, bm25: opts.bm25, highlights: opts.highlights },
+      }),
+      opts.name,
+    );
+  }
+  /** HNSW vector index over this field (an `array<number>` embedding). `name` overrides the derived name. */
+  $hnsw(opts: HnswOptions & { name?: string }): SField<S, Flags> {
+    return this.withIndexSpec(buildIndexSpec({ hnsw: opts }), opts.name);
+  }
+  /** DISKANN vector index over this field (an `array<number>` embedding). `name` overrides the derived name. */
+  $diskann(opts: DiskannOptions & { name?: string }): SField<S, Flags> {
+    return this.withIndexSpec(buildIndexSpec({ diskann: opts }), opts.name);
+  }
+  /** Set a FULLTEXT/HNSW/DISKANN index `spec` (+ optional custom `name`) on this field. */
+  private withIndexSpec(
+    spec: string | undefined,
+    name?: string,
+  ): SField<S, Flags> {
+    return new SField(this.schema, {
+      ...this.surreal,
+      index: {
+        ...this.surreal.index,
+        ...(spec !== undefined ? { spec } : {}),
+        ...(name !== undefined ? { name } : {}),
+      },
+    });
+  }
   /** @deprecated Renamed to {@link SField.$index} — field DDL clauses are `$`-prefixed. */
   index(name?: string): SField<S, Flags> {
     return this.$index(name);
@@ -1431,6 +1476,7 @@ function buildIndexSpec(opts: {
     const f = opts.fulltext;
     let s = `FULLTEXT ANALYZER ${f.analyzer}`;
     if (Array.isArray(f.bm25)) s += ` BM25(${f.bm25[0]},${f.bm25[1]})`;
+    else if (f.bm25) s += " BM25"; // `true` → bare BM25 (SurrealDB's default k1=1.2,b=0.75)
     if (f.highlights) s += " HIGHLIGHTS";
     return s;
   }
