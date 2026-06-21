@@ -1,6 +1,6 @@
 {
   "name": "create-schemic",
-  "version": "0.1.0-alpha.6",
+  "version": "0.1.0-alpha.7",
   "description": "Scaffold a new Schemic project — package.json, tsconfig, a driver, and the database/ schema, in one command.",
   "license": "MIT",
   "author": "Vertio Solutions",
