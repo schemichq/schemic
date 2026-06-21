@@ -611,9 +611,11 @@ function emit(
   const ddl = `DEFINE FIELD ${prefix}${path} ON TABLE ${escapeIdent(table)} ${Object.values(clauses).join(" ")};`;
   out.push({ kind: "field", name: path, table, ddl, clauses });
 
-  // A single-field index defined via `.index()` / `.unique()`.
+  // A single-field index defined via `.$index()` / `.$unique()` (custom name or the derived one).
   if (surreal?.index) {
-    const idxName = `${table}_${path.replace(/[`]/g, "").replace(/[^a-zA-Z0-9]+/g, "_")}_idx`;
+    const idxName =
+      surreal.index.name ??
+      `${table}_${path.replace(/[`]/g, "").replace(/[^a-zA-Z0-9]+/g, "_")}_idx`;
     const unique = surreal.index.unique ? " UNIQUE" : "";
     out.push({
       kind: "index",

@@ -116,6 +116,17 @@ live("plain / UNIQUE / COUNT / COMMENT", () => {
     );
   });
 
+  test("a custom field-index name (field.$unique(name)) round-trips", async () => {
+    const t = defineTable("ix2b", {
+      id: s.string(),
+      email: s.string().$unique("custom_email_uq"),
+    });
+    // The custom name survives apply -> introspect; pull renders it as a named index.
+    expect(await roundTrip(t, "ix2b")).toContain(
+      '  .index("custom_email_uq", ["email"], { unique: true })',
+    );
+  });
+
   test("COUNT round-trips", async () => {
     const t = defineTable("ix3", { id: s.string() }).index("rows", [], {
       count: true,

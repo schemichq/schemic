@@ -164,10 +164,10 @@ function lowerField(
       sf.permissions = lowerPermissions(surreal.permissions, FIELD_PERM_OPS);
     }
     if (surreal.index) {
-      // The single-field index name the emitter derives: `<table>_<sanitized-path>_idx`.
-      const idxName = `${table}_${path
-        .replace(/[`]/g, "")
-        .replace(/[^a-zA-Z0-9]+/g, "_")}_idx`;
+      // Custom name if given, else the derived `<table>_<sanitized-path>_idx`.
+      const idxName =
+        surreal.index.name ??
+        `${table}_${path.replace(/[`]/g, "").replace(/[^a-zA-Z0-9]+/g, "_")}_idx`;
       indexes.push({
         name: idxName,
         cols: [path],

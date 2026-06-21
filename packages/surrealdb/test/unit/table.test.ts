@@ -503,4 +503,21 @@ describe("field $unique / $index (DDL clauses are $-prefixed)", () => {
     const ai = emitTable(defineTable("b", { id: s.string(), x: s.string().index() }));
     expect(ai).toBe(ci);
   });
+
+  test("a custom index name overrides the derived `<table>_<field>_idx`", () => {
+    const ddl = emitTable(
+      defineTable("u", {
+        id: s.string(),
+        email: s.string().$unique("email_uq"),
+        code: s.string().$index("code_ix"),
+      }),
+    );
+    expect(ddl).toContain("DEFINE INDEX email_uq ON TABLE u FIELDS email UNIQUE;");
+    expect(ddl).toContain("DEFINE INDEX code_ix ON TABLE u FIELDS code;");
+    expect(ddl).not.toContain("u_email_idx");
+    // No name -> still the derived default.
+    expect(
+      emitTable(defineTable("d", { id: s.string(), x: s.string().$unique() })),
+    ).toContain("DEFINE INDEX d_x_idx ON TABLE d FIELDS x UNIQUE;");
+  });
 });

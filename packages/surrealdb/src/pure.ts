@@ -85,9 +85,9 @@ export interface SurrealMeta {
   /** DB-managed, client-hidden: still emits DEFINE FIELD (+ PERMISSIONS NONE) but is
    * excluded from the public app/create/update surface. See `.$internal()` / `.system`. */
   internal?: boolean;
-  /** Single-field index: `.index()` (normal) / `.unique()` (uniqueness). Emits a `DEFINE
-   * INDEX <table>_<field>_idx ON TABLE <table> FIELDS <field> [UNIQUE]`. */
-  index?: { unique?: boolean };
+  /** Single-field index: `.$index()` (normal) / `.$unique()` (uniqueness), with an optional custom
+   * `name`. Emits `DEFINE INDEX <name ?? <table>_<field>_idx> ON TABLE <table> FIELDS <field> [UNIQUE]`. */
+  index?: { unique?: boolean; name?: string };
   /** `REFERENCE [ON DELETE …]` on a record-link field. See `.reference()`. */
   reference?:
     | true
@@ -750,27 +750,34 @@ export class SField<
   $comment(comment: string): SField<S, Flags> {
     return new SField(this.schema, { ...this.surreal, comment });
   }
-  /** Index this field — `DEFINE INDEX <table>_<field>_idx ON TABLE <table> FIELDS <field>`. */
-  $index(): SField<S, Flags> {
+  /**
+   * Index this field — `DEFINE INDEX <name> ON TABLE <table> FIELDS <field>`. `name` overrides the
+   * derived `<table>_<field>_idx` index name.
+   */
+  $index(name?: string): SField<S, Flags> {
     return new SField(this.schema, {
       ...this.surreal,
-      index: { ...this.surreal.index },
+      index: { ...this.surreal.index, ...(name !== undefined ? { name } : {}) },
     });
   }
-  /** Index this field with a uniqueness constraint (`… FIELDS <field> UNIQUE`). */
-  $unique(): SField<S, Flags> {
+  /** Index this field with a uniqueness constraint (`… UNIQUE`). `name` overrides the derived name. */
+  $unique(name?: string): SField<S, Flags> {
     return new SField(this.schema, {
       ...this.surreal,
-      index: { unique: true },
+      index: {
+        ...this.surreal.index,
+        unique: true,
+        ...(name !== undefined ? { name } : {}),
+      },
     });
   }
   /** @deprecated Renamed to {@link SField.$index} — field DDL clauses are `$`-prefixed. */
-  index(): SField<S, Flags> {
-    return this.$index();
+  index(name?: string): SField<S, Flags> {
+    return this.$index(name);
   }
   /** @deprecated Renamed to {@link SField.$unique} — field DDL clauses are `$`-prefixed. */
-  unique(): SField<S, Flags> {
-    return this.$unique();
+  unique(name?: string): SField<S, Flags> {
+    return this.$unique(name);
   }
   /**
    * Mark a record-link field as a `REFERENCE` so the DB tracks back-links. `onDelete` sets the
