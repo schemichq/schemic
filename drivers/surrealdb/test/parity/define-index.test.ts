@@ -301,11 +301,11 @@ live("field-level special indexes (.$fulltext / .$hnsw / .$diskann)", () => {
     const Doc = defineTable("ftf", {
       id: s.string(),
       // object form + the AnalyzerDef passed directly (not its name string).
-      body: s.string().$fulltext({ analyzer: a, bm25: true, highlights: true }),
+      body: s.string().$fulltext({ analyzer: a, highlights: true }),
     });
     await applyEach(db!, emitDefStatement(a).ddl);
     await applyEach(db!, emitTable(Doc, { exists: "overwrite" }));
-    // PUSH: bare BM25 is the default, so no phantom diff.
+    // PUSH: the default BM25 is stripped on both sides, so no phantom diff.
     const plan = planKinds(
       surrealKinds,
       await introspectAll(db!),

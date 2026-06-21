@@ -133,7 +133,7 @@ describe("fromTableDef", () => {
       id: s.string(),
       body: s
         .string()
-        .$fulltext({ analyzer: "eng", bm25: true, highlights: true }),
+        .$fulltext({ analyzer: "eng", bm25: [1.5, 0.75], highlights: true }),
       emb: s.array(s.float()).$hnsw({ dimension: 4 }),
     });
     const out = normalizeTable(fromTableDef(t));
@@ -141,7 +141,7 @@ describe("fromTableDef", () => {
       {
         name: "doc_body_idx",
         cols: ["body"],
-        index: "FULLTEXT ANALYZER eng BM25 HIGHLIGHTS",
+        index: "FULLTEXT ANALYZER eng BM25(1.5,0.75) HIGHLIGHTS",
       },
       { name: "doc_emb_idx", cols: ["emb"], index: "HNSW DIMENSION 4" },
     ]);

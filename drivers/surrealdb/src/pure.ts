@@ -875,8 +875,8 @@ export class SField<
    * Full-text search index over this field — `… FIELDS <field> FULLTEXT [ANALYZER <analyzer>]
    * [BM25[(k1,b)]] [HIGHLIGHTS]`. The analyzer is optional — omit it (`.$fulltext()`) and SurrealDB
    * uses its built-in `like` analyzer; pass a {@link defineAnalyzer} name/def for real tokenizing:
-   *   `.$fulltext()` · `.$fulltext("english")` · `.$fulltext(english)` · `.$fulltext({ analyzer: english, bm25: true, highlights: true })`.
-   * `bm25: true` is default scoring, `[k1, b]` tunes it; `highlights` enables `search::highlight`.
+   *   `.$fulltext()` · `.$fulltext("english")` · `.$fulltext(english)` · `.$fulltext({ analyzer: english, highlights: true })`.
+   * `bm25: [k1, b]` tunes the (always-on) scoring; `highlights` enables `search::highlight`.
    * The DEFAULT analyzer/bm25 are omitted from emitted DDL (SurrealDB always applies them) — see
    * {@link FulltextOptions}. Mutually exclusive with `.$unique()`.
    */
@@ -1566,11 +1566,12 @@ export interface DiskannOptions {
  *  so authoring and introspection stay in sync:
  *   - `analyzer` — omit it and SurrealDB injects its built-in `like` analyzer (`INFO` reports
  *     `… ANALYZER like`). A real {@link defineAnalyzer} name is required for proper tokenizing/stemming.
- *   - `bm25` — always-on; `true` / `[1.2, 0.75]` is the default and is dropped. Only a NON-default
- *     `bm25: [k1, b]` (and a non-`like` analyzer) survive into the `DEFINE INDEX`. */
+ *   - `bm25` — BM25 is the mandatory full-text scorer and is always-on with `[1.2, 0.75]`, so there is
+ *     no "off" and no "use the default" toggle: `bm25` is a TUNING knob only (`[k1, b]`). Omit it for
+ *     the default; a NON-default `[k1, b]` (and a non-`like` analyzer) survive into the `DEFINE INDEX`. */
 export interface FulltextOptions {
   analyzer?: string;
-  bm25?: boolean | [number, number];
+  bm25?: [number, number];
   highlights?: boolean;
 }
 
@@ -1580,7 +1581,7 @@ export interface FulltextOptions {
  *  {@link FulltextOptions}. See {@link SField.$fulltext}. */
 export interface FulltextFieldOptions {
   analyzer?: string | AnalyzerDef;
-  bm25?: boolean | [number, number];
+  bm25?: [number, number];
   highlights?: boolean;
   name?: string;
 }
@@ -1628,8 +1629,8 @@ function buildIndexSpec(opts: {
     const f = opts.fulltext;
     let s = "FULLTEXT"; // analyzer optional — omit it and SurrealDB injects its built-in `like`.
     if (f.analyzer) s += ` ANALYZER ${f.analyzer}`;
-    if (Array.isArray(f.bm25)) s += ` BM25(${f.bm25[0]},${f.bm25[1]})`;
-    else if (f.bm25) s += " BM25"; // `true` → bare BM25 (SurrealDB's default k1=1.2,b=0.75)
+    // Only a tuned BM25 is emitted — the default is always-on, so there's nothing to write for it.
+    if (f.bm25) s += ` BM25(${f.bm25[0]},${f.bm25[1]})`;
     if (f.highlights) s += " HIGHLIGHTS";
     return s;
   }

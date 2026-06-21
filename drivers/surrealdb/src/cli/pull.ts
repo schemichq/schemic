@@ -493,12 +493,11 @@ function indexSpecOpts(spec: string): string | null {
   if (ft) {
     const f: string[] = [];
     if (ft[1]) f.push(`analyzer: ${JSON.stringify(ft[1])}`); // omitted -> SurrealDB's `like` default
-    const bm = /BM25(?:\(([^)]*)\))?/.exec(ft[2]);
-    if (bm?.[1]) {
+    // Only a tuned BM25 survives canonicalization (the default is stripped) -> render the tuple.
+    const bm = /BM25\(([^)]*)\)/.exec(ft[2]);
+    if (bm) {
       const [k, b] = bm[1].split(",").map((x) => x.trim());
       f.push(`bm25: [${k}, ${b}]`);
-    } else if (bm) {
-      f.push("bm25: true"); // bare BM25 — default scoring
     }
     if (/\bHIGHLIGHTS\b/.test(ft[2])) f.push("highlights: true");
     return f.length ? `fulltext: { ${f.join(", ")} }` : "fulltext: {}";

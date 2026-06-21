@@ -569,17 +569,17 @@ describe("field $unique / $index (DDL clauses are $-prefixed)", () => {
 });
 
 describe("field $fulltext / $hnsw / $diskann (single-field special indexes)", () => {
-  test("$fulltext({…}) emits FULLTEXT; bm25:true is a bare BM25", () => {
+  test("$fulltext({…}) emits FULLTEXT; a tuned bm25 emits BM25(k1,b)", () => {
     const ddl = emitTable(
       defineTable("doc", {
         id: s.string(),
         body: s
           .string()
-          .$fulltext({ analyzer: "eng", bm25: true, highlights: true }),
+          .$fulltext({ analyzer: "eng", bm25: [1.5, 0.75], highlights: true }),
       }),
     );
     expect(ddl).toContain(
-      "DEFINE INDEX doc_body_idx ON TABLE doc FIELDS body FULLTEXT ANALYZER eng BM25 HIGHLIGHTS;",
+      "DEFINE INDEX doc_body_idx ON TABLE doc FIELDS body FULLTEXT ANALYZER eng BM25(1.5,0.75) HIGHLIGHTS;",
     );
   });
 
