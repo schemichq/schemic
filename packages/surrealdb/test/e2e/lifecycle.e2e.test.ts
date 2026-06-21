@@ -44,9 +44,9 @@ e2e("lifecycle: init -> gen -> migrate -> status -> diff -> check", () => {
       // gen writes the baseline migration from the empty snapshot.
       const gen = await run(["gen", "init_schema", "-y"]);
       expect(gen.code).toBe(0);
-      expect(gen.out).toContain("to migrate");
-      // gen PREVIEWS the logical change (plain DEFINE, the diff form).
-      expect(gen.out).toContain("DEFINE TABLE user");
+      expect(gen.out).toContain("change");
+      // gen prints the rendered migration it wrote — idempotent DEFINE … OVERWRITE, not a diff.
+      expect(gen.out).toContain("DEFINE TABLE OVERWRITE user");
       expect(gen.out).toContain("init_schema");
       // …and writes an IDEMPOTENT migration FILE — added objects as DEFINE … OVERWRITE.
       const migRel = [...new Glob("**/*_init_schema.surql").scanSync(root)][0];

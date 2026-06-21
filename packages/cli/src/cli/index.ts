@@ -656,11 +656,10 @@ const genAction = (
       activeDriver(config).registry,
       plan.diff.items ?? [],
     );
+    // The change summary gives the scope you're naming; `schemic diff` is the +/- comparison view.
     console.log(
-      `${plural(plan.diff.up.length, "change")} to migrate${kinds ? ` — ${kinds}` : ""}.`,
+      `${plural(plan.diff.up.length, "change")}${kinds ? ` — ${kinds}` : ""}.`,
     );
-    // Preview the changes BEFORE prompting for a name, so you see what you're naming.
-    console.log(formatDiff(plan.diff, {}));
     const title =
       name ??
       (opts.baseline ? "baseline" : opts.yes ? undefined : await promptTitle());
@@ -670,8 +669,15 @@ const genAction = (
       return;
     }
     const res = commitMigration(config, prepared);
+    // `gen` shows the migration it WROTE (the rendered DDL), not a diff — so you review the actual
+    // statements that will replay. Indented under the filename; counts close it out.
+    const body = prepared.content
+      .replace(/\n+$/, "")
+      .split("\n")
+      .map((line) => `  ${line}`)
+      .join("\n");
     console.log(
-      `${ok(res.file ?? "migration written")}  ${style.dim(`(+${res.up} up / ${res.down} down)`)}`,
+      `\n${ok(res.file ?? "migration written")}\n\n${style.dim(body)}\n\n  ${style.dim(`(+${res.up} up / ${res.down} down)`)}`,
     );
     // After a squash, reconcile the live DB's migration history (best-effort): when the DB already
     // matches the schema, record the baseline as applied so its DDL isn't re-run and `schemic status`
