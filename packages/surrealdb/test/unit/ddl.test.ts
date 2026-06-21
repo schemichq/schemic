@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { surql } from "surrealdb";
 import { z } from "zod";
+import { schemaStruct } from "../../src/cli/lower";
+import { structuredSnapshot } from "../../src/cli/structure";
 import { emitField, emitTable, renderPermissions } from "../../src/ddl";
 import {
   defineRelation,
@@ -704,6 +706,25 @@ describe("PERMISSIONS", () => {
       });
       expect(head(T)).toBe(
         "DEFINE TABLE t TYPE NORMAL SCHEMAFULL PERMISSIONS FOR select WHERE $auth.id != NONE FOR create NONE FOR update, delete WHERE id = $auth.id;",
+      );
+    });
+
+    test("the CANONICAL (structured) emit collapses same-body ops too", () => {
+      // Regression: the structured/canonical path (gen/diff/snapshot, via `canonicalPerms`) emitted
+      // `FOR select WHERE … FOR update WHERE …` per-op, while the authoring emitter collapsed. Now both
+      // collapse — matching SurrealDB's INFO form. (`delete NONE` is the table default, so it's omitted.)
+      const T = defineTable("doc", { id: s.string() }).permissions({
+        select: surql`$auth.id = id`,
+        update: "same as select",
+        create: true,
+        delete: false,
+      });
+      const snap = structuredSnapshot(schemaStruct([T], []));
+      const tableDdl = Object.values(snap.statements).find((st) =>
+        st.ddl.startsWith("DEFINE TABLE doc"),
+      )?.ddl;
+      expect(tableDdl).toBe(
+        "DEFINE TABLE doc TYPE NORMAL SCHEMAFULL PERMISSIONS FOR select, update WHERE $auth.id = id FOR create FULL;",
       );
     });
   });

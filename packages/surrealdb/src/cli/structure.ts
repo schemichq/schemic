@@ -236,17 +236,24 @@ function canonicalPerms(
   if (defaultFull ? allFull : allNone) return "";
   if (allFull) return "PERMISSIONS FULL";
   if (allNone) return "PERMISSIONS NONE";
-  // Mixed: emit only the ops that differ from the kind default (the generator omits default ops).
+  // Mixed: emit only the ops that differ from the kind default (the generator omits default ops),
+  // GROUPED by clause body so same-permission ops collapse into one clause — `FOR select, update
+  // WHERE …` — matching SurrealDB's INFO form and the authoring emitter (`permissionsClause` in ddl.ts).
   const isDefault = (v: StructPermissions[keyof StructPermissions]) =>
     defaultFull ? v === true : v === false || v === undefined;
-  const clauses = ops
-    .filter((op) => !isDefault(perms[op]))
-    .map((op) => {
-      const v = perms[op];
-      if (v === true) return `FOR ${op} FULL`;
-      if (v === false || v === undefined) return `FOR ${op} NONE`;
-      return `FOR ${op} WHERE ${v}`;
-    });
+  const groups = new Map<string, string[]>();
+  for (const op of ops) {
+    const v = perms[op];
+    if (isDefault(v)) continue;
+    const body =
+      v === true ? "FULL" : v === false || v === undefined ? "NONE" : `WHERE ${v}`;
+    const group = groups.get(body);
+    if (group) group.push(op as string);
+    else groups.set(body, [op as string]);
+  }
+  const clauses = [...groups].map(
+    ([body, group]) => `FOR ${group.join(", ")} ${body}`,
+  );
   return clauses.length ? `PERMISSIONS ${clauses.join(" ")}` : "";
 }
 
