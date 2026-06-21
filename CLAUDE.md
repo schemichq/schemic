@@ -51,12 +51,13 @@ cd .claude/worktrees/<your-name>
 - **Never** commit onto another agent's branch or the shared checkout. Push your branch and **DM the
   owner** (usually `core-dev`) to integrate.
 
-**Cleanup on merge.** A worktree lives only as long as its PR is open. When a PR lands, its branch +
-worktree are removed so they never pile up — `core-dev` lands with **`bun scripts/land.ts <branch>`**,
-which fast-forwards `<branch>` onto `main` then runs `git worktree remove` + deletes the branch
-(local + remote). So **after your PR lands, your worktree is gone**: start a fresh one off the latest
-`main` for your next task — never keep working in a landed worktree. If you spot your own merged
-worktrees lingering, remove them yourself (`git worktree remove <path>` + `git branch -d <branch>`).
+**Continuous deployment.** `core-dev` lands every PR with **`bun scripts/land.ts <branch>`**, which is
+the whole pipeline: rebase the branch onto `main`, fast-forward-merge it, **gate it** (typecheck +
+test the workspace — a red gate rolls `main` back and ships nothing), push `main`, remove the branch's
+worktree + delete the branch, then **deploy** — cut the next prerelease (`bun scripts/release.ts next`,
+lockstep all 6 to npm) and push the version bumps. So **every merge ships a release**; pass
+`--no-deploy` only to batch a change into the next deploy. After your PR lands, your worktree is gone
+— start a fresh one off the latest `main` for your next task; never keep working in a landed worktree.
 
 ## Driver coverage docs
 

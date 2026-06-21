@@ -1,100 +1,164 @@
 #!/usr/bin/env bun
 /**
- * Land a green, backward-compatible PR branch onto `main` AND clean up after it — so worktrees never
- * pile up. This is core-dev's standard landing step (see CLAUDE.md "Cleanup on merge"):
+ * Land a green, backward-compatible PR branch onto `main` AND continuously deploy it. This is
+ * core-dev's one-command merge step (see CLAUDE.md "Continuous deployment"):
  *
- *   1. fast-forward-only push of <branch> -> main (refuses if the branch has diverged; rebase first)
- *   2. remove the worktree checked out on <branch>, if any (`git worktree remove`)
- *   3. delete the branch locally and on the remote
+ *   1. rebase <branch> onto origin/main (in its worktree) so the merge is a clean fast-forward
+ *   2. fast-forward-merge it into the local main checkout (NOT pushed yet)
+ *   3. GATE: typecheck + test the whole workspace — if red, undo the merge and abort (never ship red)
+ *   4. push main, then remove the branch's worktree + delete the branch (local + remote)
+ *   5. deploy: cut the next prerelease (bun scripts/release.ts next) and commit/push the version bumps
  *
  * Usage:
- *   bun scripts/land.ts <branch> [--remote origin] [--no-push] [--keep-branch]
+ *   bun scripts/land.ts <branch> [--remote origin] [--no-test] [--no-deploy]
  *
- *   --no-push      skip the push (the branch is already on main) — just clean up the worktree+branch
- *   --keep-branch  remove the worktree but keep the branch (rare; e.g. follow-up work pending)
+ *   --no-test    skip the gate (rare; e.g. a docs/scripts-only branch)
+ *   --no-deploy  land to main but DON'T cut a release (the change batches into the next deploy)
  */
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 const argv = process.argv.slice(2);
 const branch = argv.find((a) => !a.startsWith("-"));
-const flag = (name: string) => argv.includes(name);
-const opt = (name: string, fallback: string) => {
-  const i = argv.indexOf(name);
-  return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
+const flag = (n: string) => argv.includes(n);
+const opt = (n: string, d: string) => {
+  const i = argv.indexOf(n);
+  return i >= 0 && argv[i + 1] ? argv[i + 1] : d;
 };
 
 if (!branch) {
   console.error(
-    "usage: bun scripts/land.ts <branch> [--remote origin] [--no-push] [--keep-branch]",
+    "usage: bun scripts/land.ts <branch> [--remote origin] [--no-test] [--no-deploy]",
   );
   process.exit(1);
 }
 
+const ROOT = join(import.meta.dir, "..");
 const remote = opt("--remote", "origin");
 const main = `${remote}/main`;
-const git = (...args: string[]) =>
-  execFileSync("git", args, { encoding: "utf8" }).trim();
-const gitIO = (...args: string[]) =>
-  execFileSync("git", args, { stdio: "inherit" });
+
+const git = (...a: string[]) =>
+  execFileSync("git", a, { cwd: ROOT, encoding: "utf8" }).trim();
+const gitIO = (...a: string[]) => execFileSync("git", a, { cwd: ROOT, stdio: "inherit" });
+const run = (cmd: string, a: string[]) =>
+  execFileSync(cmd, a, { cwd: ROOT, stdio: "inherit" });
+const die = (msg: string): never => {
+  console.error(`land: ${msg}`);
+  process.exit(1);
+};
+
+// --- preflight: a clean main checkout ----------------------------------------------------------
+if (git("rev-parse", "--abbrev-ref", "HEAD") !== "main")
+  die("the main checkout must be on `main` (this script integrates into it).");
+// tracked changes block the merge; untracked (e.g. .claude/) are fine.
+if (
+  git("status", "--porcelain")
+    .split("\n")
+    .some((l) => l && !l.startsWith("??"))
+)
+  die("main has uncommitted tracked changes — commit or stash them first.");
 
 git("fetch", remote, "-q");
 
-// Fast-forward guard: main must be an ancestor of the branch, i.e. the branch is main + new commits
-// on top. A diverged branch (someone pushed to main since) is rejected so a land never rewrites main.
-let isFF = true;
-try {
-  execFileSync("git", ["merge-base", "--is-ancestor", main, branch], {
-    stdio: "ignore",
-  });
-} catch {
-  isFF = false;
-}
-if (!isFF) {
-  console.error(
-    `refusing to land: ${branch} is not a fast-forward of ${main} — rebase it onto ${main} first.`,
-  );
-  process.exit(1);
+// Bring local main up to origin/main (fast-forward only).
+const behind = Number(git("rev-list", "--count", `HEAD..${main}`));
+if (behind) {
+  if (Number(git("rev-list", "--count", `${main}..HEAD`)))
+    die(`local main has diverged from ${main} — reconcile manually.`);
+  gitIO("merge", "--ff-only", main);
 }
 
-const ahead = git("rev-list", "--count", `${main}..${branch}`);
-if (ahead === "0") {
-  console.log(`${branch} is already on ${main} — nothing to push; cleaning up.`);
-} else if (flag("--no-push")) {
-  console.log(`--no-push: leaving ${ahead} commit(s) unpushed; cleaning up.`);
-} else {
-  console.log(`pushing ${branch} -> main (${ahead} commit(s))...`);
-  gitIO("push", remote, `${branch}:main`);
-}
-
-// Remove the worktree (if any) checked out on this branch.
-let removedWorktree = false;
-for (const block of git("worktree", "list", "--porcelain").split("\n\n")) {
-  const path = block.match(/^worktree (.+)$/m)?.[1];
-  const onBranch = block.match(/^branch refs\/heads\/(.+)$/m)?.[1];
-  if (onBranch === branch && path) {
-    gitIO("worktree", "remove", "--force", path);
-    console.log(`removed worktree ${path}`);
-    removedWorktree = true;
+// --- locate + rebase the branch --------------------------------------------------------------
+function worktreeOf(b: string): string | null {
+  for (const block of git("worktree", "list", "--porcelain").split("\n\n")) {
+    const path = block.match(/^worktree (.+)$/m)?.[1];
+    if (block.match(/^branch refs\/heads\/(.+)$/m)?.[1] === b) return path ?? null;
   }
+  return null;
 }
-if (!removedWorktree) console.log("no worktree was checked out on this branch.");
 
-// Delete the branch locally + on the remote (best-effort; it may not exist on either).
-if (!flag("--keep-branch")) {
+const wt = worktreeOf(branch);
+const isFF = (() => {
   try {
-    execFileSync("git", ["branch", "-D", branch], { stdio: "ignore" });
-    console.log(`deleted local branch ${branch}`);
-  } catch {
-    /* not a local branch */
-  }
-  try {
-    execFileSync("git", ["push", remote, "--delete", branch], {
+    execFileSync("git", ["merge-base", "--is-ancestor", main, branch], {
+      cwd: ROOT,
       stdio: "ignore",
     });
-    console.log(`deleted remote branch ${remote}/${branch}`);
+    return true;
   } catch {
-    /* not on the remote */
+    return false;
+  }
+})();
+
+if (!isFF) {
+  if (!wt) die(`${branch} is behind ${main} and has no worktree to rebase in.`);
+  console.log(`rebasing ${branch} onto ${main}...`);
+  try {
+    execFileSync("git", ["-C", wt, "fetch", remote, "-q"]);
+    execFileSync("git", ["-C", wt, "rebase", main], { stdio: "inherit" });
+  } catch {
+    try {
+      execFileSync("git", ["-C", wt, "rebase", "--abort"], { stdio: "ignore" });
+    } catch {}
+    die(`rebase of ${branch} onto ${main} conflicted — resolve it in ${wt}, then re-run.`);
   }
 }
 
+const ahead = Number(git("rev-list", "--count", `HEAD..${branch}`));
+if (ahead === 0) die(`${branch} has no commits beyond main — nothing to land.`);
+
+// --- ff-merge into main locally (not pushed) -------------------------------------------------
+console.log(`merging ${branch} -> main (${ahead} commit(s))...`);
+gitIO("merge", "--ff-only", branch);
+
+// --- gate: never ship red --------------------------------------------------------------------
+if (!flag("--no-test")) {
+  console.log("gate: typecheck + test workspace...");
+  try {
+    run("bun", ["run", "--filter", "*", "typecheck"]);
+    run("bun", ["run", "--filter", "*", "test"]);
+  } catch {
+    console.error("gate FAILED — rolling main back, nothing pushed.");
+    gitIO("reset", "--hard", main);
+    process.exit(1);
+  }
+}
+
+// --- push + clean up the worktree/branch -----------------------------------------------------
+gitIO("push", remote, "main");
+if (wt) {
+  gitIO("worktree", "remove", "--force", wt);
+  console.log(`removed worktree ${wt}`);
+}
+try {
+  execFileSync("git", ["branch", "-D", branch], { cwd: ROOT, stdio: "ignore" });
+} catch {}
+try {
+  execFileSync("git", ["push", remote, "--delete", branch], {
+    cwd: ROOT,
+    stdio: "ignore",
+  });
+} catch {}
 console.log(`landed ${branch}.`);
+
+// --- deploy ----------------------------------------------------------------------------------
+if (flag("--no-deploy")) {
+  console.log("--no-deploy: landed without releasing; it'll batch into the next deploy.");
+  process.exit(0);
+}
+console.log("deploying (release next)...");
+run("bun", ["scripts/release.ts", "next"]);
+const newVer = JSON.parse(
+  readFileSync(join(ROOT, "packages/core/package.json"), "utf8"),
+).version as string;
+gitIO(
+  "add",
+  ...["core", "cli", "surrealdb", "postgres", "create-schemic", "schemic"].map(
+    (p) => `packages/${p}/package.json`,
+  ),
+  "bun.lock",
+);
+gitIO("commit", "-q", "-m", `chore: release ${newVer} (${branch})`);
+gitIO("push", remote, "main");
+console.log(`deployed ${newVer}.`);

@@ -3,7 +3,10 @@ import { join } from "node:path";
 /**
  * Lockstep release for all @schemic packages.
  *
- *   bun scripts/release.ts <version> [--dry-run]
+ *   bun scripts/release.ts <version|next> [--dry-run]
+ *
+ * `next` auto-bumps the trailing prerelease number from core's current version (0.1.0-alpha.10 ->
+ * 0.1.0-alpha.11) — the continuous-deployment path (see scripts/land.ts / CLAUDE.md).
  *
  * Encapsulates the publish gotchas we have hit (see memory: publish-pin-gotcha):
  *  - `bun publish` rewrites each dependent's `@schemic/core: workspace:*` using bun.lock, and a bare
@@ -17,10 +20,10 @@ import { join } from "node:path";
  */
 import { $ } from "bun";
 
-const version = process.argv[2];
+const versionArg = process.argv[2];
 const dryRun = process.argv.includes("--dry-run");
-if (!version || version.startsWith("-")) {
-  console.error("usage: bun scripts/release.ts <version> [--dry-run]");
+if (!versionArg || versionArg.startsWith("-")) {
+  console.error("usage: bun scripts/release.ts <version|next> [--dry-run]");
   process.exit(1);
 }
 
@@ -30,6 +33,24 @@ const ROOT = join(import.meta.dir, "..");
 const ORDER = ["core", "cli", "surrealdb", "postgres", "create-schemic", "schemic"];
 const DEPENDENTS = ["cli", "surrealdb", "postgres"];
 const pkgDir = (p: string) => join(ROOT, "packages", p);
+
+// `next` -> bump the trailing .N of core's current version (0.1.0-alpha.10 -> 0.1.0-alpha.11).
+async function resolveVersion(arg: string): Promise<string> {
+  if (arg !== "next") return arg;
+  const cur = JSON.parse(
+    await Bun.file(join(pkgDir("core"), "package.json")).text(),
+  ).version as string;
+  const m = cur.match(/^(.*[-.])(\d+)$/);
+  if (!m) {
+    console.error(
+      `cannot auto-bump "${cur}" — no trailing .N to increment; pass an explicit version.`,
+    );
+    process.exit(1);
+  }
+  return `${m[1]}${Number(m[2]) + 1}`;
+}
+const version = await resolveVersion(versionArg);
+if (versionArg === "next") console.log(`auto-bumped -> ${version}`);
 
 // 1. set every package's version (targeted edit — don't reformat the file)
 for (const p of ORDER) {
