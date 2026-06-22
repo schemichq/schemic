@@ -39,13 +39,14 @@ export const User = defineTable("user", {
 `;
 
 const SEED = `import { defineSeed } from "@schemic/surrealdb";
-import { RecordId } from "surrealdb";
+import { User } from "../schema/tables/user";
 
 // The default seed — \`schemic seed\` (no arg) runs this \`index.ts\`. Add more named seeds alongside it:
 // \`database/seed/01-users.ts\` runs as \`schemic seed users\` (the numeric prefix orders \`seed --all\`).
 // \`defineSeed\` types \`db\` (the SurrealDB client) and \`ctx\` (a fs helper) — no imports needed.
 export default defineSeed(async (db, ctx) => {
-  await db.create(new RecordId("user", "ada")).content({
+  // \`User.record().for("ada")\` is the typed \`user:ada\` record id — no \`RecordId\` import needed.
+  await db.create(User.record().for("ada")).content({
     name: "Ada Lovelace",
     email: "ada@example.com",
   });

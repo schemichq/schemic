@@ -92,3 +92,26 @@ e2e("lifecycle: init -> gen -> migrate -> status -> diff -> check", () => {
     T,
   );
 });
+
+e2e("seed: the scaffolded default seed runs against the migrated DB", () => {
+  test(
+    "init -> gen -> migrate -> seed creates user:ada",
+    async () => {
+      const root = H.scaffold();
+      const db = H.freshDb();
+      const run = (args: string[]) => H.run(args, { cwd: root, db });
+
+      expect((await run(["init"])).code).toBe(0);
+      expect((await run(["gen", "init_schema", "-y"])).code).toBe(0);
+      expect((await run(["migrate"])).code).toBe(0);
+
+      // The scaffolded seed imports `../schema/tables/user` and runs
+      // `db.create(User.record().for("ada")).content({ … })`. A broken import or a write that the
+      // 2.x SDK / 3.x server combo rejects would exit non-zero — so a clean exit proves the row landed.
+      const seed = await run(["seed"]);
+      expect(seed.code).toBe(0);
+      expect(seed.out.toLowerCase()).not.toContain("error");
+    },
+    T,
+  );
+});
