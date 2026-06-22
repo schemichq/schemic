@@ -1,6 +1,6 @@
 {
   "name": "@schemic/surrealdb",
-  "version": "0.1.0-alpha.12",
+  "version": "0.1.0-alpha.13",
   "description": "SurrealDB driver + authoring for Schemic — s.* schema definition, SurrealQL DDL, introspection, migrations.",
   "license": "MIT",
   "author": "Vertio Solutions",

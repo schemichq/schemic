@@ -9,7 +9,7 @@
     },
     "packages/cli": {
       "name": "@schemic/cli",
-      "version": "0.1.0-alpha.12",
+      "version": "0.1.0-alpha.13",
       "bin": {
         "schemic": "lib/cli.js",
         "sc": "lib/cli.js",
@@ -32,7 +32,7 @@
     },
     "packages/core": {
       "name": "@schemic/core",
-      "version": "0.1.0-alpha.12",
+      "version": "0.1.0-alpha.13",
       "dependencies": {
         "commander": "^14.0.2",
         "jiti": "^2.4.2",
@@ -54,7 +54,7 @@
     },
     "packages/create-schemic": {
       "name": "create-schemic",
-      "version": "0.1.0-alpha.12",
+      "version": "0.1.0-alpha.13",
       "bin": {
         "create-schemic": "lib/index.js",
       },
@@ -87,7 +87,7 @@
     },
     "packages/postgres": {
       "name": "@schemic/postgres",
-      "version": "0.1.0-alpha.12",
+      "version": "0.1.0-alpha.13",
       "dependencies": {
         "@schemic/core": "workspace:*",
         "zod": "^4.3.5",
@@ -108,7 +108,7 @@
     },
     "packages/schemic": {
       "name": "schemic",
-      "version": "0.1.0-alpha.12",
+      "version": "0.1.0-alpha.13",
       "bin": {
         "schemic": "bin.mjs",
         "sc": "bin.mjs",
@@ -119,7 +119,7 @@
     },
     "packages/surrealdb": {
       "name": "@schemic/surrealdb",
-      "version": "0.1.0-alpha.12",
+      "version": "0.1.0-alpha.13",
       "dependencies": {
         "@schemic/core": "workspace:*",
         "surrealdb": "^2.0.3",
@@ -1075,7 +1075,7 @@
 
     "tiny-inflate": ["tiny-inflate@1.0.3", "", {}, "sha512-pkY1fj1cKHb2seWDy0B16HeWyczlJA9/WW3u3c4z/NiWDsO3DOU5D7nhTLE9CF0yXv/QZFY7sEJmj24dK+Rrqw=="],
 
-    "tinyclip": ["tinyclip@0.1.14", "", {}, "sha512-F1oWdz8tjT17qe1d5JgDK6z03WGOhYYAN0lK3/D/fzNiy93xswLLEw7pk+3g05onhAy6Bsc6PLNUGhdgVjemMQ=="],
+    "tinyclip": ["tinyclip@0.1.15", "", {}, "sha512-uo33abH+Ays0xYaDysoBt494Hb3hsEczMpcC0MwFl773pazORx4fmvKhclhR1wonUbB6vvpRsvVMwnhfqeMc+A=="],
 
     "tinyexec": ["tinyexec@0.3.2", "", {}, "sha512-KQQR9yN7R5+OSwaK0XQoj22pwHoTlgYqmUscPYoknOoWCWfj/5/ABTMRi69FrKU5ffPVh5QcFikpWJI/P1ocHA=="],
 
