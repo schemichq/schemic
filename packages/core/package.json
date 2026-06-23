@@ -58,6 +58,13 @@
         "default": "./lib/testing.js"
       }
     },
+    "./query": {
+      "bun": "./src/query.ts",
+      "import": {
+        "types": "./lib/query.d.ts",
+        "default": "./lib/query.js"
+      }
+    },
     "./package.json": "./package.json"
   },
   "scripts": {

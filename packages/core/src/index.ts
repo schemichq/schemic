@@ -91,6 +91,7 @@ export {
   type ApplyOptions,
   type Authored,
   type AuthoredDef,
+  type CallableFunctions,
   type ConnectionOverrides,
   type Driver,
   driverNames,

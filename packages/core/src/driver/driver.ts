@@ -145,6 +145,21 @@ export interface ShadowCapability<Conn> {
 }
 
 /**
+ * User-defined DB functions — the `.call` side of the query layer's (B) surface (DB functions as code).
+ * `invoke` calls a defined function by name with already-encoded args and returns RAW rows; the caller
+ * decodes them through the function's `.returns(R)` schema (the schema-driven toolkit in
+ * `@schemic/core/query`). A defined function still emits/migrates via the schema engine regardless; this
+ * capability only adds INVOCATION. (surreal: `RETURN fn::name($a)`; pg: `SELECT … FROM name($a)`.)
+ */
+export interface CallableFunctions<Conn = unknown> {
+  invoke<T = unknown>(
+    conn: Conn,
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<T[]>;
+}
+
+/**
  * A database dialect, expressed as a SET OF KINDS (core-v2). The driver registers its object kinds on
  * `registry`; core orchestrates schema ops GENERICALLY over it (`lowerSchema`/`buildKindDiff`/
  * `emitKinds`/`orderObjects`) — it never names a kind. The driver owns only what isn't generic: the
@@ -257,6 +272,12 @@ export interface Driver<
     sql: string,
     vars?: Record<string, unknown>,
   ): Promise<T[]>;
+  /**
+   * User-defined DB functions ((B) of the query layer) — invoke a defined function + decode the result.
+   * Absent -> no `.call()` surface on this driver (the function still emits/migrates). See
+   * {@link CallableFunctions}.
+   */
+  readonly callable?: CallableFunctions<Conn>;
   /**
    * The dialect-specific files `schemic init` scaffolds, keyed by project-relative path: a
    * connections-only `schemic.config.ts` (using this driver's `<driver>Connection` factory), a sample
