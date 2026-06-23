@@ -11,6 +11,8 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 
 ## [Unreleased]
 
+## [0.1.0-alpha.20] - 2026-06-23
+
 ### Added
 - **core:** `callFunction` in `@schemic/core/query` — invoke a defined DB function via the `callable`
   capability and decode the result through `.returns(R)` (the neutral half of the query layer's (B)
