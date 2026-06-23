@@ -368,3 +368,93 @@ export const createExtensionDdl = (
 /** `DROP EXTENSION IF EXISTS "name";`. */
 export const dropExtensionSql = (name: string) =>
   `DROP EXTENSION IF EXISTS ${escId(name)};`;
+
+// --- function (CREATE FUNCTION) -----------------------------------------------------------------
+
+/** A function's emit-relevant shape: signature + language + body + optional volatility/strict flags. */
+export interface PgFunctionAttrs {
+  args: string;
+  returns: string;
+  language: string;
+  body: string;
+  volatility?: "immutable" | "stable" | "volatile";
+  strict?: boolean;
+  replace?: boolean;
+}
+
+/**
+ * `CREATE [OR REPLACE] FUNCTION "name"(args) RETURNS <ret> LANGUAGE <lang> [IMMUTABLE|STABLE|VOLATILE]
+ * [STRICT] AS $$<body>$$;`. The body is spliced verbatim inside `$$` dollar-quotes.
+ */
+export const createFunctionDdl = (name: string, a: PgFunctionAttrs): string => {
+  const head = a.replace ? "CREATE OR REPLACE FUNCTION" : "CREATE FUNCTION";
+  const parts = [
+    `${head} ${escId(name)}(${a.args}) RETURNS ${a.returns} LANGUAGE ${a.language}`,
+  ];
+  if (a.volatility) parts.push(a.volatility.toUpperCase());
+  if (a.strict) parts.push("STRICT");
+  parts.push(`AS $$${a.body}$$`);
+  return `${parts.join(" ")};`;
+};
+/** `DROP FUNCTION IF EXISTS "name"(args);` — args make the drop unambiguous (pg resolves by signature). */
+export const dropFunctionSql = (name: string, args: string) =>
+  `DROP FUNCTION IF EXISTS ${escId(name)}(${args});`;
+
+// --- trigger (CREATE TRIGGER) -------------------------------------------------------------------
+
+/** A trigger's structured shape (authoring); introspect stores the same fields parsed from pg. */
+export interface PgTriggerAttrs {
+  table: string;
+  timing: "before" | "after" | "instead of";
+  events: ("insert" | "update" | "delete" | "truncate")[];
+  fn: string;
+  forEach?: "row" | "statement";
+  when?: string;
+  args?: string[];
+}
+
+/** Build the `CREATE TRIGGER …` statement (no trailing `;`) from structured attributes. */
+export const triggerDefSql = (name: string, a: PgTriggerAttrs): string => {
+  const events = a.events.map((e) => e.toUpperCase()).join(" OR ");
+  const each = (a.forEach ?? "row").toUpperCase();
+  const when = a.when ? ` WHEN (${a.when})` : "";
+  const fnArgs = (a.args ?? []).map((x) => `'${x.replace(/'/g, "''")}'`).join(", ");
+  return (
+    `CREATE TRIGGER ${escId(name)} ${a.timing.toUpperCase()} ${events} ON ${escId(a.table)} ` +
+    `FOR EACH ${each}${when} EXECUTE FUNCTION ${escId(a.fn)}(${fnArgs})`
+  );
+};
+/** `DROP TRIGGER IF EXISTS "name" ON "table";`. */
+export const dropTriggerSql = (name: string, table: string) =>
+  `DROP TRIGGER IF EXISTS ${escId(name)} ON ${escId(table)};`;
+
+// --- policy (CREATE POLICY, row-level security) -------------------------------------------------
+
+/** A policy's emit-relevant shape (RLS). `command` defaults to ALL; `roles` defaults to PUBLIC. */
+export interface PgPolicyAttrs {
+  table: string;
+  command?: "all" | "select" | "insert" | "update" | "delete";
+  roles?: string[];
+  using?: string;
+  withCheck?: string;
+  permissive?: boolean;
+}
+
+/** `ALTER TABLE "t" ENABLE ROW LEVEL SECURITY;` — idempotent; emitted before a policy so it takes effect. */
+export const enableRlsSql = (table: string) =>
+  `ALTER TABLE ${escId(table)} ENABLE ROW LEVEL SECURITY;`;
+
+/** `CREATE POLICY "name" ON "t" [AS PERMISSIVE|RESTRICTIVE] [FOR cmd] [TO roles] [USING (…)] [WITH CHECK (…)];`. */
+export const createPolicyDdl = (name: string, a: PgPolicyAttrs): string => {
+  const parts = [`CREATE POLICY ${escId(name)} ON ${escId(a.table)}`];
+  if (a.permissive === false) parts.push("AS RESTRICTIVE");
+  if (a.command && a.command !== "all") parts.push(`FOR ${a.command.toUpperCase()}`);
+  if (a.roles && a.roles.length > 0)
+    parts.push(`TO ${a.roles.map(escId).join(", ")}`);
+  if (a.using !== undefined) parts.push(`USING (${a.using})`);
+  if (a.withCheck !== undefined) parts.push(`WITH CHECK (${a.withCheck})`);
+  return `${parts.join(" ")};`;
+};
+/** `DROP POLICY IF EXISTS "name" ON "table";`. */
+export const dropPolicySql = (name: string, table: string) =>
+  `DROP POLICY IF EXISTS ${escId(name)} ON ${escId(table)};`;
