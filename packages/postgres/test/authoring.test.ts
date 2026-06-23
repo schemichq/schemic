@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { buildKindDiff, emitKinds } from "@schemic/core";
 import * as z from "zod";
 import {
+  defineDomain,
   defineEnum,
+  defineExtension,
+  defineMaterializedView,
+  defineSequence,
   defineTable,
   defineView,
   type PgConn,
@@ -406,5 +410,78 @@ describe("PgTableDef.object / decode (row codec — what the query builder reuse
       at: new Date(),
     });
     expect(r.success).toBe(false);
+  });
+});
+
+describe("standalone DDL objects via the authoring surface (explode)", () => {
+  const roundtrip = async (objs: ReturnType<typeof postgresDriver.explode>) => {
+    const out = emitKinds(registry, objs);
+    const conn = (await postgresDriver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
+    try {
+      await postgresDriver.apply(conn, out);
+      const live = await postgresDriver.introspectAll(conn);
+      return buildKindDiff(registry, live, objs);
+    } finally {
+      await conn.close();
+    }
+  };
+
+  test("defineSequence: emits + round-trips (default + custom)", async () => {
+    const plain = defineSequence("ats_plain");
+    const order = defineSequence("ats_order", { start: 1000, increment: 5 });
+    const out = emitKinds(registry, postgresDriver.explode([], [plain, order]));
+    expect(out).toContain('CREATE SEQUENCE "ats_plain";');
+    expect(out).toContain(
+      'CREATE SEQUENCE "ats_order" INCREMENT BY 5 START WITH 1000;',
+    );
+    const { up, down } = await roundtrip(
+      postgresDriver.explode([], [plain, order]),
+    );
+    expect({ up, down }).toEqual({ up: [], down: [] });
+  });
+
+  test("defineDomain: .column() types a table column as the domain; round-trips", async () => {
+    const code = defineDomain("atd_code", s.varchar(50), {
+      notNull: true,
+      check: "VALUE ~ '^[A-Z]+$'",
+    });
+    const t = defineTable("atd_t", { code: code.column() });
+    const objs = postgresDriver.explode([t], [code]);
+    const out = emitKinds(registry, objs);
+    // domain emits before the table that uses it
+    expect(
+      out.findIndex((x) => x.startsWith('CREATE DOMAIN "atd_code"')),
+    ).toBeLessThan(out.findIndex((x) => x.includes('CREATE TABLE "atd_t"')));
+    expect(out.find((x) => x.includes('"code" atd_code'))).toBeTruthy();
+    const { up, down } = await roundtrip(objs);
+    expect({ up, down }).toEqual({ up: [], down: [] });
+  });
+
+  test("defineMaterializedView: emits after its table + round-trips", async () => {
+    const u = defineTable("atm_u", { name: s.text() });
+    const stats = defineMaterializedView(
+      "atm_stats",
+      'SELECT count(*) AS n FROM "atm_u"',
+    );
+    const objs = postgresDriver.explode([u], [stats]);
+    const out = emitKinds(registry, objs);
+    expect(
+      out.findIndex((x) => x.includes('CREATE TABLE "atm_u"')),
+    ).toBeLessThan(
+      out.findIndex((x) =>
+        x.startsWith('CREATE MATERIALIZED VIEW "atm_stats"'),
+      ),
+    );
+    const { up, down } = await roundtrip(objs);
+    expect({ up, down }).toEqual({ up: [], down: [] });
+  });
+
+  test("defineExtension: emits CREATE EXTENSION IF NOT EXISTS (first)", () => {
+    const citext = defineExtension("citext");
+    const u = defineTable("ate_u", { name: s.text() });
+    const out = emitKinds(registry, postgresDriver.explode([u], [citext]));
+    expect(out[0]).toBe('CREATE EXTENSION IF NOT EXISTS "citext";');
   });
 });

@@ -9,8 +9,12 @@ import {
 import type { PgTable } from "../src/emit";
 import { type PgConn, postgresDriver } from "../src/index";
 import {
+  domainPortable,
   enumPortable,
+  extensionPortable,
+  matViewPortable,
   registry,
+  sequencePortable,
   splitTables,
   viewPortable,
 } from "../src/kinds";
@@ -42,20 +46,29 @@ const ud = (d: { up: string[]; down: string[] }) => ({
 // --- registration ------------------------------------------------------------------------------
 
 describe("postgres kind registry", () => {
-  test("registers enum/table/index/constraint/view coarse-to-fine (registration order == ordinal)", () => {
+  test("registers the kinds dependency-ordered (registration order == ordinal == emit order)", () => {
     expect(registry.names()).toEqual([
+      "extension",
       "enum",
+      "domain",
+      "sequence",
       "table",
       "index",
       "constraint",
       "view",
+      "matview",
     ]);
-    // enum FIRST (CREATE TYPE before tables); view LAST (reads tables, emits after them).
-    expect(registry.ordinal("enum")).toBe(0);
-    expect(registry.ordinal("table")).toBe(1);
-    expect(registry.ordinal("index")).toBe(2);
-    expect(registry.ordinal("constraint")).toBe(3);
-    expect(registry.ordinal("view")).toBe(4);
+    // Pre-table kinds (extension/enum/domain/sequence) FIRST — a table's columns/defaults can reference
+    // them; views/matviews LAST — they read tables, so emit after them (reverse on drop).
+    expect(registry.ordinal("extension")).toBe(0);
+    expect(registry.ordinal("enum")).toBe(1);
+    expect(registry.ordinal("domain")).toBe(2);
+    expect(registry.ordinal("sequence")).toBe(3);
+    expect(registry.ordinal("table")).toBe(4);
+    expect(registry.ordinal("index")).toBe(5);
+    expect(registry.ordinal("constraint")).toBe(6);
+    expect(registry.ordinal("view")).toBe(7);
+    expect(registry.ordinal("matview")).toBe(8);
   });
 });
 
@@ -424,6 +437,236 @@ describe("view kind", () => {
       expect(
         live.some((o) => o.kind === "table" && o.name === "vrt_active"),
       ).toBe(false);
+      const { up, down } = buildKindDiff(registry, live, objs);
+      expect({ up, down }).toEqual({ up: [], down: [] });
+    } finally {
+      await conn.close();
+    }
+  });
+});
+
+// --- sequence kind (CREATE SEQUENCE) ------------------------------------------------------------
+
+describe("sequence kind", () => {
+  test("emits only the attributes set; pg fills the rest", () => {
+    expect(
+      emitKinds(registry, [
+        sequencePortable("s", { start: "1000", increment: "5", cycle: true }),
+      ]),
+    ).toEqual([`CREATE SEQUENCE "s" INCREMENT BY 5 START WITH 1000 CYCLE;`]);
+    expect(emitKinds(registry, [sequencePortable("plain")])).toEqual([
+      `CREATE SEQUENCE "plain";`,
+    ]);
+  });
+
+  test("a new sequence diffs as add / drop", () => {
+    const { up, down } = buildKindDiff(registry, [], [sequencePortable("s")]);
+    expect(up).toEqual([`CREATE SEQUENCE "s";`]);
+    expect(down).toEqual([`DROP SEQUENCE IF EXISTS "s";`]);
+  });
+
+  test("authoring without opts == the fully-defaulted introspected sequence (no phantom)", () => {
+    // introspect always reports the materialized defaults; canonical fills them on the authored side.
+    const live = sequencePortable("s", {
+      start: "1",
+      min: "1",
+      max: "9223372036854775807",
+      increment: "1",
+      cache: "1",
+      cycle: false,
+    });
+    const { up, down } = buildKindDiff(
+      registry,
+      [live],
+      [sequencePortable("s")],
+    );
+    expect({ up, down }).toEqual({ up: [], down: [] });
+  });
+
+  test("a real attribute change IS detected (drop+recreate)", () => {
+    const { up } = buildKindDiff(
+      registry,
+      [sequencePortable("s", { increment: "1" })],
+      [sequencePortable("s", { increment: "2" })],
+    );
+    expect(up).toEqual([
+      `DROP SEQUENCE IF EXISTS "s";`,
+      `CREATE SEQUENCE "s" INCREMENT BY 2;`,
+    ]);
+  });
+
+  test("default + custom sequence round-trip through the engine", async () => {
+    const objs = [
+      sequencePortable("krt_plain"),
+      sequencePortable("krt_order", {
+        start: "1000",
+        increment: "5",
+        cycle: true,
+      }),
+    ];
+    const conn = (await driver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
+    try {
+      await driver.apply(conn, emitKinds(registry, objs));
+      const live = await driver.introspectAll(conn);
+      const { up, down } = buildKindDiff(registry, live, objs);
+      expect({ up, down }).toEqual({ up: [], down: [] });
+    } finally {
+      await conn.close();
+    }
+  });
+});
+
+// --- domain kind (CREATE DOMAIN) ----------------------------------------------------------------
+
+describe("domain kind", () => {
+  test("emits CREATE DOMAIN with base + clauses (pg order: DEFAULT, NOT NULL, CHECK)", () => {
+    expect(
+      emitKinds(registry, [
+        domainPortable("email", {
+          baseType: "text",
+          notNull: true,
+          check: "VALUE ~ '@'",
+        }),
+      ]),
+    ).toEqual([`CREATE DOMAIN "email" AS text NOT NULL CHECK (VALUE ~ '@');`]);
+  });
+
+  test("a new domain diffs as add / drop", () => {
+    const { up, down } = buildKindDiff(
+      registry,
+      [],
+      [domainPortable("email", { baseType: "text" })],
+    );
+    expect(up).toEqual([`CREATE DOMAIN "email" AS text;`]);
+    expect(down).toEqual([`DROP DOMAIN IF EXISTS "email";`]);
+  });
+
+  test("CHECK/DEFAULT edits are NOT a change (pg rewrites exprs; excluded from canonical)", () => {
+    const { up, down } = buildKindDiff(
+      registry,
+      [domainPortable("email", { baseType: "text", check: "VALUE ~ '@'" })],
+      [
+        domainPortable("email", {
+          baseType: "text",
+          check: "VALUE ~ '@@'",
+          default: "'x'",
+        }),
+      ],
+    );
+    expect({ up, down }).toEqual({ up: [], down: [] });
+  });
+
+  test("varchar base round-trips despite the information_schema spelling", async () => {
+    // authored 'varchar(50)' vs introspected 'character varying(50)' -> normalized equal, no phantom.
+    const objs = [
+      domainPortable("drt_code", { baseType: "varchar(50)", notNull: true }),
+      ...splitTables([
+        tbl("drt_t", [
+          f("code", { t: "native", db: "postgres", name: "drt_code" }),
+        ]),
+      ]),
+    ];
+    const conn = (await driver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
+    try {
+      await driver.apply(conn, emitKinds(registry, objs));
+      const live = await driver.introspectAll(conn);
+      const { up, down } = buildKindDiff(registry, live, objs);
+      expect({ up, down }).toEqual({ up: [], down: [] });
+    } finally {
+      await conn.close();
+    }
+  });
+});
+
+// --- extension kind (CREATE EXTENSION) ----------------------------------------------------------
+
+describe("extension kind", () => {
+  test("emits CREATE EXTENSION IF NOT EXISTS (+ schema/version)", () => {
+    expect(emitKinds(registry, [extensionPortable("citext")])).toEqual([
+      `CREATE EXTENSION IF NOT EXISTS "citext";`,
+    ]);
+    expect(
+      emitKinds(registry, [
+        extensionPortable("vector", { schema: "ext", version: "0.7.0" }),
+      ]),
+    ).toEqual([
+      `CREATE EXTENSION IF NOT EXISTS "vector" SCHEMA "ext" VERSION '0.7.0';`,
+    ]);
+  });
+
+  test("a new extension diffs as add / drop (name-only canonical)", () => {
+    const { up, down } = buildKindDiff(
+      registry,
+      [],
+      [extensionPortable("citext")],
+    );
+    expect(up).toEqual([`CREATE EXTENSION IF NOT EXISTS "citext";`]);
+    expect(down).toEqual([`DROP EXTENSION IF EXISTS "citext";`]);
+  });
+
+  test("introspect excludes the plpgsql system default (no phantom on a schema with no extensions)", async () => {
+    // PGlite can't install real extensions (citext/postgis aren't bundled), so we can't round-trip a
+    // CREATE; assert the introspector never surfaces the always-present plpgsql -> a schema with no
+    // authored extensions diffs clean.
+    const conn = (await driver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
+    try {
+      await driver.apply(
+        conn,
+        emitKinds(
+          registry,
+          splitTables([tbl("ert_x", [f("a", scalar("string"))])]),
+        ),
+      );
+      const live = await driver.introspectAll(conn);
+      expect(live.some((o) => o.kind === "extension")).toBe(false);
+    } finally {
+      await conn.close();
+    }
+  });
+});
+
+// --- materialized view kind (CREATE MATERIALIZED VIEW) ------------------------------------------
+
+describe("matview kind", () => {
+  test("emits CREATE MATERIALIZED VIEW", () => {
+    expect(
+      emitKinds(registry, [matViewPortable("mv", "SELECT 1 AS x")]),
+    ).toEqual([`CREATE MATERIALIZED VIEW "mv" AS SELECT 1 AS x;`]);
+  });
+
+  test("body change is NOT a change (name-only canonical, like a view)", () => {
+    const { up, down } = buildKindDiff(
+      registry,
+      [matViewPortable("mv", "SELECT 1 AS x")],
+      [matViewPortable("mv", "SELECT 2 AS y")],
+    );
+    expect({ up, down }).toEqual({ up: [], down: [] });
+  });
+
+  test("table + matview round-trips; introspected as a matview", async () => {
+    const objs = [
+      ...splitTables([tbl("mrt_u", [f("name", scalar("string"))])]),
+      matViewPortable("mrt_stats", 'SELECT count(*) AS n FROM "mrt_u"'),
+    ];
+    const ddl = emitKinds(registry, objs);
+    expect(ddl[ddl.length - 1]).toContain(
+      'CREATE MATERIALIZED VIEW "mrt_stats"',
+    );
+    const conn = (await driver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
+    try {
+      await driver.apply(conn, ddl);
+      const live = await driver.introspectAll(conn);
+      expect(
+        live.some((o) => o.kind === "matview" && o.name === "mrt_stats"),
+      ).toBe(true);
       const { up, down } = buildKindDiff(registry, live, objs);
       expect({ up, down }).toEqual({ up: [], down: [] });
     } finally {

@@ -2,12 +2,21 @@
 // its KINDS on a per-driver KindRegistry and core orchestrates generically (lowerSchema / planKinds /
 // buildKindDiff / emitKinds). See packages/core/docs/kind-registry-contract.md.
 //
-// Postgres registers THREE kinds (coarse-to-fine, registration order == ordinal):
+// Postgres registers these kinds (registration order == ordinal == emit order; reverse on drop):
+//   extension   — CREATE EXTENSION IF NOT EXISTS; standalone def, FIRST (can supply types/functions).
+//   enum        — CREATE TYPE … AS ENUM; standalone def, before the tables/domains that use it.
+//   domain      — CREATE DOMAIN; standalone def, before the tables whose columns are typed as it.
+//   sequence    — CREATE SEQUENCE; standalone def, before a column DEFAULT nextval('seq') that uses it.
 //   table       — the structured kind: columns (substrate) + PK + table CHECKs; CREATE TABLE; field-
 //                 level overwrite. A FK COLUMN stays a plain `text` column here; the FK CONSTRAINT is
 //                 its own kind (below) so the dependency graph can break mutual-FK cycles.
 //   index       — own kind, deps -> its table (no `owner`); CREATE [UNIQUE] INDEX.
 //   constraint  — own kind (FK first), deps -> [its table, the referenced table]; ALTER ADD CONSTRAINT.
+//   view        — CREATE VIEW; standalone def, LAST (reads tables/enums; name-only change-detection).
+//   matview     — CREATE MATERIALIZED VIEW; standalone def, LAST (like view; name-only change-detection).
+//
+// The standalone defs (extension/enum/domain/sequence/view/matview) come in via the driver's `explode`
+// (authoring `defineX`) and `introspectAll` (live read); table/index/constraint are split off a table.
 //
 // index/constraint DECLINE `owner` (opt-in clustering): without it the spine falls back to ordinal+name,
 // so the emit order is all tables -> all indexes -> all constraints (pg's rank-grouped convention),
@@ -31,11 +40,19 @@ import {
   addEnumValueSql,
   addFkSql,
   canonField,
+  createDomainDdl,
   createEnumDdl,
+  createExtensionDdl,
+  createMatViewDdl,
+  createSequenceDdl,
   createTableDdl,
   createViewDdl,
+  dropDomainSql,
   dropEnumSql,
+  dropExtensionSql,
   dropFkSql,
+  dropMatViewSql,
+  dropSequenceSql,
   dropTableSql,
   dropViewSql,
   escId,
@@ -43,9 +60,12 @@ import {
   fkActions,
   fkName,
   normAction,
+  type PgDomainAttrs,
+  type PgSequenceAttrs,
   type PgTable,
   pgColumn,
   pgEmitFields,
+  seqDefaults,
 } from "./emit";
 
 // --- the kinds' portable objects ----------------------------------------------------------------
@@ -372,14 +392,144 @@ const viewEngine: KindEngine<PgViewPortable, PgViewPortable> = {
   // No deps: registered LAST (highest ordinal) so views emit after the tables/enums they read.
 };
 
+// --- materialized view kind (CREATE MATERIALIZED VIEW … AS <select>) ----------------------------
+
+/** The `matview` kind's portable form: a name + its SELECT body (verbatim authored / introspected). */
+export interface PgMatViewPortable extends PortableObject {
+  kind: "matview";
+  name: string;
+  sql: string;
+}
+
+const matViewEngine: KindEngine<PgMatViewPortable, PgMatViewPortable> = {
+  lower: (v) => v,
+  emit: (v) => [createMatViewDdl(v.name, v.sql)],
+  remove: (v) => [dropMatViewSql(v.name)],
+  // Name-only change-detection (same rationale as the view kind: pg rewrites the stored definition).
+  canonical: (v) => `matview:${v.name}`,
+  // No deps: registered LAST (after plain views) so a matview emits after the tables/views it reads.
+};
+
+// --- sequence kind (CREATE SEQUENCE) ------------------------------------------------------------
+
+/** The `sequence` kind's portable form: a name + its explicit attributes (omitted -> pg defaults). */
+export interface PgSequencePortable extends PortableObject, PgSequenceAttrs {
+  kind: "sequence";
+  name: string;
+}
+
+/** Effective attributes (author's value or pg's default) — so authoring-without-opts matches introspect. */
+const seqEffective = (s: PgSequencePortable) => ({
+  start: s.start ?? seqDefaults.start,
+  increment: s.increment ?? seqDefaults.increment,
+  min: s.min ?? seqDefaults.min,
+  max: s.max ?? seqDefaults.max,
+  cache: s.cache ?? seqDefaults.cache,
+  cycle: s.cycle ?? seqDefaults.cycle,
+});
+
+const sequenceEngine: KindEngine<PgSequencePortable, PgSequencePortable> = {
+  lower: (s) => s,
+  emit: (s) => [createSequenceDdl(s.name, s)],
+  remove: (s) => [dropSequenceSql(s.name)],
+  // Canonical over the EFFECTIVE attributes (defaults filled), so `CREATE SEQUENCE s;` (no opts) and the
+  // fully-defaulted introspected sequence compare equal — no phantom — while a real attribute change
+  // (start/increment/min/max/cache/cycle) is still detected. No in-place ALTER: a change drop+recreates.
+  canonical: (s) => `sequence:${s.name}:${JSON.stringify(seqEffective(s))}`,
+  // No deps: registered before tables so a column DEFAULT nextval('seq') resolves.
+};
+
+// --- domain kind (CREATE DOMAIN) ----------------------------------------------------------------
+
+/** The `domain` kind's portable form: name + base type + the optional NOT NULL / DEFAULT / CHECK clauses. */
+export interface PgDomainPortable extends PortableObject, PgDomainAttrs {
+  kind: "domain";
+  name: string;
+}
+
+/**
+ * Normalize a domain's base type to a single spelling so the authored token (`varchar(50)`) and the
+ * introspected `information_schema` form (`character varying(50)`) compare equal in `canonical`.
+ */
+const canonDomainBase = (t: string): string =>
+  t
+    .toLowerCase()
+    .replace("character varying", "varchar")
+    .replace(/\bcharacter\b/, "char")
+    .replace("timestamp with time zone", "timestamptz")
+    .replace("timestamp without time zone", "timestamp")
+    .replace("time with time zone", "timetz")
+    .replace("time without time zone", "time")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const domainEngine: KindEngine<PgDomainPortable, PgDomainPortable> = {
+  lower: (d) => d,
+  emit: (d) => [createDomainDdl(d.name, d)],
+  remove: (d) => [dropDomainSql(d.name)],
+  // Canonical = name + base type + NOT NULL (all reliably introspected). DEFAULT/CHECK are emit-faithful
+  // but EXCLUDED — pg rewrites their expressions on read (`a > 0` -> `(VALUE > 0)`), same line the table
+  // kind draws for column default/check. So a clean apply round-trips; a default/check edit isn't
+  // auto-diffed (drop+recreate / re-gen).
+  canonical: (d) =>
+    `domain:${d.name}:${canonDomainBase(d.baseType)}:${d.notNull ? "nn" : ""}`,
+  // No deps: registered before tables so a column typed as the domain resolves.
+};
+
+// --- extension kind (CREATE EXTENSION) ----------------------------------------------------------
+
+/** The `extension` kind's portable form: the extension name (+ optional schema/version, emit-only). */
+export interface PgExtensionPortable extends PortableObject {
+  kind: "extension";
+  name: string;
+  schema?: string;
+  version?: string;
+}
+
+const extensionEngine: KindEngine<PgExtensionPortable, PgExtensionPortable> = {
+  lower: (e) => e,
+  emit: (e) => [
+    createExtensionDdl(e.name, {
+      ...(e.schema !== undefined ? { schema: e.schema } : {}),
+      ...(e.version !== undefined ? { version: e.version } : {}),
+    }),
+  ],
+  remove: (e) => [dropExtensionSql(e.name)],
+  // Name-only: SCHEMA/VERSION are install-time choices that pg materializes (a fresh CREATE picks the
+  // default version), so presence is the reliable round-trip unit. Registered FIRST — an extension can
+  // supply types/functions everything else uses.
+  canonical: (e) => `extension:${e.name}`,
+};
+
 // --- the registry -------------------------------------------------------------------------------
 
 export const registry = new KindRegistry();
-// enum FIRST (ordinal 0): a CREATE TYPE has no deps and must emit before the tables that use it.
+// Registration order == ordinal == emit order. The "pre-table" kinds first (a table's columns/defaults
+// can reference them), then table -> index -> constraint, then the read-only views LAST (after the
+// tables/enums they read). Reverse order applies on drop (down migrations).
+// extension FIRST: it can supply types/functions everything else uses.
+registry.define({
+  name: "extension",
+  build: (e: PgExtensionPortable) => e,
+  ...extensionEngine,
+});
+// enum: a CREATE TYPE must emit before the tables/domains that use it.
 registry.define({
   name: "enum",
   build: (e: PgEnumPortable) => e,
   ...enumEngine,
+});
+// domain: a CREATE DOMAIN must emit before the tables whose columns are typed as it.
+registry.define({
+  name: "domain",
+  build: (d: PgDomainPortable) => d,
+  ...domainEngine,
+});
+// sequence: must emit before a column DEFAULT nextval('seq') that references it.
+registry.define({
+  name: "sequence",
+  build: (s: PgSequencePortable) => s,
+  ...sequenceEngine,
 });
 registry.define({
   name: "table",
@@ -396,11 +546,16 @@ registry.define({
   build: (c: PgConstraintPortable) => c,
   ...constraintEngine,
 });
-// view LAST (highest ordinal): a view reads tables/enums, so it must emit after them.
+// view then matview LAST (highest ordinals): they read tables/enums, so they emit after them.
 registry.define({
   name: "view",
   build: (v: PgViewPortable) => v,
   ...viewEngine,
+});
+registry.define({
+  name: "matview",
+  build: (v: PgMatViewPortable) => v,
+  ...matViewEngine,
 });
 
 // --- splitTable: the driver's table IR -> the registry's kind objects ----------------------------
@@ -473,3 +628,31 @@ export const viewPortable = (name: string, sql: string): PgViewPortable => ({
   name,
   sql,
 });
+
+/** A materialized view (authoring `PgMatViewDef` or introspected) -> its `matview` kind object. */
+export const matViewPortable = (
+  name: string,
+  sql: string,
+): PgMatViewPortable => ({
+  kind: "matview",
+  name,
+  sql,
+});
+
+/** A sequence (authoring `PgSequenceDef` or introspected) -> its `sequence` kind object. */
+export const sequencePortable = (
+  name: string,
+  attrs: PgSequenceAttrs = {},
+): PgSequencePortable => ({ kind: "sequence", name, ...attrs });
+
+/** A domain (authoring `PgDomainDef` or introspected) -> its `domain` kind object. */
+export const domainPortable = (
+  name: string,
+  attrs: PgDomainAttrs,
+): PgDomainPortable => ({ kind: "domain", name, ...attrs });
+
+/** An extension (authoring `PgExtensionDef` or introspected) -> its `extension` kind object. */
+export const extensionPortable = (
+  name: string,
+  attrs: { schema?: string; version?: string } = {},
+): PgExtensionPortable => ({ kind: "extension", name, ...attrs });

@@ -424,6 +424,170 @@ export function defineView(name: string, sql: string): PgViewDef {
   return new PgViewDef(name, sql);
 }
 
+// --- defineMaterializedView: a pg MATERIALIZED VIEW ---------------------------------------------
+
+/**
+ * A Postgres materialized view — `CREATE MATERIALIZED VIEW <name> AS <sql>`. Like {@link PgViewDef} but
+ * the result set is stored on disk (refresh with `REFRESH MATERIALIZED VIEW`). Same body caveat as a
+ * plain view: pg rewrites the stored definition, so the PRESENCE round-trips but a body edit isn't
+ * auto-diffed (drop+recreate / re-gen to change the SELECT).
+ */
+export class PgMatViewDef {
+  readonly kind = "matview" as const;
+  constructor(
+    readonly name: string,
+    readonly sql: string,
+  ) {}
+}
+
+/** Declare a pg materialized view: `export const stats = defineMaterializedView("stats", 'SELECT count(*) FROM "user"')`. */
+export function defineMaterializedView(
+  name: string,
+  sql: string,
+): PgMatViewDef {
+  return new PgMatViewDef(name, sql);
+}
+
+// --- defineSequence: a standalone pg SEQUENCE ---------------------------------------------------
+
+/** Options for a standalone sequence; any omitted field uses Postgres' default (start/min 1, increment 1, …). */
+export interface PgSequenceOptions {
+  start?: number | string;
+  increment?: number | string;
+  min?: number | string;
+  max?: number | string;
+  cache?: number | string;
+  cycle?: boolean;
+}
+
+const seqStr = (v: number | string | undefined): string | undefined =>
+  v === undefined ? undefined : String(v);
+
+/**
+ * A standalone Postgres sequence — `CREATE SEQUENCE <name> …`. Reference it from a column default with
+ * `s.bigint().$default(sqlExpr("nextval('order_no')"))`. (Auto-increment columns usually want
+ * `s.serial()` / `.$identity()` instead — this is for a SHARED or custom-stepped sequence.)
+ */
+export class PgSequenceDef {
+  readonly kind = "sequence" as const;
+  readonly start?: string;
+  readonly increment?: string;
+  readonly min?: string;
+  readonly max?: string;
+  readonly cache?: string;
+  readonly cycle?: boolean;
+  constructor(
+    readonly name: string,
+    opts: PgSequenceOptions = {},
+  ) {
+    this.start = seqStr(opts.start);
+    this.increment = seqStr(opts.increment);
+    this.min = seqStr(opts.min);
+    this.max = seqStr(opts.max);
+    this.cache = seqStr(opts.cache);
+    if (opts.cycle !== undefined) this.cycle = opts.cycle;
+  }
+}
+
+/** Declare a pg sequence: `export const orderNo = defineSequence("order_no", { start: 1000 })`. */
+export function defineSequence(
+  name: string,
+  opts?: PgSequenceOptions,
+): PgSequenceDef {
+  return new PgSequenceDef(name, opts);
+}
+
+// --- defineDomain: a pg DOMAIN (a reusable constrained type) ------------------------------------
+
+const pgTypeRefToSql = (ref: PgTypeRef): string =>
+  ref.params && ref.params.length > 0
+    ? `${ref.type}(${ref.params.join(", ")})`
+    : ref.type;
+
+/** Options for a domain: a `DEFAULT`, a `NOT NULL`, and/or a `CHECK (expr)` (expr uses `VALUE`). */
+export interface PgDomainOptions {
+  notNull?: boolean;
+  default?: string | number | boolean | null | SqlExpr;
+  check?: string | SqlExpr;
+}
+
+/**
+ * A Postgres domain — `CREATE DOMAIN <name> AS <base> [DEFAULT …] [NOT NULL] [CHECK (…)]`: a reusable,
+ * named constrained type. `base` is an `s.*` field (its column type becomes the domain's base type).
+ * `.column()` makes a field of this domain (App type = the base field's). The CHECK/DEFAULT are
+ * emit-faithful but, like table column checks/defaults, excluded from drift-detection (pg rewrites the
+ * expression on read) — the domain's presence + base type + NOT NULL round-trip.
+ */
+export class PgDomainDef<S extends z.ZodType = z.ZodType> {
+  readonly kind = "domain" as const;
+  readonly baseType: string;
+  readonly notNull?: boolean;
+  readonly default?: string;
+  readonly check?: string;
+  constructor(
+    readonly name: string,
+    private readonly base: PgField<S>,
+    opts: PgDomainOptions = {},
+  ) {
+    const ref = base.native.pg;
+    this.baseType = ref ? pgTypeRefToSql(ref) : "text";
+    if (opts.notNull !== undefined) this.notNull = opts.notNull;
+    if (opts.default !== undefined)
+      this.default = toExpr(opts.default as never);
+    if (opts.check !== undefined)
+      this.check = isSqlExpr(opts.check) ? opts.check.__sql : opts.check;
+  }
+
+  /** A column typed as this domain (App type = the base field's; stored as the domain). */
+  column(): PgField<S> {
+    return new PgField<S>(this.base.schema, { pg: { type: this.name } });
+  }
+}
+
+/** Declare a pg domain: `export const email = defineDomain("email", s.text(), { check: "VALUE ~ '@'" })`; use `email.column()`. */
+export function defineDomain<S extends z.ZodType>(
+  name: string,
+  base: PgField<S>,
+  opts?: PgDomainOptions,
+): PgDomainDef<S> {
+  return new PgDomainDef(name, base, opts);
+}
+
+// --- defineExtension: a pg EXTENSION (CREATE EXTENSION IF NOT EXISTS) ----------------------------
+
+/** Options for an extension install: a target `schema` and/or a pinned `version`. */
+export interface PgExtensionOptions {
+  schema?: string;
+  version?: string;
+}
+
+/**
+ * A Postgres extension — `CREATE EXTENSION IF NOT EXISTS <name> [SCHEMA …] [VERSION …]`. Enables types
+ * /functions like `citext`, `postgis`, `pgcrypto`, `uuid-ossp`, `vector`. NOTE: the embedded PGlite
+ * engine only bundles a small set of extensions, so most can't be applied locally — emit + introspect
+ * are supported, but a round-trip against PGlite is limited to its available extensions.
+ */
+export class PgExtensionDef {
+  readonly kind = "extension" as const;
+  readonly schema?: string;
+  readonly version?: string;
+  constructor(
+    readonly name: string,
+    opts: PgExtensionOptions = {},
+  ) {
+    if (opts.schema !== undefined) this.schema = opts.schema;
+    if (opts.version !== undefined) this.version = opts.version;
+  }
+}
+
+/** Declare a pg extension: `export const citext = defineExtension("citext")`. */
+export function defineExtension(
+  name: string,
+  opts?: PgExtensionOptions,
+): PgExtensionDef {
+  return new PgExtensionDef(name, opts);
+}
+
 // --- App/Wire type inference (DX) --------------------------------------------------------------
 
 /** The decoded (App-land) row type of a table — `z.output` of each field's schema. */

@@ -274,3 +274,97 @@ export const createViewDdl = (name: string, sql: string) =>
 /** `DROP VIEW IF EXISTS "name";`. */
 export const dropViewSql = (name: string) =>
   `DROP VIEW IF EXISTS ${escId(name)};`;
+
+// --- materialized view (CREATE MATERIALIZED VIEW … AS <select>) ---------------------------------
+
+/** `CREATE MATERIALIZED VIEW "name" AS <sql>;` — `sql` is the SELECT body, spliced verbatim. */
+export const createMatViewDdl = (name: string, sql: string) =>
+  `CREATE MATERIALIZED VIEW ${escId(name)} AS ${sql.trim().replace(/;\s*$/, "")};`;
+/** `DROP MATERIALIZED VIEW IF EXISTS "name";`. */
+export const dropMatViewSql = (name: string) =>
+  `DROP MATERIALIZED VIEW IF EXISTS ${escId(name)};`;
+
+// --- sequence (CREATE SEQUENCE) -----------------------------------------------------------------
+
+/** The explicit attributes of a standalone sequence (any omitted -> pg's default; see {@link seqDefaults}). */
+export interface PgSequenceAttrs {
+  start?: string;
+  increment?: string;
+  min?: string;
+  max?: string;
+  cache?: string;
+  cycle?: boolean;
+}
+
+/** Postgres' effective defaults for an ascending `bigint` sequence — what introspect reports for `CREATE SEQUENCE s;`. */
+export const seqDefaults = {
+  start: "1",
+  increment: "1",
+  min: "1",
+  max: "9223372036854775807",
+  cache: "1",
+  cycle: false,
+} as const;
+
+/**
+ * `CREATE SEQUENCE "name" [INCREMENT BY n] [MINVALUE m] [MAXVALUE x] [START WITH s] [CACHE c] [CYCLE];`.
+ * Only the attributes the author SET are emitted (pg fills the rest); clause order follows pg's grammar.
+ */
+export const createSequenceDdl = (name: string, a: PgSequenceAttrs): string => {
+  const parts = [`CREATE SEQUENCE ${escId(name)}`];
+  if (a.increment !== undefined) parts.push(`INCREMENT BY ${a.increment}`);
+  if (a.min !== undefined) parts.push(`MINVALUE ${a.min}`);
+  if (a.max !== undefined) parts.push(`MAXVALUE ${a.max}`);
+  if (a.start !== undefined) parts.push(`START WITH ${a.start}`);
+  if (a.cache !== undefined) parts.push(`CACHE ${a.cache}`);
+  if (a.cycle) parts.push("CYCLE");
+  return `${parts.join(" ")};`;
+};
+/** `DROP SEQUENCE IF EXISTS "name";`. */
+export const dropSequenceSql = (name: string) =>
+  `DROP SEQUENCE IF EXISTS ${escId(name)};`;
+
+// --- domain (CREATE DOMAIN) ---------------------------------------------------------------------
+
+/** A domain's emit-relevant shape: its base type + the optional NOT NULL / DEFAULT / CHECK clauses. */
+export interface PgDomainAttrs {
+  baseType: string;
+  notNull?: boolean;
+  default?: string;
+  check?: string;
+}
+
+/** `CREATE DOMAIN "name" AS <base> [DEFAULT d] [NOT NULL] [CHECK (expr)];` (pg's clause order). */
+export const createDomainDdl = (name: string, a: PgDomainAttrs): string => {
+  const parts = [`CREATE DOMAIN ${escId(name)} AS ${a.baseType}`];
+  if (a.default !== undefined) parts.push(`DEFAULT ${a.default}`);
+  if (a.notNull) parts.push("NOT NULL");
+  if (a.check !== undefined) parts.push(`CHECK (${a.check})`);
+  return `${parts.join(" ")};`;
+};
+/** `DROP DOMAIN IF EXISTS "name";`. */
+export const dropDomainSql = (name: string) =>
+  `DROP DOMAIN IF EXISTS ${escId(name)};`;
+
+// --- extension (CREATE EXTENSION) ---------------------------------------------------------------
+
+/** Optional `SCHEMA`/`VERSION` modifiers for a `CREATE EXTENSION`. */
+export interface PgExtensionAttrs {
+  schema?: string;
+  version?: string;
+}
+
+/** `CREATE EXTENSION IF NOT EXISTS "name" [SCHEMA "s"] [VERSION 'v'];`. */
+export const createExtensionDdl = (
+  name: string,
+  a: PgExtensionAttrs,
+): string => {
+  const parts = [`CREATE EXTENSION IF NOT EXISTS ${escId(name)}`];
+  if (a.schema !== undefined) parts.push(`SCHEMA ${escId(a.schema)}`);
+  if (a.version !== undefined)
+    parts.push(`VERSION '${a.version.replace(/'/g, "''")}'`);
+  return `${parts.join(" ")};`;
+};
+/** `DROP EXTENSION IF EXISTS "name";`. */
+export const dropExtensionSql = (name: string) =>
+  `DROP EXTENSION IF EXISTS ${escId(name)};`;

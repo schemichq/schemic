@@ -42,9 +42,26 @@ import {
   nullable,
   registerDriver,
 } from "@schemic/core/driver";
-import type { PgEnumDef, PgTableDef, PgViewDef } from "./authoring";
+import type {
+  PgDomainDef,
+  PgEnumDef,
+  PgExtensionDef,
+  PgMatViewDef,
+  PgSequenceDef,
+  PgTableDef,
+  PgViewDef,
+} from "./authoring";
 import { escId, type PgIndexInfo, type PgTable } from "./emit";
-import { enumPortable, registry, splitTables, viewPortable } from "./kinds";
+import {
+  domainPortable,
+  enumPortable,
+  extensionPortable,
+  matViewPortable,
+  registry,
+  sequencePortable,
+  splitTables,
+  viewPortable,
+} from "./kinds";
 import { pgLower } from "./lower";
 
 // The pg-native authoring surface (`s.*`, defineTable, PgField, $postgres escape hatch, …).
@@ -79,6 +96,7 @@ interface ColRow {
   column_name: string;
   data_type: string;
   udt_name: string;
+  domain_name: string | null;
   is_nullable: string;
   is_identity: string;
   identity_generation: string | null;
@@ -128,6 +146,9 @@ const DATATYPE_TO_NATIVE: Record<string, string> = {
 
 /** A column row -> portable type, INVERSE of lower's token->portable (canonical -> scalar, else native+params). */
 function introspectType(c: ColRow): PortableType {
+  // A column typed as a DOMAIN: information_schema reports the base type in data_type/udt_name but the
+  // domain in domain_name — surface the domain (matches how `domain.column()` lowers: native <domain>).
+  if (c.domain_name) return nativeT(c.domain_name);
   const dt = c.data_type;
   if (dt === "ARRAY") {
     // udt_name is the element type prefixed with `_` (e.g. `_int4`, `_text`).
@@ -187,7 +208,7 @@ async function pgIntrospect(
   const { rows: cols } = await conn.query<ColRow>(
     // BASE TABLE only — exclude views (their columns also live in information_schema.columns); views
     // are introspected separately as the `view` kind (pgIntrospectViews).
-    `SELECT c.table_name, c.column_name, c.data_type, c.udt_name, c.is_nullable,
+    `SELECT c.table_name, c.column_name, c.data_type, c.udt_name, c.domain_name, c.is_nullable,
             c.is_identity, c.identity_generation,
             c.character_maximum_length, c.numeric_precision, c.numeric_scale
        FROM information_schema.columns c
@@ -359,6 +380,130 @@ async function pgIntrospectViews(
   return rows
     .filter((r) => !exclude.has(r.name))
     .map((r) => viewPortable(r.name, (r.definition ?? "").trim()));
+}
+
+/** Read materialized views (pg_matviews) -> `matview` kind objects (definition is pg's rewritten form). */
+async function pgIntrospectMatViews(
+  conn: PgConn,
+  exclude: Set<string> = new Set(),
+): Promise<PortableObject[]> {
+  const { rows } = await conn.query<{ name: string; definition: string }>(
+    `SELECT matviewname AS name, definition
+       FROM pg_matviews WHERE schemaname = 'public' ORDER BY matviewname`,
+  );
+  return rows
+    .filter((r) => !exclude.has(r.name))
+    .map((r) => matViewPortable(r.name, (r.definition ?? "").trim()));
+}
+
+/**
+ * Read STANDALONE sequences (pg_sequences) -> `sequence` kind objects; values read as text (bigint-safe).
+ * Excludes sequences OWNED BY a column — the implicit ones an `IDENTITY` / `serial` column auto-creates
+ * (pg_depend deptype 'i'/'a') — which are table substrate, not standalone objects, so reading them back
+ * would phantom-ADD a sequence next to every auto-increment column.
+ */
+async function pgIntrospectSequences(
+  conn: PgConn,
+  exclude: Set<string> = new Set(),
+): Promise<PortableObject[]> {
+  const { rows } = await conn.query<{
+    name: string;
+    start: string;
+    min: string;
+    max: string;
+    increment: string;
+    cache: string;
+    cycle: boolean;
+  }>(
+    `SELECT s.sequencename AS name, s.start_value::text AS start, s.min_value::text AS min,
+            s.max_value::text AS max, s.increment_by::text AS increment,
+            s.cache_size::text AS cache, s.cycle
+       FROM pg_sequences s
+       JOIN pg_class c ON c.relname = s.sequencename
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+            AND n.nspname = s.schemaname AND n.nspname = 'public'
+      WHERE c.relkind = 'S'
+        AND NOT EXISTS (
+          SELECT 1 FROM pg_depend d
+           WHERE d.objid = c.oid AND d.deptype IN ('a', 'i') AND d.refobjsubid > 0)
+      ORDER BY s.sequencename`,
+  );
+  return rows
+    .filter((r) => !exclude.has(r.name))
+    .map((r) =>
+      sequencePortable(r.name, {
+        start: r.start,
+        min: r.min,
+        max: r.max,
+        increment: r.increment,
+        cache: r.cache,
+        cycle: r.cycle,
+      }),
+    );
+}
+
+/** Read domains (information_schema.domains + pg_type.typnotnull) -> `domain` kind objects. */
+async function pgIntrospectDomains(
+  conn: PgConn,
+  exclude: Set<string> = new Set(),
+): Promise<PortableObject[]> {
+  const { rows } = await conn.query<{
+    name: string;
+    data_type: string;
+    char_len: number | null;
+    num_precision: number | null;
+    num_scale: number | null;
+    not_null: boolean;
+  }>(
+    `SELECT t.typname AS name,
+            d.data_type,
+            d.character_maximum_length AS char_len,
+            d.numeric_precision AS num_precision,
+            d.numeric_scale AS num_scale,
+            t.typnotnull AS not_null
+       FROM information_schema.domains d
+       JOIN pg_type t ON t.typname = d.domain_name
+       JOIN pg_namespace n ON n.oid = t.typnamespace AND n.nspname = 'public'
+      WHERE d.domain_schema = 'public'
+      ORDER BY t.typname`,
+  );
+  return rows
+    .filter((r) => !exclude.has(r.name))
+    .map((r) =>
+      domainPortable(r.name, {
+        baseType: introspectedDomainBaseType(r),
+        ...(r.not_null ? { notNull: true } : {}),
+      }),
+    );
+}
+
+/** Reconstruct a domain's base type SQL from information_schema (length / precision-scale preserved). */
+function introspectedDomainBaseType(r: {
+  data_type: string;
+  char_len: number | null;
+  num_precision: number | null;
+  num_scale: number | null;
+}): string {
+  if (r.char_len != null) return `${r.data_type}(${r.char_len})`;
+  if (r.data_type === "numeric" && r.num_precision != null)
+    return `numeric(${r.num_precision}, ${r.num_scale ?? 0})`;
+  return r.data_type;
+}
+
+/**
+ * Read installed extensions (pg_extension) -> `extension` kind objects. `plpgsql` is excluded: it's a
+ * system default present in every database, so tracking it would phantom-diff every schema.
+ */
+async function pgIntrospectExtensions(
+  conn: PgConn,
+  exclude: Set<string> = new Set(),
+): Promise<PortableObject[]> {
+  const { rows } = await conn.query<{ name: string }>(
+    `SELECT extname AS name FROM pg_extension WHERE extname <> 'plpgsql' ORDER BY extname`,
+  );
+  return rows
+    .filter((r) => !exclude.has(r.name))
+    .map((r) => extensionPortable(r.name));
 }
 
 // --- connection (PGlite, embedded) --------------------------------------------------------------
@@ -609,30 +754,52 @@ export const postgresDriver: Driver<PgConn> = {
   // lowerSchema(registry, explode(...)).
   explode: (tables, defs): Definable[] => {
     const standalone = defs as unknown as Array<{ kind?: string }>;
+    const of = <T>(kind: string) =>
+      standalone.filter((d) => d?.kind === kind) as unknown as T[];
     return [
       ...splitTables(pgLower(tables as unknown as PgTableDef[])),
-      ...standalone
-        .filter((d) => d?.kind === "enum")
-        .map((d) => {
-          const e = d as unknown as PgEnumDef;
-          return enumPortable(e.name, e.values);
+      ...of<PgExtensionDef>("extension").map((e) =>
+        extensionPortable(e.name, {
+          ...(e.schema !== undefined ? { schema: e.schema } : {}),
+          ...(e.version !== undefined ? { version: e.version } : {}),
         }),
-      ...standalone
-        .filter((d) => d?.kind === "view")
-        .map((d) => {
-          const v = d as unknown as PgViewDef;
-          return viewPortable(v.name, v.sql);
+      ),
+      ...of<PgEnumDef>("enum").map((e) => enumPortable(e.name, e.values)),
+      ...of<PgDomainDef>("domain").map((d) =>
+        domainPortable(d.name, {
+          baseType: d.baseType,
+          ...(d.notNull !== undefined ? { notNull: d.notNull } : {}),
+          ...(d.default !== undefined ? { default: d.default } : {}),
+          ...(d.check !== undefined ? { check: d.check } : {}),
         }),
+      ),
+      ...of<PgSequenceDef>("sequence").map((s) =>
+        sequencePortable(s.name, {
+          ...(s.start !== undefined ? { start: s.start } : {}),
+          ...(s.increment !== undefined ? { increment: s.increment } : {}),
+          ...(s.min !== undefined ? { min: s.min } : {}),
+          ...(s.max !== undefined ? { max: s.max } : {}),
+          ...(s.cache !== undefined ? { cache: s.cache } : {}),
+          ...(s.cycle !== undefined ? { cycle: s.cycle } : {}),
+        }),
+      ),
+      ...of<PgViewDef>("view").map((v) => viewPortable(v.name, v.sql)),
+      ...of<PgMatViewDef>("matview").map((v) => matViewPortable(v.name, v.sql)),
     ];
   },
 
   // One pg_catalog/information_schema read -> ALL kind objects, canonicalized identically to lowering
-  // (a clean apply round-trips to a zero diff) and complete (enum + table + index + FK + view) so no
-  // phantom (view bodies are name-only in `canonical` — see the view kind).
+  // (a clean apply round-trips to a zero diff) and complete (extension + enum + domain + sequence +
+  // table + index + FK + view + matview) so no phantom (view/matview bodies are name-only in
+  // `canonical` — see those kinds; plpgsql is excluded as a system default).
   introspectAll: async (conn, exclude) => [
+    ...(await pgIntrospectExtensions(conn, exclude)),
     ...(await pgIntrospectEnums(conn, exclude)),
+    ...(await pgIntrospectDomains(conn, exclude)),
+    ...(await pgIntrospectSequences(conn, exclude)),
     ...splitTables(await pgIntrospect(conn, exclude)),
     ...(await pgIntrospectViews(conn, exclude)),
+    ...(await pgIntrospectMatViews(conn, exclude)),
   ],
 
   /**

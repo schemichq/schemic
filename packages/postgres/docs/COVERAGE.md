@@ -40,11 +40,11 @@ round-trip (author `s.*` → lower → emit → introspect → diff = 0) · `[n/
 | `index` | [x] | [x] | [x] | [x] | registered; `deps`→table (no `owner`, rank-grouped); emits `CREATE [UNIQUE] INDEX`; change = drop+recreate. **Plain btree indexes — UNIQUE and NON-unique — introspect (pg_index, excl. PK / partial / expression / non-btree) → full round-trip, no phantom** (real index add/drop diffs). Partial / expression / method indexes (gin/gist/brin/hash) still not emitted or read |
 | `constraint` (FK; PK/UNIQUE/CHECK/EXCLUDE TBD) | [x] | [x] | [x] | [~] | FK registered; `deps`→[table, refTable] breaks mutual-FK cycles; change = drop+recreate; FK + actions introspect (canonicalized UPPERCASE, no phantom); PK is table substrate; UNIQUE rides `index`; CHECK/EXCLUDE TBD |
 | `view` | [x] | [x] | [~] | [~] | `defineView(name, sql)` standalone def; registered LAST (emits after the tables it reads); emit `CREATE VIEW … AS <sql>`, introspect pg_views, drop. PRESENCE round-trips (add/drop diff); the BODY is excluded from change-detection (`canonical` = name-only) because pg rewrites view definitions (expands `SELECT *`, strips qualifiers, reformats) — so a body EDIT isn't auto-diffed yet (drop+recreate / re-gen; future: shadow-normalize) |
-| `materialized_view` | [ ] | [ ] | [ ] | [ ] | not implemented (same standalone-def path as `view`) |
-| `sequence` (standalone) | [ ] | [ ] | [ ] | [ ] | identity-backed sequences are implicit today; standalone `CREATE SEQUENCE` not impl |
-| `enum` (`CREATE TYPE … AS ENUM`) | [x] | [x] | [x] | [x] | registered (ordinal 0, emits before tables); `defineEnum(name, values)` standalone def, `.column()` references it; emit `CREATE TYPE`, introspect pg_type/pg_enum, full round-trip; `overwrite` = `ALTER TYPE ADD VALUE` for appended labels, drop+recreate (coarse) otherwise |
-| `domain` / composite `type` (`CREATE TYPE`/`CREATE DOMAIN`) | [ ] | [ ] | [ ] | [ ] | not impl (same standalone-def path as `enum` when added) |
-| `extension` | [ ] | [ ] | [ ] | [ ] | needed for citext/postgis/pgvector; not impl |
+| `matview` (materialized view) | [x] | [x] | [~] | [~] | `defineMaterializedView(name, sql)` standalone def; registered LAST (after `view`); emit `CREATE MATERIALIZED VIEW … AS <sql>`, introspect pg_matviews, drop. PRESENCE round-trips; BODY excluded from change-detection (`canonical` = name-only, same as `view` — pg rewrites the stored definition); a body edit isn't auto-diffed (drop+recreate / re-gen) |
+| `sequence` (standalone) | [x] | [x] | [x] | [x] | `defineSequence(name, opts?)` standalone def (start/increment/min/max/cache/cycle); emit only the SET attributes, `canonical` fills pg defaults so authoring-without-opts matches introspect; introspect pg_sequences EXCLUDING identity/serial-OWNED sequences (pg_depend) so auto-increment columns don't phantom-add; values read as text (bigint-safe); a real attribute change drop+recreates |
+| `enum` (`CREATE TYPE … AS ENUM`) | [x] | [x] | [x] | [x] | registered before tables; `defineEnum(name, values)` standalone def, `.column()` references it; emit `CREATE TYPE`, introspect pg_type/pg_enum, full round-trip; `overwrite` = `ALTER TYPE ADD VALUE` for appended labels, drop+recreate (coarse) otherwise |
+| `domain` (`CREATE DOMAIN`) | [x] | [x] | [x] | [~] | `defineDomain(name, base, opts?)` standalone def (NOT NULL / DEFAULT / CHECK), `.column()` types a column as it; emit `CREATE DOMAIN … AS <base> …`, introspect information_schema.domains + pg_type.typnotnull; a domain-typed column round-trips (introspect surfaces `domain_name`). `canonical` = name + normalized base type + NOT NULL; DEFAULT/CHECK emit-faithful but excluded (pg rewrites the expr) — a default/check edit isn't auto-diffed |
+| `extension` | [x] | [x] | [~] | [x] | `defineExtension(name, opts?)` standalone def (SCHEMA/VERSION); registered FIRST; emit `CREATE EXTENSION IF NOT EXISTS`, introspect pg_extension EXCLUDING the `plpgsql` system default, drop; `canonical` = name-only. NOTE: the embedded PGlite engine bundles only a small set of extensions (citext/postgis/pgvector aren't available), so a CREATE can't be APPLIED locally — emit + introspect are supported but a live round-trip is limited to PGlite's available extensions |
 | `function` | [ ] | [ ] | [ ] | [ ] | opaque kind (no `overwrite`/`deps`); trivial once structured path proven; not impl |
 | `procedure` | [ ] | [ ] | [ ] | [ ] | opaque kind; not impl |
 | `trigger` | [ ] | [ ] | [ ] | [ ] | own kind, `deps`→table + any function it calls; not impl |
@@ -113,9 +113,10 @@ round-trip (author `s.*` → lower → emit → introspect → diff = 0) · `[n/
 > diff yet. A future pass can canonicalize via the shadow engine (apply both sides, compare introspect).
 
 ### Higher-level objects
-- [ ] native `ENUM` / `DOMAIN` (`CREATE TYPE`), `EXTENSION` (PostGIS/citext/pgvector) — the IR now has a
-  generic `PortableDb.natives[]` slot for these; emission/introspection is a follow-up
-- [ ] `VIEW` / materialized view, `FUNCTION` / `PROCEDURE`, `TRIGGER`, `SEQUENCE` (standalone), RLS policies
+- [x] native `ENUM` (`defineEnum`), `DOMAIN` (`defineDomain`), `EXTENSION` (`defineExtension`) — standalone
+  defs through the driver's `explode`/`introspectAll`; see the kind table above for round-trip status
+- [x] `VIEW` (`defineView`), materialized view (`defineMaterializedView`), standalone `SEQUENCE` (`defineSequence`)
+- [ ] `FUNCTION` / `PROCEDURE`, `TRIGGER`, RLS policies, `SCHEMA` (multi) — next via the same standalone-def path
 - [n/a] Surreal-only constructs (events, access, db functions, relations, changefeed, permissions) — dropped, no DDL
 
 ### Migration / diff
