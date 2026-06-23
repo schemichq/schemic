@@ -15,7 +15,7 @@ Legend: ✅ done · 🚧 in progress · 🟡 partial · ⏳ not started
   inference, `projectionSchema`/`decodeProjection`.
 - ✅ **M0.2** `callable` capability on the `Driver` contract + `callFunction` (invoke + decode).
 - 🚧 **M0.3** package-split: side-effect-free authoring index + `/driver` + `/connection` subpaths,
-  loader prefers `/driver`. Both drivers split ✅; **⏳ remove the loader fallback after it ships in a
+  loader prefers `/driver`. Both drivers split + SHIPPED (alpha.21) ✅; **⏳ remove the loader fallback (now unblocked — published drivers have `/driver`) to
   release** (then M0.3 is closed).
 
 **Drivers (M1–M5)**
