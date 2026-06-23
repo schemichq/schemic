@@ -11,6 +11,10 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 
 ## [Unreleased]
 
+### Changed
+- **surrealdb:** `pull` renders analyzer filters via the typed `.filters(f => [...])` builder callback
+  instead of string literals (round-trips identically).
+
 ### Fixed
 - **surrealdb:** `defineAnalyzer().filters()` no longer dedupes — duplicate filters pass through verbatim
   (follow-up to the alpha.19 tokenizers fix; drops the now-unused `uniqueClause` helper).
