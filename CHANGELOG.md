@@ -11,6 +11,8 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 
 ## [Unreleased]
 
+## [0.1.0-alpha.21] - 2026-06-23
+
 ### Added
 - **surrealdb:** `defineFunction(args).returns(R).call(db, args)` — the (B) DB-functions-as-code call
   site over core's `callFunction`: args encoded via the param schemas, result decoded through `.returns(R)`

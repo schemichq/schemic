@@ -1,6 +1,6 @@
 {
   "name": "@schemic/core",
-  "version": "0.1.0-alpha.20",
+  "version": "0.1.0-alpha.21",
   "description": "The dialect-neutral engine for Schemic — Driver contract, portable schema IR, and the migration/diff/snapshot engine.",
   "license": "MIT",
   "author": "Vertio Solutions",
