@@ -15,6 +15,10 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 - **cli:** the driver loader now **requires** the `@schemic/<driver>/driver` entry (dropped the index
   fallback) — completes the M0.3 package split. Drivers must be >= 0.1.0-alpha.21.
 
+### Fixed
+- **cli:** `schemic gen` now shows the rendered migration **before** the title prompt (you review the
+  actual DDL while naming it), instead of after writing.
+
 ## [0.1.0-alpha.21] - 2026-06-23
 
 ### Added
