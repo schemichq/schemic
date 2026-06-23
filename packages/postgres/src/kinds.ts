@@ -43,7 +43,9 @@ import {
   createDomainDdl,
   createEnumDdl,
   createExtensionDdl,
+  createFunctionDdl,
   createMatViewDdl,
+  createPolicyDdl,
   createSequenceDdl,
   createTableDdl,
   createViewDdl,
@@ -51,16 +53,22 @@ import {
   dropEnumSql,
   dropExtensionSql,
   dropFkSql,
+  dropFunctionSql,
   dropMatViewSql,
+  dropPolicySql,
   dropSequenceSql,
   dropTableSql,
+  dropTriggerSql,
   dropViewSql,
+  enableRlsSql,
   escId,
   fieldColumnDdl,
   fkActions,
   fkName,
   normAction,
   type PgDomainAttrs,
+  type PgFunctionAttrs,
+  type PgPolicyAttrs,
   type PgSequenceAttrs,
   type PgTable,
   pgColumn,
@@ -501,6 +509,70 @@ const extensionEngine: KindEngine<PgExtensionPortable, PgExtensionPortable> = {
   canonical: (e) => `extension:${e.name}`,
 };
 
+// --- function kind (CREATE FUNCTION) ------------------------------------------------------------
+
+/** The `function` kind's portable form: name + signature + language + body (+ optional flags). */
+export interface PgFunctionPortable extends PortableObject, PgFunctionAttrs {
+  kind: "function";
+  name: string;
+}
+
+const functionEngine: KindEngine<PgFunctionPortable, PgFunctionPortable> = {
+  lower: (f) => f,
+  emit: (f) => [createFunctionDdl(f.name, f)],
+  remove: (f) => [dropFunctionSql(f.name, f.args)],
+  // Name-only change-detection: pg may re-spell a function's signature/body on read (arg-type aliases,
+  // body whitespace), so presence is the reliable round-trip unit; a body/signature edit isn't
+  // auto-diffed (re-gen / OR REPLACE). Overloads (same name, different args) are NOT distinguished —
+  // use distinct names. Registered after tables (a sql-language body may reference them).
+  canonical: (f) => `function:${f.name}`,
+};
+
+// --- trigger kind (CREATE TRIGGER) --------------------------------------------------------------
+
+/** The `trigger` kind's portable form: name + table + the function it calls + the full `def` statement. */
+export interface PgTriggerPortable extends PortableObject {
+  kind: "trigger";
+  name: string;
+  table: string;
+  fn: string;
+  /** The full `CREATE TRIGGER …` statement (no trailing `;`) — authored-built or introspected. */
+  def: string;
+}
+
+const functionRef = (name: string): Ref => ({ kind: "function", name });
+
+const triggerEngine: KindEngine<PgTriggerPortable, PgTriggerPortable> = {
+  lower: (t) => t,
+  emit: (t) => [`${t.def};`],
+  remove: (t) => [dropTriggerSql(t.name, t.table)],
+  // Name+table change-detection: pg normalizes a trigger's stored definition, so the def can't byte-
+  // match; presence (per table) is the round-trip unit; a definition edit isn't auto-diffed (re-gen).
+  canonical: (t) => `trigger:${t.table}:${t.name}`,
+  // A trigger emits AFTER its table and the function it calls.
+  deps: (t) => [tableRef(t.table), functionRef(t.fn)],
+};
+
+// --- policy kind (CREATE POLICY, row-level security) --------------------------------------------
+
+/** The `policy` kind's portable form (RLS): name + table + command/roles/using/withCheck/permissive. */
+export interface PgPolicyPortable extends PortableObject, PgPolicyAttrs {
+  kind: "policy";
+  name: string;
+}
+
+const policyEngine: KindEngine<PgPolicyPortable, PgPolicyPortable> = {
+  lower: (p) => p,
+  // Enable RLS on the table first (idempotent), then create the policy.
+  emit: (p) => [enableRlsSql(p.table), createPolicyDdl(p.name, p)],
+  remove: (p) => [dropPolicySql(p.name, p.table)],
+  // Name+table change-detection: USING/WITH CHECK expressions are rewritten by pg on read, so a policy
+  // is tracked by presence; an expression edit isn't auto-diffed (drop+recreate / re-gen).
+  canonical: (p) => `policy:${p.table}:${p.name}`,
+  // A policy emits AFTER its table.
+  deps: (p) => [tableRef(p.table)],
+};
+
 // --- the registry -------------------------------------------------------------------------------
 
 export const registry = new KindRegistry();
@@ -546,7 +618,13 @@ registry.define({
   build: (c: PgConstraintPortable) => c,
   ...constraintEngine,
 });
-// view then matview LAST (highest ordinals): they read tables/enums, so they emit after them.
+// function after the tables (a sql-language body may reference them); before triggers that call it.
+registry.define({
+  name: "function",
+  build: (f: PgFunctionPortable) => f,
+  ...functionEngine,
+});
+// view then matview: they read tables/enums, so they emit after them.
 registry.define({
   name: "view",
   build: (v: PgViewPortable) => v,
@@ -556,6 +634,17 @@ registry.define({
   name: "matview",
   build: (v: PgMatViewPortable) => v,
   ...matViewEngine,
+});
+// trigger + policy LAST: a trigger deps -> [table, function]; a policy deps -> table.
+registry.define({
+  name: "trigger",
+  build: (t: PgTriggerPortable) => t,
+  ...triggerEngine,
+});
+registry.define({
+  name: "policy",
+  build: (p: PgPolicyPortable) => p,
+  ...policyEngine,
 });
 
 // --- splitTable: the driver's table IR -> the registry's kind objects ----------------------------
@@ -656,3 +745,23 @@ export const extensionPortable = (
   name: string,
   attrs: { schema?: string; version?: string } = {},
 ): PgExtensionPortable => ({ kind: "extension", name, ...attrs });
+
+/** A function (authoring `PgFunctionDef` or introspected) -> its `function` kind object. */
+export const functionPortable = (
+  name: string,
+  attrs: PgFunctionAttrs,
+): PgFunctionPortable => ({ kind: "function", name, ...attrs });
+
+/** A trigger (authoring `PgTriggerDef` or introspected) -> its `trigger` kind object. */
+export const triggerPortable = (
+  name: string,
+  table: string,
+  fn: string,
+  def: string,
+): PgTriggerPortable => ({ kind: "trigger", name, table, fn, def });
+
+/** A policy (authoring `PgPolicyDef` or introspected) -> its `policy` kind object. */
+export const policyPortable = (
+  name: string,
+  attrs: PgPolicyAttrs,
+): PgPolicyPortable => ({ kind: "policy", name, ...attrs });

@@ -45,12 +45,12 @@ round-trip (author `s.*` → lower → emit → introspect → diff = 0) · `[n/
 | `enum` (`CREATE TYPE … AS ENUM`) | [x] | [x] | [x] | [x] | registered before tables; `defineEnum(name, values)` standalone def, `.column()` references it; emit `CREATE TYPE`, introspect pg_type/pg_enum, full round-trip; `overwrite` = `ALTER TYPE ADD VALUE` for appended labels, drop+recreate (coarse) otherwise |
 | `domain` (`CREATE DOMAIN`) | [x] | [x] | [x] | [~] | `defineDomain(name, base, opts?)` standalone def (NOT NULL / DEFAULT / CHECK), `.column()` types a column as it; emit `CREATE DOMAIN … AS <base> …`, introspect information_schema.domains + pg_type.typnotnull; a domain-typed column round-trips (introspect surfaces `domain_name`). `canonical` = name + normalized base type + NOT NULL; DEFAULT/CHECK emit-faithful but excluded (pg rewrites the expr) — a default/check edit isn't auto-diffed |
 | `extension` | [x] | [x] | [~] | [x] | `defineExtension(name, opts?)` standalone def (SCHEMA/VERSION); registered FIRST; emit `CREATE EXTENSION IF NOT EXISTS`, introspect pg_extension EXCLUDING the `plpgsql` system default, drop; `canonical` = name-only. NOTE: the embedded PGlite engine bundles only a small set of extensions (citext/postgis/pgvector aren't available), so a CREATE can't be APPLIED locally — emit + introspect are supported but a live round-trip is limited to PGlite's available extensions |
-| `function` | [ ] | [ ] | [ ] | [ ] | opaque kind (no `overwrite`/`deps`); trivial once structured path proven; not impl |
-| `procedure` | [ ] | [ ] | [ ] | [ ] | opaque kind; not impl |
-| `trigger` | [ ] | [ ] | [ ] | [ ] | own kind, `deps`→table + any function it calls; not impl |
+| `function` | [x] | [x] | [x] | [~] | `defineFunction(name, {args, returns, language, body, …})` standalone def; registered after tables (a sql body may read them); emit `CREATE [OR REPLACE] FUNCTION … AS $$body$$`, introspect pg_proc (sql/plpgsql, excl. extension-owned), drop with signature. `canonical` = name-only — overloads NOT distinguished (use distinct names); a body/signature edit isn't auto-diffed (re-gen / `replace: true`) |
+| `procedure` | [ ] | [ ] | [ ] | [ ] | not impl (same path as `function`; `CALL`-only, no RETURNS) |
+| `trigger` | [x] | [x] | [x] | [~] | `defineTrigger(name, {table, timing, events, function, …})` standalone def; `deps`→[table, function]; emit `CREATE TRIGGER …`, introspect pg_trigger via pg_get_triggerdef, drop. `canonical` = name+table (pg normalizes the stored def); a definition edit isn't auto-diffed (re-gen) |
 | `schema` | [ ] | [ ] | [ ] | [ ] | hardcoded `public` today; not impl |
 | `role`/`grant` | [ ] | [ ] | [ ] | [ ] | out of scope for now |
-| `policy` (RLS) | [ ] | [ ] | [ ] | [ ] | own kind, `deps`→table; not impl |
+| `policy` (RLS) | [x] | [x] | [x] | [~] | `definePolicy(name, {table, command, roles, using, withCheck, permissive})` standalone def; `deps`→table; emit `ALTER TABLE … ENABLE ROW LEVEL SECURITY` (idempotent) + `CREATE POLICY …`, introspect pg_policies, drop. `canonical` = name+table; USING / WITH CHECK exprs are rewritten by pg so excluded — an expr edit isn't auto-diffed (drop+recreate / re-gen) |
 
 \* `column` is substrate nested in `table`, listed for completeness — it is never registered as a kind.
 
@@ -116,7 +116,8 @@ round-trip (author `s.*` → lower → emit → introspect → diff = 0) · `[n/
 - [x] native `ENUM` (`defineEnum`), `DOMAIN` (`defineDomain`), `EXTENSION` (`defineExtension`) — standalone
   defs through the driver's `explode`/`introspectAll`; see the kind table above for round-trip status
 - [x] `VIEW` (`defineView`), materialized view (`defineMaterializedView`), standalone `SEQUENCE` (`defineSequence`)
-- [ ] `FUNCTION` / `PROCEDURE`, `TRIGGER`, RLS policies, `SCHEMA` (multi) — next via the same standalone-def path
+- [x] `FUNCTION` (`defineFunction`), `TRIGGER` (`defineTrigger`), RLS `POLICY` (`definePolicy`) — see the kind table for round-trip status
+- [ ] `PROCEDURE`, `SCHEMA` (multi), `ROLE`/`GRANT` — next via the same standalone-def path
 - [n/a] Surreal-only constructs (events, access, db functions, relations, changefeed, permissions) — dropped, no DDL
 
 ### Migration / diff

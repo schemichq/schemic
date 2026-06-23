@@ -7,15 +7,19 @@ import {
   scalar,
 } from "@schemic/core/driver";
 import type { PgTable } from "../src/emit";
+import { triggerDefSql } from "../src/emit";
 import { type PgConn, postgresDriver } from "../src/index";
 import {
   domainPortable,
   enumPortable,
   extensionPortable,
+  functionPortable,
   matViewPortable,
+  policyPortable,
   registry,
   sequencePortable,
   splitTables,
+  triggerPortable,
   viewPortable,
 } from "../src/kinds";
 
@@ -55,11 +59,15 @@ describe("postgres kind registry", () => {
       "table",
       "index",
       "constraint",
+      "function",
       "view",
       "matview",
+      "trigger",
+      "policy",
     ]);
     // Pre-table kinds (extension/enum/domain/sequence) FIRST — a table's columns/defaults can reference
-    // them; views/matviews LAST — they read tables, so emit after them (reverse on drop).
+    // them; function after tables (a sql body may read them); view/matview read tables; trigger/policy
+    // LAST (deps -> table [+ function]). Reverse order applies on drop.
     expect(registry.ordinal("extension")).toBe(0);
     expect(registry.ordinal("enum")).toBe(1);
     expect(registry.ordinal("domain")).toBe(2);
@@ -67,8 +75,11 @@ describe("postgres kind registry", () => {
     expect(registry.ordinal("table")).toBe(4);
     expect(registry.ordinal("index")).toBe(5);
     expect(registry.ordinal("constraint")).toBe(6);
-    expect(registry.ordinal("view")).toBe(7);
-    expect(registry.ordinal("matview")).toBe(8);
+    expect(registry.ordinal("function")).toBe(7);
+    expect(registry.ordinal("view")).toBe(8);
+    expect(registry.ordinal("matview")).toBe(9);
+    expect(registry.ordinal("trigger")).toBe(10);
+    expect(registry.ordinal("policy")).toBe(11);
   });
 });
 
@@ -666,6 +677,215 @@ describe("matview kind", () => {
       const live = await driver.introspectAll(conn);
       expect(
         live.some((o) => o.kind === "matview" && o.name === "mrt_stats"),
+      ).toBe(true);
+      const { up, down } = buildKindDiff(registry, live, objs);
+      expect({ up, down }).toEqual({ up: [], down: [] });
+    } finally {
+      await conn.close();
+    }
+  });
+});
+
+// --- function kind (CREATE FUNCTION) ------------------------------------------------------------
+
+describe("function kind", () => {
+  const addOne = functionPortable("add_one", {
+    args: "n integer",
+    returns: "integer",
+    language: "sql",
+    body: "SELECT n + 1",
+  });
+
+  test("emits CREATE FUNCTION with signature + body", () => {
+    expect(emitKinds(registry, [addOne])).toEqual([
+      'CREATE FUNCTION "add_one"(n integer) RETURNS integer LANGUAGE sql AS $$SELECT n + 1$$;',
+    ]);
+  });
+
+  test("a new function diffs as add / drop (drop carries the signature)", () => {
+    const { up, down } = buildKindDiff(registry, [], [addOne]);
+    expect(up).toEqual([
+      'CREATE FUNCTION "add_one"(n integer) RETURNS integer LANGUAGE sql AS $$SELECT n + 1$$;',
+    ]);
+    expect(down).toEqual(['DROP FUNCTION IF EXISTS "add_one"(n integer);']);
+  });
+
+  test("a body change is NOT a change (name-only canonical)", () => {
+    const { up, down } = buildKindDiff(
+      registry,
+      [addOne],
+      [
+        functionPortable("add_one", {
+          args: "n integer",
+          returns: "integer",
+          language: "sql",
+          body: "SELECT n + 2",
+        }),
+      ],
+    );
+    expect({ up, down }).toEqual({ up: [], down: [] });
+  });
+
+  test("sql + plpgsql functions round-trip through the engine", async () => {
+    const objs = [
+      functionPortable("frt_add", {
+        args: "n integer",
+        returns: "integer",
+        language: "sql",
+        body: "SELECT n + 1",
+      }),
+      functionPortable("frt_touch", {
+        args: "",
+        returns: "trigger",
+        language: "plpgsql",
+        body: " BEGIN RETURN NEW; END ",
+      }),
+    ];
+    const conn = (await driver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
+    try {
+      await driver.apply(conn, emitKinds(registry, objs));
+      const live = await driver.introspectAll(conn);
+      const { up, down } = buildKindDiff(registry, live, objs);
+      expect({ up, down }).toEqual({ up: [], down: [] });
+    } finally {
+      await conn.close();
+    }
+  });
+});
+
+// --- trigger kind (CREATE TRIGGER) --------------------------------------------------------------
+
+describe("trigger kind", () => {
+  const def = triggerDefSql("t_touch", {
+    table: "post",
+    timing: "before",
+    events: ["update"],
+    fn: "touch",
+  });
+  const trg = triggerPortable("t_touch", "post", "touch", def);
+
+  test("emits the full CREATE TRIGGER statement", () => {
+    expect(emitKinds(registry, [trg])).toEqual([
+      'CREATE TRIGGER "t_touch" BEFORE UPDATE ON "post" FOR EACH ROW EXECUTE FUNCTION "touch"();',
+    ]);
+  });
+
+  test("a new trigger diffs as add / drop", () => {
+    const { up, down } = buildKindDiff(registry, [], [trg]);
+    expect(up).toEqual([
+      'CREATE TRIGGER "t_touch" BEFORE UPDATE ON "post" FOR EACH ROW EXECUTE FUNCTION "touch"();',
+    ]);
+    expect(down).toEqual(['DROP TRIGGER IF EXISTS "t_touch" ON "post";']);
+  });
+
+  test("a definition change is NOT a change (name+table canonical)", () => {
+    const def2 = triggerDefSql("t_touch", {
+      table: "post",
+      timing: "after",
+      events: ["insert"],
+      fn: "touch",
+    });
+    const { up, down } = buildKindDiff(
+      registry,
+      [trg],
+      [triggerPortable("t_touch", "post", "touch", def2)],
+    );
+    expect({ up, down }).toEqual({ up: [], down: [] });
+  });
+
+  test("table + function + trigger round-trip (trigger emits last)", async () => {
+    const objs = [
+      ...splitTables([
+        tbl("trt_post", [
+          f("title", scalar("string")),
+          f("updated", option(scalar("datetime"))),
+        ]),
+      ]),
+      functionPortable("trt_touch", {
+        args: "",
+        returns: "trigger",
+        language: "plpgsql",
+        body: " BEGIN NEW.updated := now(); RETURN NEW; END ",
+      }),
+      triggerPortable(
+        "trt_set",
+        "trt_post",
+        "trt_touch",
+        triggerDefSql("trt_set", {
+          table: "trt_post",
+          timing: "before",
+          events: ["update"],
+          fn: "trt_touch",
+        }),
+      ),
+    ];
+    const conn = (await driver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
+    try {
+      await driver.apply(conn, emitKinds(registry, objs));
+      const live = await driver.introspectAll(conn);
+      expect(
+        live.some((o) => o.kind === "trigger" && o.name === "trt_set"),
+      ).toBe(true);
+      const { up, down } = buildKindDiff(registry, live, objs);
+      expect({ up, down }).toEqual({ up: [], down: [] });
+    } finally {
+      await conn.close();
+    }
+  });
+});
+
+// --- policy kind (CREATE POLICY, RLS) -----------------------------------------------------------
+
+describe("policy kind", () => {
+  test("emits ENABLE RLS + CREATE POLICY (command/using)", () => {
+    expect(
+      emitKinds(registry, [
+        policyPortable("p_sel", {
+          table: "doc",
+          command: "select",
+          using: "owner = current_user",
+        }),
+      ]),
+    ).toEqual([
+      'ALTER TABLE "doc" ENABLE ROW LEVEL SECURITY;',
+      'CREATE POLICY "p_sel" ON "doc" FOR SELECT USING (owner = current_user);',
+    ]);
+  });
+
+  test("a new policy diffs as add / drop", () => {
+    const { up, down } = buildKindDiff(
+      registry,
+      [],
+      [policyPortable("p_all", { table: "doc", using: "true" })],
+    );
+    expect(up).toEqual([
+      'ALTER TABLE "doc" ENABLE ROW LEVEL SECURITY;',
+      'CREATE POLICY "p_all" ON "doc" USING (true);',
+    ]);
+    expect(down).toEqual(['DROP POLICY IF EXISTS "p_all" ON "doc";']);
+  });
+
+  test("table + policy round-trip", async () => {
+    const objs = [
+      ...splitTables([tbl("prt_doc", [f("owner", scalar("string"))])]),
+      policyPortable("prt_owner", {
+        table: "prt_doc",
+        command: "select",
+        using: "true",
+      }),
+    ];
+    const conn = (await driver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
+    try {
+      await driver.apply(conn, emitKinds(registry, objs));
+      const live = await driver.introspectAll(conn);
+      expect(
+        live.some((o) => o.kind === "policy" && o.name === "prt_owner"),
       ).toBe(true);
       const { up, down } = buildKindDiff(registry, live, objs);
       expect({ up, down }).toEqual({ up: [], down: [] });

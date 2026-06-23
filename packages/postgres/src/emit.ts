@@ -418,7 +418,9 @@ export const triggerDefSql = (name: string, a: PgTriggerAttrs): string => {
   const events = a.events.map((e) => e.toUpperCase()).join(" OR ");
   const each = (a.forEach ?? "row").toUpperCase();
   const when = a.when ? ` WHEN (${a.when})` : "";
-  const fnArgs = (a.args ?? []).map((x) => `'${x.replace(/'/g, "''")}'`).join(", ");
+  const fnArgs = (a.args ?? [])
+    .map((x) => `'${x.replace(/'/g, "''")}'`)
+    .join(", ");
   return (
     `CREATE TRIGGER ${escId(name)} ${a.timing.toUpperCase()} ${events} ON ${escId(a.table)} ` +
     `FOR EACH ${each}${when} EXECUTE FUNCTION ${escId(a.fn)}(${fnArgs})`
@@ -448,7 +450,8 @@ export const enableRlsSql = (table: string) =>
 export const createPolicyDdl = (name: string, a: PgPolicyAttrs): string => {
   const parts = [`CREATE POLICY ${escId(name)} ON ${escId(a.table)}`];
   if (a.permissive === false) parts.push("AS RESTRICTIVE");
-  if (a.command && a.command !== "all") parts.push(`FOR ${a.command.toUpperCase()}`);
+  if (a.command && a.command !== "all")
+    parts.push(`FOR ${a.command.toUpperCase()}`);
   if (a.roles && a.roles.length > 0)
     parts.push(`TO ${a.roles.map(escId).join(", ")}`);
   if (a.using !== undefined) parts.push(`USING (${a.using})`);

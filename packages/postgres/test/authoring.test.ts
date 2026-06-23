@@ -5,9 +5,12 @@ import {
   defineDomain,
   defineEnum,
   defineExtension,
+  defineFunction,
   defineMaterializedView,
+  definePolicy,
   defineSequence,
   defineTable,
+  defineTrigger,
   defineView,
   type PgConn,
   PgField,
@@ -483,5 +486,94 @@ describe("standalone DDL objects via the authoring surface (explode)", () => {
     const u = defineTable("ate_u", { name: s.text() });
     const out = emitKinds(registry, postgresDriver.explode([u], [citext]));
     expect(out[0]).toBe('CREATE EXTENSION IF NOT EXISTS "citext";');
+  });
+});
+
+describe("functions / triggers / policies via the authoring surface (explode)", () => {
+  const roundtrip = async (objs: ReturnType<typeof postgresDriver.explode>) => {
+    const out = emitKinds(registry, objs);
+    const conn = (await postgresDriver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
+    try {
+      await postgresDriver.apply(conn, out);
+      const live = await postgresDriver.introspectAll(conn);
+      return buildKindDiff(registry, live, objs);
+    } finally {
+      await conn.close();
+    }
+  };
+
+  test("defineFunction: emits CREATE FUNCTION + round-trips (sql + plpgsql)", async () => {
+    const addOne = defineFunction("afn_add", {
+      args: "n integer",
+      returns: "integer",
+      body: "SELECT n + 1",
+    });
+    const touch = defineFunction("afn_touch", {
+      returns: "trigger",
+      language: "plpgsql",
+      body: " BEGIN RETURN NEW; END ",
+    });
+    const out = emitKinds(
+      registry,
+      postgresDriver.explode([], [addOne, touch]),
+    );
+    expect(
+      out.find((x) => x.startsWith('CREATE FUNCTION "afn_add"(n integer)')),
+    ).toBeTruthy();
+    const { up, down } = await roundtrip(
+      postgresDriver.explode([], [addOne, touch]),
+    );
+    expect({ up, down }).toEqual({ up: [], down: [] });
+  });
+
+  test("defineTrigger: emits after its table + function, round-trips", async () => {
+    const post = defineTable("atr_post", {
+      title: s.text(),
+      updated: s.timestamptz().optional(),
+    });
+    const touch = defineFunction("atr_touch", {
+      returns: "trigger",
+      language: "plpgsql",
+      body: " BEGIN NEW.updated := now(); RETURN NEW; END ",
+    });
+    const trg = defineTrigger("atr_set", {
+      table: "atr_post",
+      timing: "before",
+      events: ["update"],
+      function: "atr_touch",
+    });
+    const objs = postgresDriver.explode([post], [touch, trg]);
+    const out = emitKinds(registry, objs);
+    // trigger emits after both its table and the function it calls
+    const ti = out.findIndex((x) => x.includes('CREATE TRIGGER "atr_set"'));
+    expect(
+      out.findIndex((x) => x.includes('CREATE TABLE "atr_post"')),
+    ).toBeLessThan(ti);
+    expect(
+      out.findIndex((x) => x.startsWith('CREATE FUNCTION "atr_touch"')),
+    ).toBeLessThan(ti);
+    const { up, down } = await roundtrip(objs);
+    expect({ up, down }).toEqual({ up: [], down: [] });
+  });
+
+  test("definePolicy: enables RLS + creates the policy, round-trips", async () => {
+    const doc = defineTable("apo_doc", { owner: s.text() });
+    const pol = definePolicy("apo_owner", {
+      table: "apo_doc",
+      command: "select",
+      using: "true",
+    });
+    const objs = postgresDriver.explode([doc], [pol]);
+    const out = emitKinds(registry, objs);
+    expect(
+      out.some((x) => x === 'ALTER TABLE "apo_doc" ENABLE ROW LEVEL SECURITY;'),
+    ).toBe(true);
+    expect(out.some((x) => x.startsWith('CREATE POLICY "apo_owner"'))).toBe(
+      true,
+    );
+    const { up, down } = await roundtrip(objs);
+    expect({ up, down }).toEqual({ up: [], down: [] });
   });
 });

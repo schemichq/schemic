@@ -46,20 +46,26 @@ import type {
   PgDomainDef,
   PgEnumDef,
   PgExtensionDef,
+  PgFunctionDef,
   PgMatViewDef,
+  PgPolicyDef,
   PgSequenceDef,
   PgTableDef,
+  PgTriggerDef,
   PgViewDef,
 } from "./authoring";
-import { escId, type PgIndexInfo, type PgTable } from "./emit";
+import { escId, type PgIndexInfo, type PgTable, triggerDefSql } from "./emit";
 import {
   domainPortable,
   enumPortable,
   extensionPortable,
+  functionPortable,
   matViewPortable,
+  policyPortable,
   registry,
   sequencePortable,
   splitTables,
+  triggerPortable,
   viewPortable,
 } from "./kinds";
 import { pgLower } from "./lower";
@@ -506,6 +512,107 @@ async function pgIntrospectExtensions(
     .map((r) => extensionPortable(r.name));
 }
 
+/**
+ * Read user functions (pg_proc) -> `function` kind objects; excludes extension-owned functions
+ * (pg_depend deptype 'e') and C/internal-language builtins. Reconstructs the signature/return/body so a
+ * dropped function can be recreated on `down`.
+ */
+async function pgIntrospectFunctions(
+  conn: PgConn,
+  exclude: Set<string> = new Set(),
+): Promise<PortableObject[]> {
+  const { rows } = await conn.query<{
+    name: string;
+    args: string;
+    result: string;
+    lang: string;
+    body: string;
+  }>(
+    `SELECT p.proname AS name,
+            pg_get_function_identity_arguments(p.oid) AS args,
+            pg_get_function_result(p.oid) AS result,
+            l.lanname AS lang,
+            p.prosrc AS body
+       FROM pg_proc p
+       JOIN pg_namespace n ON n.oid = p.pronamespace AND n.nspname = 'public'
+       JOIN pg_language l ON l.oid = p.prolang AND l.lanname IN ('sql', 'plpgsql')
+      WHERE NOT EXISTS (
+        SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e')
+      ORDER BY p.proname`,
+  );
+  return rows
+    .filter((r) => !exclude.has(r.name))
+    .map((r) =>
+      functionPortable(r.name, {
+        args: r.args,
+        returns: r.result,
+        language: r.lang,
+        body: r.body,
+      }),
+    );
+}
+
+/** Read user triggers (pg_trigger, excl. internal) -> `trigger` kind objects via pg_get_triggerdef. */
+async function pgIntrospectTriggers(
+  conn: PgConn,
+  exclude: Set<string> = new Set(),
+): Promise<PortableObject[]> {
+  const { rows } = await conn.query<{
+    name: string;
+    table: string;
+    fn: string;
+    def: string;
+  }>(
+    `SELECT t.tgname AS name, c.relname AS table, p.proname AS fn,
+            pg_get_triggerdef(t.oid) AS def
+       FROM pg_trigger t
+       JOIN pg_class c ON c.oid = t.tgrelid
+       JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
+       JOIN pg_proc p ON p.oid = t.tgfoid
+      WHERE NOT t.tgisinternal
+      ORDER BY c.relname, t.tgname`,
+  );
+  return rows
+    .filter((r) => !exclude.has(r.table))
+    .map((r) => triggerPortable(r.name, r.table, r.fn, r.def));
+}
+
+/** Read RLS policies (pg_policies) -> `policy` kind objects. */
+async function pgIntrospectPolicies(
+  conn: PgConn,
+  exclude: Set<string> = new Set(),
+): Promise<PortableObject[]> {
+  const { rows } = await conn.query<{
+    name: string;
+    table: string;
+    permissive: string;
+    roles: string[];
+    cmd: string;
+    qual: string | null;
+    with_check: string | null;
+  }>(
+    `SELECT policyname AS name, tablename AS table, permissive, roles, cmd, qual, with_check
+       FROM pg_policies WHERE schemaname = 'public' ORDER BY tablename, policyname`,
+  );
+  return rows
+    .filter((r) => !exclude.has(r.table))
+    .map((r) =>
+      policyPortable(r.name, {
+        table: r.table,
+        command: r.cmd.toLowerCase() as
+          | "all"
+          | "select"
+          | "insert"
+          | "update"
+          | "delete",
+        ...(r.permissive === "RESTRICTIVE" ? { permissive: false } : {}),
+        ...(r.roles ? { roles: r.roles } : {}),
+        ...(r.qual != null ? { using: r.qual } : {}),
+        ...(r.with_check != null ? { withCheck: r.with_check } : {}),
+      }),
+    );
+}
+
 // --- connection (PGlite, embedded) --------------------------------------------------------------
 
 async function newPglite(dataDir?: string): Promise<PgConn> {
@@ -783,23 +890,64 @@ export const postgresDriver: Driver<PgConn> = {
           ...(s.cycle !== undefined ? { cycle: s.cycle } : {}),
         }),
       ),
+      ...of<PgFunctionDef>("function").map((f) =>
+        functionPortable(f.name, {
+          args: f.args,
+          returns: f.returns,
+          language: f.language,
+          body: f.body,
+          ...(f.volatility !== undefined ? { volatility: f.volatility } : {}),
+          ...(f.strict !== undefined ? { strict: f.strict } : {}),
+          ...(f.replace !== undefined ? { replace: f.replace } : {}),
+        }),
+      ),
       ...of<PgViewDef>("view").map((v) => viewPortable(v.name, v.sql)),
       ...of<PgMatViewDef>("matview").map((v) => matViewPortable(v.name, v.sql)),
+      ...of<PgTriggerDef>("trigger").map((t) =>
+        triggerPortable(
+          t.name,
+          t.table,
+          t.function,
+          triggerDefSql(t.name, {
+            table: t.table,
+            timing: t.timing,
+            events: t.events,
+            fn: t.function,
+            ...(t.forEach !== undefined ? { forEach: t.forEach } : {}),
+            ...(t.when !== undefined ? { when: t.when } : {}),
+            ...(t.args !== undefined ? { args: t.args } : {}),
+          }),
+        ),
+      ),
+      ...of<PgPolicyDef>("policy").map((p) =>
+        policyPortable(p.name, {
+          table: p.table,
+          ...(p.command !== undefined ? { command: p.command } : {}),
+          ...(p.roles !== undefined ? { roles: p.roles } : {}),
+          ...(p.using !== undefined ? { using: p.using } : {}),
+          ...(p.withCheck !== undefined ? { withCheck: p.withCheck } : {}),
+          ...(p.permissive !== undefined ? { permissive: p.permissive } : {}),
+        }),
+      ),
     ];
   },
 
   // One pg_catalog/information_schema read -> ALL kind objects, canonicalized identically to lowering
   // (a clean apply round-trips to a zero diff) and complete (extension + enum + domain + sequence +
-  // table + index + FK + view + matview) so no phantom (view/matview bodies are name-only in
-  // `canonical` — see those kinds; plpgsql is excluded as a system default).
+  // table + index + FK + function + view + matview + trigger + policy) so no phantom (view/matview/
+  // function/trigger/policy use name-based `canonical` — see those kinds; plpgsql is excluded as a
+  // system default).
   introspectAll: async (conn, exclude) => [
     ...(await pgIntrospectExtensions(conn, exclude)),
     ...(await pgIntrospectEnums(conn, exclude)),
     ...(await pgIntrospectDomains(conn, exclude)),
     ...(await pgIntrospectSequences(conn, exclude)),
     ...splitTables(await pgIntrospect(conn, exclude)),
+    ...(await pgIntrospectFunctions(conn, exclude)),
     ...(await pgIntrospectViews(conn, exclude)),
     ...(await pgIntrospectMatViews(conn, exclude)),
+    ...(await pgIntrospectTriggers(conn, exclude)),
+    ...(await pgIntrospectPolicies(conn, exclude)),
   ],
 
   /**

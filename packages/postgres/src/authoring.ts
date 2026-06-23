@@ -588,6 +588,158 @@ export function defineExtension(
   return new PgExtensionDef(name, opts);
 }
 
+// --- defineFunction: a pg FUNCTION (CREATE FUNCTION) --------------------------------------------
+
+/** Options for a function: signature + body. `args`/`language` default to `""` / `"sql"`. */
+export interface PgFunctionOptions {
+  /** Argument list, e.g. `"n integer, label text"` (verbatim SQL); defaults to no args. */
+  args?: string;
+  /** Return type, e.g. `"integer"`, `"trigger"`, `"setof text"`. */
+  returns: string;
+  /** Procedural language; defaults to `"sql"` (also `"plpgsql"`, …). */
+  language?: string;
+  /** The function body, spliced verbatim inside `$$ … $$`. */
+  body: string;
+  volatility?: "immutable" | "stable" | "volatile";
+  strict?: boolean;
+  /** Emit `CREATE OR REPLACE` (default `false`). */
+  replace?: boolean;
+}
+
+/**
+ * A Postgres function — `CREATE FUNCTION <name>(args) RETURNS <ret> LANGUAGE <lang> AS $$ <body> $$`.
+ * Use it as a trigger handler (`RETURNS trigger`) or a callable helper. NOTE: tracked by NAME — an
+ * overloaded function (same name, different args) isn't distinguished; use distinct names. A body edit
+ * isn't auto-diffed (re-gen, or author `replace: true` for `CREATE OR REPLACE`).
+ */
+export class PgFunctionDef {
+  readonly kind = "function" as const;
+  readonly args: string;
+  readonly returns: string;
+  readonly language: string;
+  readonly body: string;
+  readonly volatility?: "immutable" | "stable" | "volatile";
+  readonly strict?: boolean;
+  readonly replace?: boolean;
+  constructor(
+    readonly name: string,
+    opts: PgFunctionOptions,
+  ) {
+    this.args = opts.args ?? "";
+    this.returns = opts.returns;
+    this.language = opts.language ?? "sql";
+    this.body = opts.body;
+    if (opts.volatility !== undefined) this.volatility = opts.volatility;
+    if (opts.strict !== undefined) this.strict = opts.strict;
+    if (opts.replace !== undefined) this.replace = opts.replace;
+  }
+}
+
+/** Declare a pg function: `export const addOne = defineFunction("add_one", { args: "n integer", returns: "integer", body: "SELECT n + 1" })`. */
+export function defineFunction(
+  name: string,
+  opts: PgFunctionOptions,
+): PgFunctionDef {
+  return new PgFunctionDef(name, opts);
+}
+
+// --- defineTrigger: a pg TRIGGER (CREATE TRIGGER) ----------------------------------------------
+
+/** Options for a trigger: when it fires, on which table, and the function it calls. */
+export interface PgTriggerOptions {
+  table: string;
+  timing: "before" | "after" | "instead of";
+  events: ("insert" | "update" | "delete" | "truncate")[];
+  /** The function to call (must `RETURN trigger`); references a {@link PgFunctionDef} by name. */
+  function: string;
+  forEach?: "row" | "statement";
+  when?: string;
+  /** Static arguments passed to the trigger function (rare). */
+  args?: string[];
+}
+
+/**
+ * A Postgres trigger — `CREATE TRIGGER <name> <timing> <events> ON <table> FOR EACH … EXECUTE FUNCTION
+ * <fn>()`. The `function` must already exist (define it with {@link defineFunction}); the trigger
+ * depends on both its table and that function. Tracked by name + table (a definition edit re-gens).
+ */
+export class PgTriggerDef {
+  readonly kind = "trigger" as const;
+  readonly table: string;
+  readonly timing: "before" | "after" | "instead of";
+  readonly events: ("insert" | "update" | "delete" | "truncate")[];
+  readonly function: string;
+  readonly forEach?: "row" | "statement";
+  readonly when?: string;
+  readonly args?: string[];
+  constructor(
+    readonly name: string,
+    opts: PgTriggerOptions,
+  ) {
+    this.table = opts.table;
+    this.timing = opts.timing;
+    this.events = opts.events;
+    this.function = opts.function;
+    if (opts.forEach !== undefined) this.forEach = opts.forEach;
+    if (opts.when !== undefined) this.when = opts.when;
+    if (opts.args !== undefined) this.args = opts.args;
+  }
+}
+
+/** Declare a pg trigger: `export const t = defineTrigger("set_updated", { table: "post", timing: "before", events: ["update"], function: "touch" })`. */
+export function defineTrigger(
+  name: string,
+  opts: PgTriggerOptions,
+): PgTriggerDef {
+  return new PgTriggerDef(name, opts);
+}
+
+// --- definePolicy: a pg row-level-security POLICY (CREATE POLICY) -------------------------------
+
+/** Options for an RLS policy. `command` defaults to ALL, `roles` to PUBLIC; `permissive` defaults true. */
+export interface PgPolicyOptions {
+  table: string;
+  command?: "all" | "select" | "insert" | "update" | "delete";
+  roles?: string[];
+  /** Row-visibility predicate (`USING (…)`). */
+  using?: string;
+  /** Write predicate (`WITH CHECK (…)`). */
+  withCheck?: string;
+  /** `false` -> `AS RESTRICTIVE` (default permissive). */
+  permissive?: boolean;
+}
+
+/**
+ * A Postgres row-level-security policy — `CREATE POLICY <name> ON <table> …`. Emitting it also enables
+ * RLS on the table (`ALTER TABLE … ENABLE ROW LEVEL SECURITY`, idempotent). Tracked by name + table;
+ * a USING / WITH CHECK expression edit isn't auto-diffed (drop+recreate / re-gen).
+ */
+export class PgPolicyDef {
+  readonly kind = "policy" as const;
+  readonly table: string;
+  readonly command?: "all" | "select" | "insert" | "update" | "delete";
+  readonly roles?: string[];
+  readonly using?: string;
+  readonly withCheck?: string;
+  readonly permissive?: boolean;
+  constructor(
+    readonly name: string,
+    opts: PgPolicyOptions,
+  ) {
+    this.table = opts.table;
+    if (opts.command !== undefined) this.command = opts.command;
+    if (opts.roles !== undefined) this.roles = opts.roles;
+    if (opts.using !== undefined) this.using = opts.using;
+    if (opts.withCheck !== undefined) this.withCheck = opts.withCheck;
+    if (opts.permissive !== undefined) this.permissive = opts.permissive;
+  }
+}
+
+/** Declare a pg RLS policy: `export const p = definePolicy("owner_only", { table: "doc", using: "owner = current_user" })`. */
+export function definePolicy(name: string, opts: PgPolicyOptions): PgPolicyDef {
+  return new PgPolicyDef(name, opts);
+}
+
 // --- App/Wire type inference (DX) --------------------------------------------------------------
 
 /** The decoded (App-land) row type of a table — `z.output` of each field's schema. */
