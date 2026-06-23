@@ -11,6 +11,7 @@ import {
   RecordId,
   RecordIdRange,
   type RecordIdValue,
+  type Surreal,
   surql,
   Table,
   Uuid,
@@ -2726,12 +2727,17 @@ interface FunctionConfig {
   comment?: string;
 }
 
+/** The typed argument object for calling a function — each named param as its **app** type
+ *  (`{ a: s.int(), b: s.int() }` -> `{ a: number, b: number }`). */
+export type CallArgs<A extends Shape> = { [K in keyof A]: App<A[K]> };
+
 /**
  * A custom function — `DEFINE FUNCTION fn::<name>(<args>) [-> <returns>] { <body> }`. Built with a
  * chainable, immutable API (like {@link TableDef}): `defineFunction(name, args).returns(…).body(…)`.
- * Args and the return type are s schemas (inferred to SurrealQL types, same as table fields).
+ * Args and the return type are s schemas (inferred to SurrealQL types, same as table fields). The
+ * generics carry the arg shape `A` and the decoded return type `R` so `.call(db, args)` is fully typed.
  */
-export class FunctionDef {
+export class FunctionDef<A extends Shape = Shape, R = unknown> {
   readonly kind = "function" as const;
   constructor(
     readonly name: string,
@@ -2739,33 +2745,69 @@ export class FunctionDef {
     readonly args: Record<string, AnyField>,
     readonly config: FunctionConfig = {},
   ) {}
-  private withConfig(c: Partial<FunctionConfig>): FunctionDef {
-    return new FunctionDef(this.name, this.args, { ...this.config, ...c });
+  private withConfig<R2 = R>(c: Partial<FunctionConfig>): FunctionDef<A, R2> {
+    return new FunctionDef<A, R2>(this.name, this.args, {
+      ...this.config,
+      ...c,
+    });
   }
-  /** Declare the return type (an s schema). */
-  returns(type: AnyField): FunctionDef {
-    return this.withConfig({ returns: type });
+  /** Declare the return type (an s schema) — types `.call()`'s decoded result. */
+  returns<RF extends AnyField>(type: RF): FunctionDef<A, App<RF>> {
+    return this.withConfig<App<RF>>({ returns: type });
   }
   /** The function body — a `surql\`…\`` block (braces optional) or a raw string. */
-  body(body: Expr): FunctionDef {
+  body(body: Expr): FunctionDef<A, R> {
     return this.withConfig({ body });
   }
   /** `PERMISSIONS`: `FULL` (true, the default), `NONE` (false), or a `surql` condition. */
-  permissions(p: boolean | Expr): FunctionDef {
+  permissions(p: boolean | Expr): FunctionDef<A, R> {
     return this.withConfig({ permissions: p });
   }
-  comment(comment: string): FunctionDef {
+  comment(comment: string): FunctionDef<A, R> {
     return this.withConfig({ comment });
+  }
+  /**
+   * Invoke the function on a live connection — DB-functions-as-code. Args are passed by name (matching
+   * the schema params) and **encoded** to wire via the param schemas; the raw result is **decoded**
+   * through `.returns(R)` (so you get real `App` types — `Date`/`RecordId`/…). Without a declared
+   * `.returns()`, the result type is `unknown`. The `args` object is optional for a no-param function.
+   *
+   * The query layer is opt-in, so its machinery is loaded lazily here — calling `.call()` keeps the
+   * authoring index's static graph free of `@schemic/core/query` and the driver.
+   */
+  async call(
+    db: Surreal,
+    ...rest: Record<string, never> extends CallArgs<A>
+      ? [args?: CallArgs<A>]
+      : [args: CallArgs<A>]
+  ): Promise<R> {
+    const appArgs = (rest[0] ?? {}) as Record<string, unknown>;
+    const encoded: Record<string, unknown> = {};
+    for (const [key, field] of Object.entries(this.args))
+      encoded[key] = field.encode(appArgs[key] as never);
+    const [{ callFunction }, { surrealDriver }] = await Promise.all([
+      import("@schemic/core/query"),
+      import("./driver/surreal"),
+    ]);
+    const callable = surrealDriver.callable;
+    if (!callable)
+      throw new Error("the surrealdb driver has no `callable` capability.");
+    const returns = this.config.returns?.schema ?? z.unknown();
+    return callFunction(callable, db, this.name, encoded, returns) as Promise<R>;
   }
 }
 
 /**
  * Declare a custom function as a standalone, exportable object:
  * `export const greet = defineFunction("greet", { name: s.string() }).returns(s.string()).body(surql\`…\`)`.
- * Emitted as `DEFINE FUNCTION fn::greet(...)`. Args are s schemas (inferred to SurrealQL types).
+ * Emitted as `DEFINE FUNCTION fn::greet(...)`. Args are s schemas (inferred to SurrealQL types); the
+ * arg shape flows into `.call(db, args)` typing.
  */
-export function defineFunction(name: string, args: Shape = {}): FunctionDef {
-  return new FunctionDef(
+export function defineFunction<A extends Shape = Record<string, never>>(
+  name: string,
+  args: A = {} as A,
+): FunctionDef<A> {
+  return new FunctionDef<A>(
     name,
     normalizeFields(args) as unknown as Record<string, AnyField>,
   );

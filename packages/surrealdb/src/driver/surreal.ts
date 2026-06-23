@@ -225,6 +225,28 @@ export const surrealDriver: Driver<
     return (Array.isArray(last) ? last : last == null ? [] : [last]) as T[];
   },
 
+  // (B) DB-functions-as-code — invoke a defined function by name with already-encoded args and return
+  // its RAW result. SurrealQL function calls are POSITIONAL, so the args (in param order) are bound to
+  // generic `$a0, $a1, …` vars and passed positionally: `RETURN fn::name($a0, $a1)`. The caller
+  // (`FunctionDef.call` / core's `callFunction`) decodes the raw value through `.returns(R)`.
+  callable: {
+    async invoke(
+      conn: Surreal,
+      name: string,
+      args: Record<string, unknown>,
+    ): Promise<unknown> {
+      const values = Object.values(args);
+      const placeholders = values.map((_, i) => `$a${i}`).join(", ");
+      const vars = Object.fromEntries(values.map((v, i) => [`a${i}`, v]));
+      const fn = name.replace(/^fn::/, "");
+      const out = (await conn.query(
+        `RETURN fn::${fn}(${placeholders})`,
+        vars,
+      )) as unknown[];
+      return out[0];
+    },
+  },
+
   shadow,
   migrations,
 

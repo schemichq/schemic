@@ -30,6 +30,7 @@ export type { BoundQuery } from "surrealdb";
 export type {
   AnalyzerConfig,
   App,
+  CallArgs,
   Create,
   DiskannOptions,
   Expr,
