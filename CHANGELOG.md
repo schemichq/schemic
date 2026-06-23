@@ -12,6 +12,10 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 ## [Unreleased]
 
 ### Added
+- **core:** `callFunction` in `@schemic/core/query` — invoke a defined DB function via the `callable`
+  capability and decode the result through `.returns(R)` (the neutral half of the query layer's (B)
+  `.call()`). `CallableFunctions.invoke` now returns the raw function result for `R` to decode (no
+  driver implemented `callable` yet, so no break).
 - **cli:** `schemic pull --watch` — poll the live DB (`--interval`, default 2s) and re-pull as it
   changes (preview, or apply with `--write`); a DB-poll loop, not fsWatch (which would self-trigger on
   pull's own file writes).
