@@ -8,10 +8,10 @@ import {
   defineFunction,
   defineRelation,
   defineTable,
-  emitTable,
   s,
   surql,
 } from "@schemic/surrealdb";
+import { emitTable } from "@schemic/surrealdb/driver";
 import { EMPTY_SNAPSHOT } from "../../src/cli/structure";
 import {
   buildSnapshot,

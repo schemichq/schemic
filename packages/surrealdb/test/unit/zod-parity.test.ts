@@ -3,7 +3,8 @@
 // drop-in for z.*, with DDL mapping to the wire/input type.
 
 import { describe, expect, test } from "bun:test";
-import { defineTable, emitTable, s } from "../../src/index";
+import { emitTable } from "../../src/driver";
+import { defineTable, s } from "../../src/index";
 
 const field = (t: Parameters<typeof emitTable>[0], name: string): string =>
   emitTable(t)

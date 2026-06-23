@@ -26,8 +26,8 @@ import {
   defineTable,
   s,
   surql,
-  surrealDriver,
 } from "@schemic/surrealdb";
+import { surrealDriver } from "@schemic/surrealdb/driver";
 import { schemaStruct } from "../../src/cli/lower";
 import { structuredSnapshot } from "../../src/cli/structure";
 import { diffSnapshots } from "../../src/cli/surreal-diff";

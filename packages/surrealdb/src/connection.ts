@@ -11,6 +11,17 @@ import {
 } from "@schemic/core/driver";
 import type { SurrealZodCheck, SurrealZodConnection } from "./config";
 
+/** SurrealDB connection config types (the `surrealConnection` factory's shapes). */
+export type {
+  AuthLevel,
+  CapabilityList,
+  EmbeddedCapabilities,
+  SurrealParams,
+  SurrealZodCheck,
+  SurrealZodCheckEmbedded,
+  SurrealZodConnection,
+} from "./config";
+
 /**
  * A SurrealDB connection's config: the dialect-neutral base (`schema`, optional `key`/`migrations`)
  * plus the SurrealDB-specific connection params and the optional `check` replay config. Read env

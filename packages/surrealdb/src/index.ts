@@ -1,13 +1,14 @@
 /**
- * @schemic/surrealdb — author SurrealDB schemas with Zod, and the SurrealDB driver.
+ * @schemic/surrealdb — author SurrealDB schemas with Zod.
  *
- * Define tables/relations with `s.*` (a drop-in for `z.*`), generate SurrealQL DDL, and map JS <-> DB
- * across Zod's two channels via codecs (`decode`/`encode`). Importing this package registers the
- * SurrealDB driver with `@schemic/core` (so the CLI's `getDriver("surrealdb")` resolves).
+ * The **authoring** surface and nothing else: define tables/relations with `s.*` (a drop-in for `z.*`)
+ * and map JS <-> DB across Zod's two channels via codecs (`decode`/`encode`). This entry is
+ * **side-effect-free** — importing it registers no driver and pulls in neither the DDL emit engine nor
+ * the diff/migration engine, so `s.*` is safe in app bundles. The engine surfaces live in subpaths:
+ *   - `@schemic/surrealdb/driver`     — the `Driver` impl + `emit*` + the `registerDriver` side-effect.
+ *   - `@schemic/surrealdb/connection` — the `surrealConnection` factory + connection config types.
+ *   - `@schemic/surrealdb/query`      — the opt-in typed query builder.
  */
-
-// Side-effect: register `surrealDriver` with the core registry on import.
-import "./driver/surreal";
 
 import { type BoundQuery, surql as sdkSurql } from "surrealdb";
 
@@ -26,38 +27,6 @@ export function surql<R extends unknown[] = unknown[]>(
   return sdkSurql(strings, ...values) as BoundQuery<R>;
 }
 export type { BoundQuery } from "surrealdb";
-/** SurrealDB config types (relocated from @schemic/core/config, now connections-only + dialect-free). */
-export type {
-  AuthLevel,
-  CapabilityList,
-  EmbeddedCapabilities,
-  SurrealParams,
-  SurrealZodCheck,
-  SurrealZodCheckEmbedded,
-  SurrealZodConnection,
-} from "./config";
-export type { SurrealConnectionConfig } from "./connection";
-/** Multi-connection factory: `defineConfig({ connections: { db: surrealConnection({ … }) } })`. */
-export { surrealConnection } from "./connection";
-export type { DefineOptions, DefineStatement, FieldInfo } from "./ddl";
-export {
-  alterField,
-  alterTable,
-  assertExpr,
-  braceBody,
-  emitDefStatement,
-  emitField,
-  emitFieldStatements,
-  emitStatements,
-  emitTable,
-  eventClause,
-  fieldType,
-  inferField,
-  inline,
-  overwriteStatement,
-  removeStatement,
-} from "./ddl";
-export { surrealDriver } from "./driver/surreal";
 export type {
   AnalyzerConfig,
   App,

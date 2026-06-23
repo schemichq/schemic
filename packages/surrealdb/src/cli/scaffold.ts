@@ -3,7 +3,7 @@
 // free) calls surrealDriver.initScaffold() and writes these verbatim, then records the neutral snapshot.
 
 const CONFIG = `import { defineConfig } from "@schemic/core/config";
-import { surrealConnection } from "@schemic/surrealdb";
+import { surrealConnection } from "@schemic/surrealdb/connection";
 
 // Connections-only config: each named connection comes from a driver's \`<driver>Connection(...)\`
 // factory, so there's no \`driver: "…"\` string to keep in sync. Values are explicit — read env here

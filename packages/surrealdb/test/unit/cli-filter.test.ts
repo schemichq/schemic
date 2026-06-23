@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { type Filter, parseFilter } from "@schemic/core";
-import type { DefineStatement } from "@schemic/surrealdb";
+import type { DefineStatement } from "@schemic/surrealdb/driver";
 import {
   filterSnapshot,
   included,

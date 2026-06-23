@@ -5,7 +5,8 @@ import {
   type DriverConformanceOptions,
   describeDriverConformance,
 } from "@schemic/core/testing";
-import { defineTable, s, surrealDriver } from "@schemic/surrealdb";
+import { defineTable, s } from "@schemic/surrealdb";
+import { surrealDriver } from "@schemic/surrealdb/driver";
 
 describeDriverConformance({
   name: "surrealdb",

@@ -12,9 +12,9 @@
   },
   "type": "module",
   "sideEffects": [
-    "./src/index.ts",
+    "./src/driver.ts",
     "./src/driver/surreal.ts",
-    "./lib/index.js"
+    "./lib/driver.js"
   ],
   "module": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -32,6 +32,20 @@
       "import": {
         "types": "./lib/index.d.ts",
         "default": "./lib/index.js"
+      }
+    },
+    "./driver": {
+      "bun": "./src/driver.ts",
+      "import": {
+        "types": "./lib/driver.d.ts",
+        "default": "./lib/driver.js"
+      }
+    },
+    "./connection": {
+      "bun": "./src/connection.ts",
+      "import": {
+        "types": "./lib/connection.d.ts",
+        "default": "./lib/connection.js"
       }
     },
     "./query": {
