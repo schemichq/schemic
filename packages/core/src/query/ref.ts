@@ -16,3 +16,17 @@ export interface FieldRefBase<T> {
 
 /** The app-value type carried by a field ref (`never` if it isn't one). */
 export type RefValue<R> = R extends FieldRefBase<infer T> ? T : never;
+
+/**
+ * Brand a driver's field-ref implementation with the neutral {@link FieldRefBase} carrier, so `Project`
+ * can read its value back out. The phantom symbol is module-private on purpose (drivers can't forge it),
+ * so this is the one sanctioned bridge — a runtime identity that saves every driver an `as unknown as`
+ * cast. `impl`'s type is inferred; `T` (the carried value type) defaults to `unknown` because refs are
+ * untyped at runtime — the per-field type is supplied by the driver's `Row` mapping. Usage:
+ * `return brandRef({ eq, neq, gte, … });`.
+ */
+export function brandRef<I extends object, T = unknown>(
+  impl: I,
+): I & FieldRefBase<T> {
+  return impl as I & FieldRefBase<T>;
+}

@@ -12,4 +12,4 @@
  */
 export { projectionSchema, decodeProjection, type ProjectionField } from "./codec";
 export type { Project } from "./project";
-export { type FieldRefBase, type RefValue } from "./ref";
+export { brandRef, type FieldRefBase, type RefValue } from "./ref";

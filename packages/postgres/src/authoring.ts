@@ -174,11 +174,14 @@ export class PgField<
 
 // --- the `s` vocabulary (pg lingo) -------------------------------------------------------------
 
-const mk = (
+// Generic in the Zod schema so each `s.*` factory keeps its precise type — without this, `App<T>` (and
+// the query builder's result typing) collapse every field to `unknown`.
+const mk = <S extends z.ZodType>(
   type: string,
-  schema: z.ZodType,
+  schema: S,
   params?: (string | number)[],
-): PgField => new PgField(schema, { pg: params ? { type, params } : { type } });
+): PgField<S> =>
+  new PgField<S>(schema, { pg: params ? { type, params } : { type } });
 
 /** The Postgres authoring namespace. Zod drop-ins (string/number/…) + native pg types + `$postgres`. */
 export const s = {
