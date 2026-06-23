@@ -1163,6 +1163,125 @@ function printLocalOnly(files: PullFilePlan[]): void {
   console.log(style.dim("  keep with --merge, or drop with --discard."));
 }
 
+/**
+ * One `pull` evaluation pass against an OPEN connection: plan, then preview or (with `--write`) apply.
+ * Returns true if it printed a plan (changes or at-risk local-only), false if the files already match the
+ * DB. Shared by the one-shot command and the `--watch` poll loop; in `watch` mode the at-risk guard warns
+ * instead of throwing, so a single risky tick doesn't kill the loop.
+ */
+async function pullPass(
+  db: unknown,
+  config: ResolvedConfig,
+  opts: FilterOpts & { write?: boolean; merge?: boolean; discard?: boolean },
+  watch: boolean,
+): Promise<boolean> {
+  const driver = activeDriver(config);
+  if (!driver.planPull)
+    throw new Error(
+      `the "${config.driver ?? "surrealdb"}" driver does not support \`pull\`.`,
+    );
+  const plan = await driver.planPull(db, config, {
+    filter: parseFilter(opts),
+    keepLocal: opts.merge,
+  });
+  const changed = plan.files.filter((f) => f.action !== "unchanged");
+  // Local-only content is only "at risk" when we're not keeping it (--merge keeps it).
+  const atRisk = opts.merge
+    ? []
+    : plan.files.filter(
+        (f) => f.localOnly.fields.length || f.localOnly.objects.length,
+      );
+  if (!changed.length && !atRisk.length) return false;
+
+  printPullPlan(plan);
+  if (!opts.write) {
+    if (changed.length)
+      console.log(
+        `\n${style.dim(`${plural(changed.length, "file")} would change — run \`schemic pull --write\` to apply.`)}`,
+      );
+    if (atRisk.length) printLocalOnly(atRisk);
+    return true;
+  }
+  // Don't silently destroy local-only schema (the git "commit or stash" guard).
+  if (atRisk.length && !opts.discard) {
+    printLocalOnly(atRisk);
+    const msg =
+      "pull would overwrite local-only schema — re-run with --merge to keep it or --discard to mirror the database.";
+    if (!watch) throw new Error(msg);
+    console.error(fail(msg)); // watch: warn but keep polling
+    return true;
+  }
+  const written = applyPull(plan);
+  // Baseline: sync the snapshot + record the pulled state as already-applied, so the schema matches the
+  // DB and `schemic diff` doesn't report the freshly-pulled objects as pending.
+  const base = await baseline(db, config);
+  const removed = plan.files.filter((f) => f.action === "delete").length;
+  // Local-only entities mixed with other code: surfaced but not safely deletable.
+  const kept = opts.merge
+    ? []
+    : plan.files.filter(
+        (f) => f.action === "unchanged" && f.localOnly.objects.length,
+      );
+  console.log(
+    `\n${ok(`Pulled ${plural(written.length, "file")} from the database${removed ? ` (${removed} removed)` : ""}.`)}`,
+  );
+  if (base.created)
+    console.log(
+      style.dim(
+        `  baseline ${base.tag} recorded (snapshot synced, marked applied).`,
+      ),
+    );
+  if (kept.length)
+    console.log(
+      style.dim(
+        `  ${plural(kept.length, "file")} with local-only entities mixed with other code left in place — remove those entities by hand.`,
+      ),
+    );
+  return true;
+}
+
+/**
+ * `pull --watch`: poll the LIVE DB (NOT the files — pull writes files, so an fsWatch would self-trigger).
+ * Reuse one connection; every `intervalMs` re-plan + preview/apply via {@link pullPass}; an unchanged tick
+ * shows a dim, in-place heartbeat. Ctrl-C closes the connection and exits. Never resolves.
+ */
+function pullPollLoop(
+  config: ResolvedConfig,
+  db: unknown,
+  intervalMs: number,
+  opts: FilterOpts & { write?: boolean; merge?: boolean; discard?: boolean },
+): Promise<never> {
+  return new Promise<never>(() => {
+    const driver = activeDriver(config);
+    console.log(
+      style.dim(
+        `Polling ${config.connection ?? "the database"} every ${intervalMs / 1000}s — ctrl-c to stop.`,
+      ),
+    );
+    let stopped = false;
+    const stop = () => {
+      stopped = true;
+      Promise.resolve(driver.close(db)).finally(() => process.exit(0));
+    };
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+    const tick = async () => {
+      if (stopped) return;
+      try {
+        const printed = await pullPass(db, config, opts, true);
+        if (!printed)
+          process.stdout.write(
+            style.dim(`\r· ${new Date().toLocaleTimeString()}  in sync   `),
+          );
+      } catch (err) {
+        console.error(`\n${fail(errMsg(err))}`);
+      }
+      if (!stopped) setTimeout(() => void tick(), intervalMs);
+    };
+    void tick();
+  });
+}
+
 kindFlags(
   dbFlags(
     program
@@ -1176,87 +1295,44 @@ kindFlags(
       .option(
         "--discard",
         "drop local-only fields/objects to mirror the DB exactly",
+      )
+      .option("--watch", "poll the live DB and re-pull as it changes")
+      .option(
+        "--interval <seconds>",
+        "poll interval in seconds for --watch (default: 2)",
       ),
   ),
 ).action(
   (
     opts: CommonOpts &
-      FilterOpts & { write?: boolean; merge?: boolean; discard?: boolean },
+      FilterOpts & {
+        write?: boolean;
+        merge?: boolean;
+        discard?: boolean;
+        watch?: boolean;
+        interval?: string;
+      },
   ) => {
-    run(() =>
-      withDb(opts, async (db, config) => {
+    run(async () => {
+      // --watch polls the DB on ONE reused connection (a single target). Otherwise the normal one-shot
+      // pass, fanned across targets by withDb.
+      if (opts.watch) {
+        const config = await resolveOne(opts);
         const driver = activeDriver(config);
         if (!driver.planPull)
           throw new Error(
             `the "${config.driver ?? "surrealdb"}" driver does not support \`pull\`.`,
           );
-        const plan = await driver.planPull(db, config, {
-          filter: parseFilter(opts),
-          keepLocal: opts.merge,
-        });
-        printPullPlan(plan);
-
-        const changed = plan.files.filter((f) => f.action !== "unchanged");
-        // Local-only content is only "at risk" when we're not keeping it (--merge keeps it).
-        const atRisk = opts.merge
-          ? []
-          : plan.files.filter(
-              (f) => f.localOnly.fields.length || f.localOnly.objects.length,
-            );
-
-        // "Already match" only when nothing would change AND there's no at-risk local-only schema
-        // (a whole local-only entity is neither changed nor — under --merge — at risk, but it must
-        // still be surfaced rather than silently reported as a match).
-        if (!changed.length && !atRisk.length) {
+        const intervalMs = Math.max(500, (Number(opts.interval) || 2) * 1000);
+        const db = await driver.connect(config, opts);
+        await pullPollLoop(config, db, intervalMs, opts);
+        return;
+      }
+      await withDb(opts, async (db, config) => {
+        if (!(await pullPass(db, config, opts, false)))
           console.log(ok("Schema files already match the database."));
-          return;
-        }
-
-        if (!opts.write) {
-          if (changed.length)
-            console.log(
-              `\n${style.dim(`${plural(changed.length, "file")} would change — run \`schemic pull --write\` to apply.`)}`,
-            );
-          if (atRisk.length) printLocalOnly(atRisk);
-          return;
-        }
-
-        // Don't silently destroy local-only schema (the git "commit or stash" guard).
-        if (atRisk.length && !opts.discard) {
-          printLocalOnly(atRisk);
-          throw new Error(
-            "pull would overwrite local-only schema — re-run with --merge to keep it or --discard to mirror the database.",
-          );
-        }
-
-        const written = applyPull(plan);
-        // Baseline: sync the snapshot and record the pulled state as an already-applied migration, so
-        // the schema matches the DB and `schemic diff` doesn't report the freshly-pulled objects as pending.
-        const base = await baseline(db, config);
-        const removed = plan.files.filter((f) => f.action === "delete").length;
-        // Files we surfaced but couldn't safely delete (a local-only entity mixed with other code).
-        const kept = opts.merge
-          ? []
-          : plan.files.filter(
-              (f) => f.action === "unchanged" && f.localOnly.objects.length,
-            );
-        console.log(
-          `\n${ok(`Pulled ${plural(written.length, "file")} from the database${removed ? ` (${removed} removed)` : ""}.`)}`,
-        );
-        if (base.created)
-          console.log(
-            style.dim(
-              `  baseline ${base.tag} recorded (snapshot synced, marked applied).`,
-            ),
-          );
-        if (kept.length)
-          console.log(
-            style.dim(
-              `  ${plural(kept.length, "file")} with local-only entities mixed with other code left in place — remove those entities by hand.`,
-            ),
-          );
-      }),
-    );
+      });
+    });
   },
 );
 
