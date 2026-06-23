@@ -230,7 +230,7 @@ live("FULLTEXT search index + DEFINE ANALYZER", () => {
       (_k, n) => `${n}.ts`,
     );
     expect(files.get("english.ts") ?? "").toContain(
-      'defineAnalyzer("english").tokenizers("blank", "class").filters("lowercase", "snowball(english)")',
+      'defineAnalyzer("english").tokenizers("blank", "class").filters((f) => [f.lowercase, f.snowball("english")])',
     );
     const idx = (files.get("ftdoc.ts") ?? "")
       .split("\n")

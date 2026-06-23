@@ -900,16 +900,44 @@ function accessUnit(a: StructAccess): RenderedUnit {
   };
 }
 
-/** Reverse a `StructAnalyzer` into a fluent `defineAnalyzer(name).tokenizers(…).filters(…)` const
- *  (tokenizer/filter names lowercased back to the authored form; `lowerAnalyzer` re-uppercases for the
- *  canonical/diff comparison). A bare analyzer renders just `defineAnalyzer(name)`. */
+/** Render one introspected filter (uppercased, e.g. `SNOWBALL(ENGLISH)`) as a `.filters(f => …)`
+ *  builder expression: bare ones as `f.lowercase`/`f.ascii`/`f.uppercase`, parameterized ones as
+ *  `f.snowball("english")` / `f.ngram(1, 3)` / `f.edgengram(2, 5)` / `f.mapper("path")`. Anything
+ *  unrecognized falls back to a lowercased string literal (the callback also accepts raw strings). */
+function filterBuilderExpr(filter: string): string {
+  const m = /^([A-Za-z_]+)(?:\((.*)\))?$/.exec(filter);
+  if (!m) return JSON.stringify(filter.toLowerCase());
+  const name = m[1].toLowerCase();
+  const inner = m[2];
+  if (inner === undefined) {
+    return name === "ascii" || name === "lowercase" || name === "uppercase"
+      ? `f.${name}`
+      : JSON.stringify(name);
+  }
+  if (name === "snowball")
+    return `f.snowball(${JSON.stringify(inner.toLowerCase())})`;
+  if (name === "ngram" || name === "edgengram") {
+    const nums = inner.split(",").map((s) => s.trim());
+    if (nums.length === 2 && nums.every((n) => /^\d+$/.test(n)))
+      return `f.${name}(${nums[0]}, ${nums[1]})`;
+  }
+  // `mapper("…")` — `inner` is already a quoted string literal (case preserved); pass it through.
+  if (name === "mapper" && /^".*"$/.test(inner)) return `f.mapper(${inner})`;
+  return JSON.stringify(filter.toLowerCase()); // unknown parameterized -> string literal
+}
+
+/** Reverse a `StructAnalyzer` into a fluent `defineAnalyzer(name).tokenizers(…).filters(f => […])`
+ *  const (tokenizer names lowercased back to the authored form; filters rendered via the typed builder
+ *  callback; `lowerAnalyzer` re-uppercases for the canonical/diff comparison). A bare analyzer renders
+ *  just `defineAnalyzer(name)`. */
 function renderAnalyzerConst(a: StructAnalyzer): string {
-  const args = (xs: string[]) =>
+  const tokList = (xs: string[]) =>
     xs.map((x) => JSON.stringify(x.toLowerCase())).join(", ");
   let expr = `defineAnalyzer(${JSON.stringify(a.name)})`;
   if (a.function) expr += `.function(${JSON.stringify(a.function)})`;
-  if (a.tokenizers?.length) expr += `.tokenizers(${args(a.tokenizers)})`;
-  if (a.filters?.length) expr += `.filters(${args(a.filters)})`;
+  if (a.tokenizers?.length) expr += `.tokenizers(${tokList(a.tokenizers)})`;
+  if (a.filters?.length)
+    expr += `.filters((f) => [${a.filters.map(filterBuilderExpr).join(", ")}])`;
   if (a.comment) expr += `.comment(${JSON.stringify(a.comment)})`;
   return `export const ${fnConst(a.name)} = ${expr};`;
 }
