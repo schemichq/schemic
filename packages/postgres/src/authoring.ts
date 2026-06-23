@@ -295,10 +295,23 @@ export interface PgForeignKeyConfig {
 }
 
 /** Table-level pg config: composite PK, table CHECKs, secondary indexes, and explicit foreign keys. */
+/** An access method for a secondary index; `btree` (the default) covers equality/range, the rest are specialized. */
+export type PgIndexMethod = "btree" | "gin" | "gist" | "brin" | "hash";
+
+export interface PgIndexConfig {
+  name?: string;
+  cols: string[];
+  unique?: boolean;
+  /** Access method (default `btree`); e.g. `gin` for jsonb/array/full-text, `brin` for huge append-only tables. */
+  method?: PgIndexMethod;
+  /** Partial-index predicate (`WHERE <expr>`) — index only the rows matching it. */
+  where?: string;
+}
+
 export interface PgTableConfig {
   primaryKey?: string[];
   checks?: string[];
-  indexes?: { name?: string; cols: string[]; unique?: boolean }[];
+  indexes?: PgIndexConfig[];
   foreignKeys?: PgForeignKeyConfig[];
 }
 
@@ -355,10 +368,18 @@ export class PgTableDef<
       checks: [...(this.config.checks ?? []), expr],
     });
   }
-  /** A secondary index over `cols` (optionally `UNIQUE`). */
+  /**
+   * A secondary index over `cols` — optionally `UNIQUE`, with an access `method` (`gin`/`gist`/`brin`/
+   * `hash`; default `btree`) and/or a partial-index `where` predicate.
+   */
   index(
     cols: (keyof F & string)[],
-    opts?: { name?: string; unique?: boolean },
+    opts?: {
+      name?: string;
+      unique?: boolean;
+      method?: PgIndexMethod;
+      where?: string;
+    },
   ): PgTableDef<Name, F> {
     return new PgTableDef(this.name, this.fields, {
       ...this.config,

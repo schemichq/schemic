@@ -645,3 +645,36 @@ describe("PgTableDef.foreignKey (composite / non-id FK via the authoring surface
     expect({ up, down }).toEqual({ up: [], down: [] });
   });
 });
+
+describe("PgTableDef.index — method + partial (via the authoring surface)", () => {
+  const roundtrip = async (objs: ReturnType<typeof postgresDriver.explode>) => {
+    const conn = (await postgresDriver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
+    try {
+      await postgresDriver.apply(conn, emitKinds(registry, objs));
+      const live = await postgresDriver.introspectAll(conn);
+      return buildKindDiff(registry, live, objs);
+    } finally {
+      await conn.close();
+    }
+  };
+
+  test("a gin index + a partial index emit + round-trip", async () => {
+    const doc = defineTable("aix_doc", {
+      meta: s.jsonb(),
+      score: s.integer(),
+      active: s.boolean(),
+    })
+      .index(["meta"], { method: "gin" })
+      .index(["score"], { name: "aix_hot", where: "active" });
+    const objs = postgresDriver.explode([doc], []);
+    const out = emitKinds(registry, objs);
+    expect(out.find((x) => x.includes("aix_doc_meta_idx"))).toContain(
+      'USING gin ("meta")',
+    );
+    expect(out.find((x) => x.includes("aix_hot"))).toContain("WHERE active");
+    const { up, down } = await roundtrip(objs);
+    expect({ up, down }).toEqual({ up: [], down: [] });
+  });
+});

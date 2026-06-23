@@ -11,11 +11,15 @@ import type {
 } from "@schemic/core/driver";
 import { nullable } from "@schemic/core/driver";
 
-/** A secondary index over one table's columns (this driver emits UNIQUE; others tracked for parity). */
+/** A secondary index over one table's columns: UNIQUE-or-not, an access method, and an optional partial predicate. */
 export interface PgIndexInfo {
   name: string;
   cols: string[];
   unique: boolean;
+  /** Access method: `btree` (default, omitted from DDL) | `gin` | `gist` | `brin` | `hash`. */
+  method?: string;
+  /** Partial-index predicate (`WHERE <expr>`); the index covers only rows matching it. */
+  where?: string;
 }
 
 /** A table-level FOREIGN KEY (composite or to a non-`id` column); single-col `id` refs ride the field. */

@@ -985,3 +985,133 @@ describe("policy kind", () => {
     }
   });
 });
+
+// --- richer indexes (method + partial) ----------------------------------------------------------
+
+describe("index kind — method + partial", () => {
+  test("emits USING <method> for non-btree; btree stays implicit", () => {
+    expect(
+      emitK([
+        tbl("d", [f("meta", { t: "object", fields: {} })], {
+          indexes: [
+            {
+              name: "d_meta_gin",
+              cols: ["meta"],
+              unique: false,
+              method: "gin",
+            },
+          ],
+        }),
+      ]).find((s) => s.includes("INDEX")),
+    ).toBe('CREATE INDEX "d_meta_gin" ON "d" USING gin ("meta");');
+    expect(
+      emitK([
+        tbl("d", [f("name", scalar("string"))], {
+          indexes: [
+            {
+              name: "d_name_idx",
+              cols: ["name"],
+              unique: false,
+              method: "btree",
+            },
+          ],
+        }),
+      ]).find((s) => s.includes("INDEX")),
+    ).toBe('CREATE INDEX "d_name_idx" ON "d" ("name");');
+  });
+
+  test("emits WHERE for a partial index", () => {
+    expect(
+      emitK([
+        tbl("d", [f("score", scalar("int")), f("active", scalar("bool"))], {
+          indexes: [
+            {
+              name: "d_active",
+              cols: ["score"],
+              unique: false,
+              where: "active",
+            },
+          ],
+        }),
+      ]).find((s) => s.includes("INDEX")),
+    ).toBe('CREATE INDEX "d_active" ON "d" ("score") WHERE active;');
+  });
+
+  test("a method change IS detected; a predicate-only change is NOT (excluded from canonical)", () => {
+    const gin = tbl("d", [f("meta", { t: "object", fields: {} })], {
+      indexes: [{ name: "d_i", cols: ["meta"], unique: false, method: "gin" }],
+    });
+    const brin = tbl("d", [f("meta", { t: "object", fields: {} })], {
+      indexes: [{ name: "d_i", cols: ["meta"], unique: false, method: "brin" }],
+    });
+    expect(ud(diffK([gin], [brin])).up.length).toBeGreaterThan(0);
+
+    const p1 = tbl("d", [f("s", scalar("int")), f("a", scalar("bool"))], {
+      indexes: [{ name: "d_p", cols: ["s"], unique: false, where: "a" }],
+    });
+    const p2 = tbl("d", [f("s", scalar("int")), f("a", scalar("bool"))], {
+      indexes: [{ name: "d_p", cols: ["s"], unique: false, where: "NOT a" }],
+    });
+    expect(ud(diffK([p1], [p2]))).toEqual({ up: [], down: [] });
+  });
+
+  test("gin / brin / hash / partial indexes round-trip through the engine", async () => {
+    const objs = splitTables([
+      tbl(
+        "irt",
+        [
+          f("meta", { t: "object", fields: {} }),
+          f("tags", { t: "array", elem: scalar("string") }),
+          f("score", scalar("int")),
+          f("name", scalar("string")),
+          f("active", scalar("bool")),
+        ],
+        {
+          indexes: [
+            {
+              name: "irt_meta_gin",
+              cols: ["meta"],
+              unique: false,
+              method: "gin",
+            },
+            {
+              name: "irt_tags_gin",
+              cols: ["tags"],
+              unique: false,
+              method: "gin",
+            },
+            {
+              name: "irt_score_brin",
+              cols: ["score"],
+              unique: false,
+              method: "brin",
+            },
+            {
+              name: "irt_name_hash",
+              cols: ["name"],
+              unique: false,
+              method: "hash",
+            },
+            {
+              name: "irt_active",
+              cols: ["score"],
+              unique: false,
+              where: "active",
+            },
+          ],
+        },
+      ),
+    ]);
+    const conn = (await driver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
+    try {
+      await driver.apply(conn, emitKinds(registry, objs));
+      const live = await driver.introspectAll(conn);
+      const { up, down } = buildKindDiff(registry, live, objs);
+      expect({ up, down }).toEqual({ up: [], down: [] });
+    } finally {
+      await conn.close();
+    }
+  });
+});

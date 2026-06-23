@@ -94,6 +94,10 @@ export interface PgIndexPortable extends PortableObject {
   table: string;
   cols: string[];
   unique: boolean;
+  /** Access method: `btree` (default) | `gin` | `gist` | `brin` | `hash`. */
+  method?: string;
+  /** Partial-index predicate (`WHERE <expr>`). */
+  where?: string;
 }
 
 /**
@@ -313,12 +317,25 @@ const tableEngine: KindEngine<PgTablePortable, PgTablePortable> = {
 
 // --- index kind ---------------------------------------------------------------------------------
 
+/** Effective access method — `btree` is pg's default and omitted from DDL, so normalize undefined -> btree. */
+const idxMethod = (i: PgIndexPortable) => i.method ?? "btree";
+
 const indexEngine: KindEngine<PgIndexPortable, PgIndexPortable> = {
   lower: (i) => i,
-  emit: (i) => [
-    `CREATE ${i.unique ? "UNIQUE " : ""}INDEX ${escId(i.name)} ON ${escId(i.table)} (${i.cols.map(escId).join(", ")});`,
-  ],
+  emit: (i) => {
+    const using = i.method && i.method !== "btree" ? ` USING ${i.method}` : "";
+    const where = i.where ? ` WHERE ${i.where}` : "";
+    return [
+      `CREATE ${i.unique ? "UNIQUE " : ""}INDEX ${escId(i.name)} ON ${escId(i.table)}${using} (${i.cols.map(escId).join(", ")})${where};`,
+    ];
+  },
   remove: (i) => [`DROP INDEX IF EXISTS ${escId(i.name)};`],
+  // Change-detection over the STRUCTURAL shape (name/unique/method/cols). The partial `where` predicate
+  // is EXCLUDED — pg rewrites it on read (`x > 0` -> `(x > 0)`), the same line the table kind draws for
+  // column CHECK/DEFAULT — so a clean apply round-trips with no phantom; a predicate-only edit isn't
+  // auto-diffed (drop+recreate / re-gen).
+  canonical: (i) =>
+    `index:${i.table}:${i.name}:u${i.unique ? 1 : 0}:m${idxMethod(i)}:${i.cols.join(",")}`,
   // An index emits AFTER its table (deps), but NO `owner` -> no clustering: the spine then falls back
   // to ordinal+name, so all indexes emit as a rank group after all tables (pg's emit convention),
   // rather than clustered next to each table. owner is opt-in readability we deliberately decline.
@@ -684,6 +701,8 @@ export function splitTable(t: PgTable): PortableObject[] {
       table: t.name,
       cols: ix.cols,
       unique: ix.unique,
+      ...(ix.method && ix.method !== "btree" ? { method: ix.method } : {}),
+      ...(ix.where ? { where: ix.where } : {}),
     };
     out.push(index);
   }

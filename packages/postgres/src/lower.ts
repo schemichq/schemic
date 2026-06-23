@@ -155,6 +155,8 @@ export function lowerTable(def: PgTableDef): PgTable {
       name: ix.name ?? `${def.name}_${ix.cols.join("_")}_idx`,
       cols: ix.cols,
       unique: !!ix.unique,
+      ...(ix.method ? { method: ix.method } : {}),
+      ...(ix.where ? { where: ix.where } : {}),
     });
   }
 

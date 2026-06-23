@@ -143,6 +143,8 @@ interface IdxRow {
   index_name: string;
   column_name: string;
   is_unique: boolean;
+  method: string;
+  pred: string | null;
 }
 
 const nativeT = (name: string, params?: (string | number)[]): PortableType =>
@@ -267,21 +269,22 @@ async function pgIntrospect(
       WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = 'public'
       ORDER BY kcu.ordinal_position`,
   );
-  // Secondary indexes this driver can author — plain btree over real columns, UNIQUE or not (the ones
-  // emitted via $unique / .index([...])). Excludes the PK's implicit index, partial indexes
-  // (indpred), expression indexes (indexprs), and non-btree methods (gin/gist/…), which the driver
-  // can't emit — reading those back would phantom-REMOVE. `is_unique` distinguishes the two forms.
-  // Required so the `index` kind ROUND-TRIPS: the registry diffs by presence, so an un-introspected
-  // index phantom-adds and a non-emittable one phantom-removes.
+  // Secondary indexes this driver can author — over real columns, any access method (btree/gin/gist/
+  // brin/hash), UNIQUE or not, optionally PARTIAL (indpred). Excludes the PK's implicit index and
+  // EXPRESSION indexes (indexprs) — the driver can't author an index on an expression yet, so reading
+  // one back would phantom-REMOVE. `am.amname` is the method; `pg_get_expr(indpred)` is the partial
+  // predicate (excluded from the index kind's `canonical`, since pg rewrites it). Required so the
+  // `index` kind ROUND-TRIPS (the registry diffs by canonical; an un-introspected index phantom-adds).
   const { rows: idxs } = await conn.query<IdxRow>(
     `SELECT t.relname AS table_name, i.relname AS index_name, a.attname AS column_name,
-            ix.indisunique AS is_unique
+            ix.indisunique AS is_unique, am.amname AS method,
+            pg_get_expr(ix.indpred, ix.indrelid) AS pred
        FROM pg_class t
        JOIN pg_namespace n ON n.oid = t.relnamespace AND n.nspname = 'public'
        JOIN pg_index ix ON ix.indrelid = t.oid AND NOT ix.indisprimary
-            AND ix.indpred IS NULL AND ix.indexprs IS NULL
+            AND ix.indexprs IS NULL
        JOIN pg_class i ON i.oid = ix.indexrelid
-       JOIN pg_am am ON am.oid = i.relam AND am.amname = 'btree'
+       JOIN pg_am am ON am.oid = i.relam
        JOIN LATERAL unnest(string_to_array(ix.indkey::text, ' ')::int[])
             WITH ORDINALITY AS k(attnum, ord) ON true
        JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
@@ -368,7 +371,8 @@ async function pgIntrospect(
     byTable.set(c.table_name, list);
   }
 
-  // Group index rows -> PgIndexInfo[] per table (columns in index order, dedup by index name).
+  // Group index rows -> PgIndexInfo[] per table (columns in index order, dedup by index name). Method +
+  // partial predicate are per-index (repeated across its column rows) — set once.
   const idxBy = new Map<string, Map<string, PgIndexInfo>>();
   for (const r of idxs) {
     if (skip.has(r.table_name)) continue;
@@ -377,6 +381,8 @@ async function pgIntrospect(
       name: r.index_name,
       cols: [],
       unique: r.is_unique,
+      ...(r.method && r.method !== "btree" ? { method: r.method } : {}),
+      ...(r.pred ? { where: r.pred } : {}),
     };
     ix.cols.push(r.column_name);
     byName.set(r.index_name, ix);
