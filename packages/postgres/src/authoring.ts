@@ -174,11 +174,14 @@ export class PgField<
 
 // --- the `s` vocabulary (pg lingo) -------------------------------------------------------------
 
-const mk = (
+// Generic in the Zod schema so each `s.*` factory keeps its precise type — without this, `App<T>` (and
+// the query builder's result typing) collapse every field to `unknown`.
+const mk = <S extends z.ZodType>(
   type: string,
-  schema: z.ZodType,
+  schema: S,
   params?: (string | number)[],
-): PgField => new PgField(schema, { pg: params ? { type, params } : { type } });
+): PgField<S> =>
+  new PgField<S>(schema, { pg: params ? { type, params } : { type } });
 
 /** The Postgres authoring namespace. Zod drop-ins (string/number/…) + native pg types + `$postgres`. */
 export const s = {
@@ -296,11 +299,35 @@ export class PgTableDef<
   Name extends string = string,
   F extends Record<string, PgField> = Record<string, PgField>,
 > {
+  /**
+   * A Zod object over the columns' schemas — the single source for row validation + encode/decode +
+   * the App/Wire types. Mirrors `@schemic/surrealdb`'s `TableDef.object`; the query builder reads its
+   * `.shape` for per-column ref schemas and runs it for full-row decode, instead of re-deriving them.
+   * NOTE: this is the AUTHORED columns only — a table's implicit `id text PRIMARY KEY` (added at emit
+   * time when no PK is declared) is not a field, so it's absent here; declare an `id` column to query it.
+   */
+  readonly object: z.ZodObject<{ [K in keyof F]: F[K]["schema"] }>;
+
   constructor(
     readonly name: Name,
     readonly fields: F,
     readonly config: PgTableConfig = {},
-  ) {}
+  ) {
+    const zshape: Record<string, z.ZodType> = {};
+    for (const [k, f] of Object.entries(fields)) zshape[k] = f.schema;
+    this.object = z.object(zshape) as z.ZodObject<{
+      [K in keyof F]: F[K]["schema"];
+    }>;
+  }
+
+  /** Decode a DB wire row to its App object (`z.decode` through {@link object}). */
+  decode(row: unknown): App<this> {
+    return z.decode(this.object, row as never) as App<this>;
+  }
+  /** No-throw decode — `{ success, data } | { success, error }`. */
+  safeDecode(row: unknown) {
+    return z.safeDecode(this.object, row as never);
+  }
 
   /** Composite / custom PRIMARY KEY (overrides the implicit `id`). */
   primaryKey(...cols: (keyof F & string)[]): PgTableDef<Name, F> {

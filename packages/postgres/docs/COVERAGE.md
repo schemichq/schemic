@@ -123,6 +123,25 @@ round-trip (author `s.*` → lower → emit → introspect → diff = 0) · `[n/
 - [~] column **type** change (best-effort cast); whole-object `overwrite` (coarse)
 - [ ] diff of the new clauses (identity/PK/default/check/FK-actions) — diff is still type/nullability-level
 
+### Query (read) builder — `@schemic/postgres/query`
+> Opt-in, tree-shakeable subpath (`import { select } from "@schemic/postgres/query"`); a schema-only
+> project never pulls it. Driver-OWNED operators + SQL lowering, composing the dialect-neutral machinery
+> from `@schemic/core/query` (`FieldRefBase`/`Project`/`decodeProjection`) so result inference is
+> cross-driver. Decodes through `PgTableDef.object` — the same row codec a full-row read uses.
+- [x] `select(table)` → typed single-table `SELECT`; bare result is `App<TD>[]` (decoded)
+- [x] `.where(r => …)` with `eq/neq/lt/lte/gt/gte` + `and(...)`/`or(...)`, lowered to positional `$1..$n` binds
+- [x] `.orderBy(r => col, "asc"|"desc")`, `.limit(n)`
+- [x] `.return(r => ({ alias: r.col, … }))` flat projection — re-types the result via core's `Project<P>`
+- [x] decode-by-default (full-row via `PgTableDef.object`, projection via core's `decodeProjection`); `.raw()` opts out
+- [x] `.toSQL()` renders `{ sql, params }` without executing; `.run(conn)` executes + decodes
+- [x] `PgTableDef.object` (a `z.ZodObject` over the columns) + `.decode(row)` / `.safeDecode(row)` — the row codec the builder reuses (mirrors `@schemic/surrealdb`'s `TableDef.object`/`decode`)
+- [~] **implicit `id` is not queryable** — a table's implicit `id text PRIMARY KEY` is added at emit time, not a field, so it's absent from `object`/`App`/the row refs. Declare an explicit `id` column (`id: s.uuid()`, `s.text().$primaryKey()`, …) to filter/return it. (Phase-0 line; aligns with the "name your PK" guidance below.)
+- [n/a] joins / CTEs / sub-selects / aggregates / writes — later phases (Phase-0 is single-table SELECT)
+
+> `$postgres` codec params are now precisely typed (`encode(app)`, `decode(wire)`), since the `s.*` leaf
+> factories return a precise `PgField<S>` (the `mk<S>` generic) rather than a wide `PgField<ZodType>` —
+> so the earlier "wire-side codec types are loose" gap is closed.
+
 ### Connection & engine
 - [x] `postgresConnection(...)` factory (static / resolver / keyed collection); `connect` reads `config.params.url`
 - [x] `Driver.query` (named `$name` + vars → positional `$1..$n` bind params); `pgSql` safe template builder

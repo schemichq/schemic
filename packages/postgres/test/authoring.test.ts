@@ -361,3 +361,50 @@ describe("defineView: CREATE VIEW", () => {
     }
   });
 });
+
+describe("PgTableDef.object / decode (row codec — what the query builder reuses)", () => {
+  const post = defineTable("post", {
+    title: s.text(),
+    views: s.integer(),
+    at: s.timestamptz(),
+  });
+
+  test("object is a z.ZodObject whose shape mirrors the authored columns", () => {
+    expect(post.object).toBeInstanceOf(z.ZodObject);
+    expect(Object.keys(post.object.shape).sort()).toEqual([
+      "at",
+      "title",
+      "views",
+    ]);
+  });
+
+  test("decode runs the wire row through the column codecs (timestamptz -> Date)", () => {
+    const row = post.decode({
+      title: "hello",
+      views: 3,
+      at: new Date("2021-02-03T04:05:06.000Z"),
+    });
+    expect(row.title).toBe("hello");
+    expect(row.views).toBe(3);
+    expect(row.at).toBeInstanceOf(Date);
+  });
+
+  test("decode applies a $postgres codec (wire text -> app value)", () => {
+    const t = defineTable("slugged", {
+      slug: s.text().$postgres(s.text(), {
+        encode: (a: string) => a.toLowerCase(),
+        decode: (w) => String(w).toUpperCase(),
+      }),
+    });
+    expect(t.decode({ slug: "ab-c" }).slug).toBe("AB-C");
+  });
+
+  test("safeDecode reports failure without throwing", () => {
+    const r = post.safeDecode({
+      title: "x",
+      views: "not-an-int",
+      at: new Date(),
+    });
+    expect(r.success).toBe(false);
+  });
+});
