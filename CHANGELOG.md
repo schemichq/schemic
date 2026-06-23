@@ -11,6 +11,11 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 
 ## [Unreleased]
 
+### Added
+- **surrealdb:** `defineFunction(args).returns(R).call(db, args)` — the (B) DB-functions-as-code call
+  site over core's `callFunction`: args encoded via the param schemas, result decoded through `.returns(R)`
+  (so `.returns(s.datetime()).call(db)` yields a real `Date`). First driver impl of the `callable` capability.
+
 ### Changed (BREAKING — alpha)
 - **postgres / surrealdb (package split, M0.3):** the authoring index (`@schemic/<driver>`) is now
   **side-effect-free** — `s.*`/`define*`/`surql` only. Moved out:
