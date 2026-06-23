@@ -6,10 +6,12 @@
  * - `FieldRefBase<T>` — the carrier a driver's field ref extends, so result inference is cross-driver.
  * - `Project<P>` — projection result-type inference (`.return(row => P)` → the decoded shape).
  * - the projection codec — decode a projected (subset/renamed) row at runtime.
- *
- * The `.call` capability (invoke a defined DB function + decode) lives on the `Driver` contract as
- * `CallableFunctions` (see `@schemic/core` `driver/driver`).
+ * - `callFunction` — invoke a defined DB function via the `callable` capability + decode through
+ *   `.returns(R)` (the neutral half of the (B) `.call()`).
  */
+export { callFunction } from "./call";
 export { projectionSchema, decodeProjection, type ProjectionField } from "./codec";
 export type { Project } from "./project";
 export { brandRef, type FieldRefBase, type RefValue } from "./ref";
+// Re-exported so a driver builds its `.call()` from one import (`@schemic/core/query`).
+export type { CallableFunctions } from "../driver/driver";

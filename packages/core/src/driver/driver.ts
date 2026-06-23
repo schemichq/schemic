@@ -146,17 +146,18 @@ export interface ShadowCapability<Conn> {
 
 /**
  * User-defined DB functions — the `.call` side of the query layer's (B) surface (DB functions as code).
- * `invoke` calls a defined function by name with already-encoded args and returns RAW rows; the caller
- * decodes them through the function's `.returns(R)` schema (the schema-driven toolkit in
- * `@schemic/core/query`). A defined function still emits/migrates via the schema engine regardless; this
- * capability only adds INVOCATION. (surreal: `RETURN fn::name($a)`; pg: `SELECT … FROM name($a)`.)
+ * `invoke` calls a defined function by name with already-encoded args and returns the function's RAW
+ * result (the driver extracts it from its own response shape — surreal `RETURN fn::name($a)` yields the
+ * value; pg `SELECT … FROM name($a)` yields a row set). The caller decodes that raw value through the
+ * function's `.returns(R)` schema via `callFunction` in `@schemic/core/query`. A defined function still
+ * emits/migrates via the schema engine regardless; this capability only adds INVOCATION.
  */
 export interface CallableFunctions<Conn = unknown> {
-  invoke<T = unknown>(
+  invoke(
     conn: Conn,
     name: string,
     args: Record<string, unknown>,
-  ): Promise<T[]>;
+  ): Promise<unknown>;
 }
 
 /**
