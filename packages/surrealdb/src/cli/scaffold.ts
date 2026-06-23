@@ -116,12 +116,13 @@ export const ${C} = defineRelation("${name}", {
 // .from(SomeTable).to(OtherTable).enforced()
 `;
     case "view":
-      return `import { defineView, surql } from "@schemic/surrealdb";
+      return `import { defineView, s, surql } from "@schemic/surrealdb";
 
 // A pre-computed (materialized) view — SurrealDB keeps its rows in sync with the source query.
-export const ${C} = defineView(
-  "${name}",
-  surql\`SELECT * FROM thing WHERE true\`,
+// The optional shape on defineView(name, shape) types the projected rows (App + decode); .as() sets
+// the SELECT. A shapeless defineView("${name}").as(...) leaves the rows untyped.
+export const ${C} = defineView("${name}", { name: s.string() }).as(
+  surql\`SELECT name FROM thing WHERE true\`,
 );
 `;
     case "function":

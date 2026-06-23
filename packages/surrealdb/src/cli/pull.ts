@@ -508,10 +508,11 @@ function renderTableConst(
   t: StructTable,
   ctx: RenderCtx,
 ): { code: string; factory: string } {
-  // A pre-computed VIEW: `defineView(name, surql\`SELECT …\`)` — no fields, then the common table
-  // config (comment / permissions / changefeed); TYPE ANY + SCHEMALESS are implied by defineView.
+  // A pre-computed VIEW: `defineView(name).as(surql\`SELECT …\`)` — shapeless (the projection types
+  // aren't in INFO), then the common table config (comment / permissions / changefeed); TYPE ANY +
+  // SCHEMALESS are implied by defineView.
   if (t.view !== undefined) {
-    let code = `export const ${ctx.constOf(t.name)} = defineView(${JSON.stringify(t.name)}, surql\`${t.view}\`)`;
+    let code = `export const ${ctx.constOf(t.name)} = defineView(${JSON.stringify(t.name)}).as(surql\`${t.view}\`)`;
     if (t.comment) code += `\n  .comment(${JSON.stringify(t.comment)})`;
     const vperm = renderPerms(
       t.permissions,

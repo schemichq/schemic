@@ -2420,15 +2420,20 @@ export function defineTable<Name extends string, S extends Shape = {}>(
 
 // biome-ignore lint/suspicious/noExplicitAny: shape-agnostic table reference for relation endpoints
 type AnyTable = TableDef<string, any>;
-type TableRef = AnyTable | readonly AnyTable[];
-type NamesOf<T> =
-  T extends TableDef<infer N extends string, infer _>
+/** A single relation endpoint: a table def, a SurrealDB `Table` instance, or a bare table name. */
+type TableLike = AnyTable | Table<string> | string;
+/** A relation endpoint reference — one table, or an array (a `|`-union of `in`/`out` tables); mix freely. */
+type TableRef = TableLike | readonly TableLike[];
+/** The table-name string literal a single {@link TableLike} carries. */
+type NameOf<T> = T extends string
+  ? T
+  : T extends TableDef<infer N extends string, infer _>
     ? N
-    : T extends readonly (infer E)[]
-      ? E extends TableDef<infer N extends string, infer _>
-        ? N
-        : never
+    : T extends Table<infer N extends string>
+      ? N
       : never;
+/** The endpoint name(s) a {@link TableRef} carries — drives the typed `in`/`out` record links. */
+type NamesOf<T> = T extends readonly (infer E)[] ? NameOf<E> : NameOf<T>;
 
 /** A relation's full shape: the edge fields plus the `in`/`out` record endpoints. */
 type RelationShape<
@@ -2442,7 +2447,8 @@ type RelationShape<
 };
 
 function tableNames(ref: TableRef): string[] {
-  return (Array.isArray(ref) ? ref : [ref as AnyTable]).map((t) => t.name);
+  const arr = (Array.isArray(ref) ? ref : [ref]) as readonly TableLike[];
+  return arr.map((t) => (typeof t === "string" ? t : t.name));
 }
 
 /** Build a relation's runtime fields: the edge fields + `in`/`out` (empty endpoints = any record). */
@@ -2492,7 +2498,8 @@ export class RelationDef<
       },
     );
   }
-  /** Restrict the source endpoint(s) (`in`). */
+  /** Restrict the source endpoint(s) (`in`) — a `TableDef`, a SurrealDB `Table`, a bare name string, or
+   *  an array mixing them for a `FROM a | b` union. Endpoint names flow into the typed `in` record link. */
   from<F extends TableRef>(ref: F): RelationDef<Name, S, NamesOf<F>, Out> {
     return new RelationDef(
       this.name,
@@ -2502,7 +2509,8 @@ export class RelationDef<
       this.isEnforced,
     ) as unknown as RelationDef<Name, S, NamesOf<F>, Out>;
   }
-  /** Restrict the target endpoint(s) (`out`). */
+  /** Restrict the target endpoint(s) (`out`) — a `TableDef`, a SurrealDB `Table`, a bare name string, or
+   *  an array mixing them for a `TO a | b` union. Endpoint names flow into the typed `out` record link. */
   to<T extends TableRef>(ref: T): RelationDef<Name, S, In, NamesOf<T>> {
     return new RelationDef(
       this.name,
@@ -2536,26 +2544,48 @@ export function defineRelation<Name extends string, S extends Shape = {}>(
 }
 
 /**
- * Define a pre-computed (materialized) VIEW table — `DEFINE TABLE <name> TYPE ANY SCHEMALESS AS
- * <query>`. Its rows are computed from the SELECT (SurrealDB keeps them in sync as the source tables
- * change), so a view has NO authored fields/id. Chain `.permissions()` / `.comment()` / `.changefeed()`
- * as on any table:
+ * The intermediate of `defineView(name, shape?)` — call `.as(query)` to set the SELECT. The optional
+ * `shape` is TYPE-ONLY: it types the projected rows (`App<typeof View>` + the `encode`/`decode` codecs)
+ * but emits NO `DEFINE FIELD` — a view's rows are computed, so the DDL stays `TYPE ANY SCHEMALESS AS …`.
+ */
+export class ViewBuilder<Name extends string, S extends Shape> {
+  constructor(
+    private readonly name: Name,
+    private readonly shape: S,
+  ) {}
+  /**
+   * Set the view's query — `DEFINE TABLE <name> TYPE ANY SCHEMALESS AS <query>`. Returns a normal
+   * table, so `.permissions()` / `.comment()` / `.changefeed()` chain after as on any table. The
+   * `shape` must match the SELECT's projection (the query is freeform SurrealQL — unchecked).
+   */
+  as(query: Expr): TableDef<Name, WithSmartId<Name, S>> {
+    return new TableDef(
+      this.name,
+      applySmartId(this.name, this.shape) as unknown as Fields<
+        WithSmartId<Name, S>
+      >,
+      { schemafull: false, type: "any", view: query },
+    );
+  }
+}
+
+/**
+ * Define a pre-computed (materialized) VIEW table — `defineView(name, shape?).as(query)` emits
+ * `DEFINE TABLE <name> TYPE ANY SCHEMALESS AS <query>`. Its rows are computed from the SELECT (SurrealDB
+ * keeps them in sync). The optional `shape` types the projected rows for `App`/decode (it emits no
+ * fields). Chain `.permissions()` / `.comment()` / `.changefeed()` after `.as(…)` as on any table:
  *
  * ```ts
- * export const Adults = defineView("adults", surql`SELECT name, age FROM person WHERE age >= 18`);
+ * const Raw = defineView("raw").as(surql`SELECT * FROM person`);            // untyped rows
+ * const Adults = defineView("adults", { name: s.string(), age: s.number() })
+ *   .as(surql`SELECT name, age FROM person WHERE age >= 18`);               // App = { id, name, age }
  * ```
  */
-export function defineView<Name extends string>(
+export function defineView<Name extends string, S extends Shape = {}>(
   name: Name,
-  // biome-ignore lint/complexity/noBannedTypes: an empty shape — a view has no authored fields.
-  query: Expr,
-): TableDef<Name, {}> {
-  // biome-ignore lint/complexity/noBannedTypes: see above.
-  return new TableDef<Name, {}>(name, {} as Fields<{}>, {
-    schemafull: false,
-    type: "any",
-    view: query,
-  });
+  shape?: S,
+): ViewBuilder<Name, S> {
+  return new ViewBuilder(name, (shape ?? ({} as S)) as S);
 }
 
 /**

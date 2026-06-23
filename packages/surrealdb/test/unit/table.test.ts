@@ -6,6 +6,7 @@ import {
   defineAnalyzer,
   defineRelation,
   defineTable,
+  defineView,
   RecordIdField,
   s,
 } from "../../src/pure";
@@ -486,6 +487,28 @@ describe("relation builder", () => {
     });
   });
 
+  test("from()/to() accept a name string, a Table instance, and a mixed array", () => {
+    const byName = defineRelation("r1").from("user").to("post");
+    expect(byName.config.relation).toEqual({ from: ["user"], to: ["post"] });
+
+    const byTable = defineRelation("r2")
+      .from(new Table("user"))
+      .to(new Table("post"));
+    expect(byTable.config.relation).toEqual({ from: ["user"], to: ["post"] });
+
+    // a mixed array (TableDef + name + Table) emits a FROM-union; names + typed `in` link carry through.
+    const mixed = defineRelation("r3")
+      .from([User, "tag", new Table("post")])
+      .to(Post);
+    expect(mixed.config.relation).toEqual({
+      from: ["user", "tag", "post"],
+      to: ["post"],
+    });
+    expect(
+      (mixed.fields.in as RecordIdField<"user" | "tag" | "post">).tables,
+    ).toEqual(["user", "tag", "post"]);
+  });
+
   test("a normal table has no relation config", () => {
     expect(User.kind).toBe("table");
     expect(User.config.relation).toBeUndefined();
@@ -679,5 +702,33 @@ describe("table.index() renameable field-ref callback", () => {
         return [t.a, t.b];
       },
     );
+  });
+});
+
+describe("defineView(name, shape?).as(query)", () => {
+  test("a typed view's shape drives decode but emits NO DEFINE FIELD", () => {
+    const V = defineView("v", {
+      id: s.string(),
+      name: s.string(),
+      n: s.number(),
+    }).as(surql`SELECT name, n FROM t`);
+    // The shape is type-only: emit is just the AS SELECT head, no fields.
+    expect(emitTable(V)).toBe(
+      "DEFINE TABLE v TYPE ANY SCHEMALESS AS SELECT name, n FROM t;",
+    );
+    expect(emitTable(V)).not.toContain("DEFINE FIELD");
+    // ...but the shape types + decodes the projected rows.
+    const row = V.decode({ id: new RecordId("v", "x"), name: "Ada", n: 3 });
+    expect(row.name).toBe("Ada");
+    expect(row.n).toBe(3);
+  });
+
+  test("a shapeless view still emits AS SELECT and chains table config", () => {
+    const V = defineView("raw")
+      .as(surql`SELECT * FROM person`)
+      .comment("all people");
+    const head = emitTable(V).split("\n")[0];
+    expect(head).toContain("TYPE ANY SCHEMALESS AS SELECT * FROM person");
+    expect(head).toContain('COMMENT "all people"');
   });
 });

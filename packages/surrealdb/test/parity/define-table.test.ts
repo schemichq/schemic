@@ -311,13 +311,13 @@ live("AS SELECT (pre-computed view)", () => {
       age: s.int(),
     });
 
-  test("a plain projection view round-trips; pull renders defineView()", async () => {
-    const view = defineView(
-      "dt_adults",
+  test("a plain projection view round-trips; pull renders defineView().as()", async () => {
+    const view = defineView("dt_adults").as(
       surql`SELECT name, age FROM dt_person WHERE age >= 18`,
     );
     const { pulled } = await roundTrip([Person(), view], "dt_adults");
     expect(pulled).toContain("defineView(");
+    expect(pulled).toContain(".as(surql`SELECT name, age");
     expect(pulled).toContain("SELECT name, age FROM dt_person WHERE age >= 18");
     // a view's TS uses no `s.*` — only the factory + surql are imported.
     expect(pulled).toContain(
@@ -327,10 +327,9 @@ live("AS SELECT (pre-computed view)", () => {
   });
 
   test("an aggregate view (GROUP BY) + .comment() round-trips", async () => {
-    const view = defineView(
-      "dt_by_name",
-      surql`SELECT name, count() AS total FROM dt_person GROUP BY name`,
-    ).comment("name counts");
+    const view = defineView("dt_by_name")
+      .as(surql`SELECT name, count() AS total FROM dt_person GROUP BY name`)
+      .comment("name counts");
     const { pulled } = await roundTrip([Person(), view], "dt_by_name");
     expect(pulled).toContain("defineView(");
     expect(pulled).toContain("GROUP BY name");

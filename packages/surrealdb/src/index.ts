@@ -98,6 +98,7 @@ export {
   s,
   surrealTypeRegistry,
   TableDef,
+  ViewBuilder,
 } from "./pure";
 /** Type a `database/seed/*.ts` default export: `export default defineSeed(async (db, ctx) => { … })`. */
 export { defineSeed, type SeedFn } from "./seed";
