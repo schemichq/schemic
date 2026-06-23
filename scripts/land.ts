@@ -116,8 +116,12 @@ gitIO("merge", "--ff-only", branch);
 
 // --- gate: never ship red --------------------------------------------------------------------
 if (!flag("--no-test")) {
-  console.log("gate: typecheck + test workspace...");
+  console.log("gate: build + typecheck + test workspace...");
   try {
+    // BUILD FIRST: the e2e suites load each driver from its compiled `lib/` (the CLI loader picks the
+    // `import`/`default` export, not `bun`->src), so a stale lib would let the gate test old code. lib/
+    // is gitignored, so this doesn't dirty the tree.
+    run("bun", ["run", "--filter", "*", "build"]);
     run("bun", ["run", "--filter", "*", "typecheck"]);
     run("bun", ["run", "--filter", "*", "test"]);
   } catch {
