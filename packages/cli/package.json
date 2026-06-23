@@ -1,6 +1,6 @@
 {
   "name": "@schemic/cli",
-  "version": "0.1.0-alpha.15",
+  "version": "0.1.0-alpha.16",
   "description": "The Schemic CLI — driver-agnostic schema migrations (gen/migrate/diff/push/pull/check).",
   "license": "MIT",
   "author": "Vertio Solutions",
