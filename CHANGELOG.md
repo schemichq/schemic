@@ -11,10 +11,20 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 
 ## [Unreleased]
 
+### Changed (BREAKING — alpha)
+- **postgres / surrealdb (package split, M0.3):** the authoring index (`@schemic/<driver>`) is now
+  **side-effect-free** — `s.*`/`define*`/`surql` only. Moved out:
+  - the **connection factory** + connection types → `@schemic/<driver>/connection`
+    (`surrealConnection`, `postgresConnection`/`PgConn`/`pgSql`). Update `schemic.config.ts` imports.
+  - the **`Driver` impl** + `emit*`/`lower`/`introspect` + the `registerDriver` side-effect →
+    `@schemic/<driver>/driver` (engine/CLI-only).
+  So importing `s.*` no longer drags the diff/emit engine or registers the driver. The query builder
+  stays at `@schemic/<driver>/query`. (surrealdb also made its field registries `globalThis` singletons
+  so the index and `/driver` module instances share state.)
+
 ### Changed
-- **cli:** the driver loader now resolves a driver via its `@schemic/<driver>/driver` subpath first
-  (falling back to the package index), so a driver can move `registerDriver` + its engine off the
-  side-effect-free authoring index. Backward-compatible; no user-facing change until drivers split.
+- **cli:** the driver loader resolves a driver via its `@schemic/<driver>/driver` subpath first (falling
+  back to the package index for not-yet-split drivers).
 
 ## [0.1.0-alpha.20] - 2026-06-23
 
