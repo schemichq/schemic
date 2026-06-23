@@ -8,15 +8,14 @@ Legend: ✅ done · 🚧 in progress · 🟡 partial · ⏳ not started
 
 ---
 
-## Phase 0 — typed reads + foundations ✅ *(shipped alpha.18–.20; one cleanup left)*
+## Phase 0 — typed reads + foundations ✅ *(complete; shipped alpha.18–.21)*
 
 **Core (M0)**
 - ✅ **M0.1** `@schemic/core/query` toolkit — `Row`/`FieldRef` (`brandRef`), `Project<P>` projection
   inference, `projectionSchema`/`decodeProjection`.
 - ✅ **M0.2** `callable` capability on the `Driver` contract + `callFunction` (invoke + decode).
-- 🚧 **M0.3** package-split: side-effect-free authoring index + `/driver` + `/connection` subpaths,
-  loader prefers `/driver`. Both drivers split + **shipped (alpha.21)** ✅; **⏳ remove the loader
-  fallback** (now unblocked — published drivers have `/driver`) → then M0.3 is closed.
+- ✅ **M0.3** package-split: side-effect-free authoring index + `/driver` + `/connection` subpaths; the
+  CLI loader now **requires** `/driver` (index fallback removed). **Closed.**
 
 **Drivers (M1–M5)**
 - ✅ Typed single-table `select().where().orderBy().limit().return()` → SQL → decode-by-default,
@@ -25,7 +24,8 @@ Legend: ✅ done · 🚧 in progress · 🟡 partial · ⏳ not started
 ## Phase 1 — DB functions as code (`.call`) 🚧
 
 - ✅ core `callFunction` — invoke via `callable` + decode through `.returns(R)`.
-- 🚧 driver `invoke` + `defineFunction(args).returns(R).call(db, args)` — **surrealdb ✅**, postgres ⏳.
+- 🚧 driver `invoke` + `defineFunction(args).returns(R).call(db, args)` — **surrealdb ✅**; **postgres
+  ⏸ on hold** (Manuel).
 - ⏳ raw-body ↔ `.returns()` **soundness shadow-check** (design: `query-layer-soundness.md`) — gated on
   the drivers exposing `callable` + a `shadowInvoke`.
 

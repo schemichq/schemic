@@ -11,6 +11,10 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 
 ## [Unreleased]
 
+### Changed
+- **cli:** the driver loader now **requires** the `@schemic/<driver>/driver` entry (dropped the index
+  fallback) — completes the M0.3 package split. Drivers must be >= 0.1.0-alpha.21.
+
 ## [0.1.0-alpha.21] - 2026-06-23
 
 ### Added
