@@ -80,42 +80,38 @@ export async function ensureDriver(name: string): Promise<void> {
   // `bunx`/`npx` from a temp dir, so a driver installed in the user's project must be found by cwd.
   let lastErr: unknown;
   let loaded = false;
-  // Prefer the `/driver` engine entry (where `registerDriver` lives once a driver splits its package, so
-  // its authoring index stays side-effect-free); fall back to the index `.` for drivers not yet split.
-  outer: for (const base of [join(process.cwd(), "noop.js"), import.meta.url]) {
-    for (const subpath of ["./driver", "."]) {
-      const entry = compiledEntry(pkg, base, subpath);
-      if (!entry) continue;
-      try {
-        await import(pathToFileURL(entry).href);
-        loaded = true;
-        break outer;
-      } catch (e) {
-        lastErr = e;
-      }
+  // A driver registers via its `/driver` engine entry (the authoring index is side-effect-free, so
+  // importing it never registers). Load `/driver` from cwd's scope first (the CLI is often run via
+  // bunx/npx from a temp dir, so a driver in the user's project must be found by cwd), then the CLI's own.
+  for (const base of [join(process.cwd(), "noop.js"), import.meta.url]) {
+    const entry = compiledEntry(pkg, base, "./driver");
+    if (!entry) continue;
+    try {
+      await import(pathToFileURL(entry).href);
+      loaded = true;
+      break;
+    } catch (e) {
+      lastErr = e;
     }
   }
-  // Last resort: plain specifier imports (covers an unbuilt monorepo checkout, where lib is absent).
+  // Plain specifier covers an unbuilt monorepo checkout (no lib; resolves the `/driver` bun -> src export).
   if (!loaded) {
-    for (const spec of [`${pkg}/driver`, pkg]) {
-      try {
-        await import(spec);
-        loaded = true;
-        break;
-      } catch (e) {
-        lastErr = e;
-      }
+    try {
+      await import(`${pkg}/driver`);
+      loaded = true;
+    } catch (e) {
+      lastErr = e;
     }
   }
   if (!loaded)
     throw new Error(
-      `could not load the "${name}" database driver (package ${pkg}). ` +
-        `Install it in your project, then re-run:\n    bun add ${pkg}\n  (${
+      `could not load the "${name}" database driver from ${pkg}/driver. ` +
+        `Install it (and ensure it's >= 0.1.0-alpha.21, which exposes the /driver entry):\n    bun add ${pkg}\n  (${
           lastErr instanceof Error ? lastErr.message : String(lastErr)
         })`,
     );
   if (!driverNames().includes(name))
-    throw new Error(`package ${pkg} did not register a "${name}" driver.`);
+    throw new Error(`package ${pkg}/driver did not register a "${name}" driver.`);
 }
 
 /** Addressing + connection overrides every command accepts. */

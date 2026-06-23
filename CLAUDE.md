@@ -17,7 +17,7 @@ what it imports:
 - `@schemic/<driver>/driver` — the `Driver` impl + `emit*`/`lower`/`introspect` + the **`registerDriver`
   side-effect** (CLI/engine-only; keep `emit*` etc. OUT of the authoring index).
 
-The CLI loader imports `/driver` to register (falling back to the index `.` for not-yet-split drivers),
+The CLI loader imports `/driver` to register (it **requires** the `/driver` entry — drivers >= alpha.21),
 so importing `s.*` never drags the diff/emit engine into an app bundle. Core mirrors this:
 `@schemic/core/query` is the neutral query toolkit (`Row`/`Project`/`decodeProjection`/`callFunction`).
 
