@@ -1,0 +1,3 @@
+# The syntax-coverage suite is hand-authored SOURCE, not c8/istanbul output —
+# re-include it despite the root `coverage` ignore.
+!coverage/
