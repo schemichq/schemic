@@ -440,25 +440,25 @@ describe("field clauses", () => {
     );
   });
 
-  // FIXED (batch 2): record references — REFERENCE [ON DELETE ...] via .reference().
+  // FIXED (batch 2): record references — REFERENCE [ON DELETE ...] via .$reference().
   test("REFERENCE / ON DELETE on record fields", () => {
-    expect(fieldDdl(s.recordId("person").reference())).toBe(
+    expect(fieldDdl(s.recordId("person").$reference())).toBe(
       "DEFINE FIELD f ON TABLE t TYPE record<person> REFERENCE;",
     );
     expect(
-      fieldDdl(s.recordId("person").reference({ onDelete: "cascade" })),
+      fieldDdl(s.recordId("person").$reference({ onDelete: "cascade" })),
     ).toBe(
       "DEFINE FIELD f ON TABLE t TYPE record<person> REFERENCE ON DELETE CASCADE;",
     );
     // works on array<record<>> too, and a surql expr -> ON DELETE THEN:
     expect(
-      fieldDdl(s.array(s.recordId("c")).reference({ onDelete: "unset" })),
+      fieldDdl(s.array(s.recordId("c")).$reference({ onDelete: "unset" })),
     ).toBe(
       "DEFINE FIELD f ON TABLE t TYPE array<record<c>> REFERENCE ON DELETE UNSET;",
     );
     expect(
       fieldDdl(
-        s.recordId("person").reference({ onDelete: surql`DELETE $this` }),
+        s.recordId("person").$reference({ onDelete: surql`DELETE $this` }),
       ),
     ).toBe(
       "DEFINE FIELD f ON TABLE t TYPE record<person> REFERENCE ON DELETE THEN DELETE $this;",

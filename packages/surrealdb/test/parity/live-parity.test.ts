@@ -275,13 +275,13 @@ live("batch 1 + 2 features round-trip on the DB", () => {
     expect(kind("sizedset")).toBe("set<int, 5>");
   });
 
-  test("record REFERENCE [ON DELETE …] via .reference()", async () => {
+  test("record REFERENCE [ON DELETE …] via .$reference()", async () => {
     const T = defineTable("pl_b2_ref", {
       id: z.string(),
-      author: s.recordId("pl_b2_ref").reference({ onDelete: "cascade" }),
+      author: s.recordId("pl_b2_ref").$reference({ onDelete: "cascade" }),
       friends: s
         .array(s.recordId("pl_b2_ref"))
-        .reference({ onDelete: "unset" }),
+        .$reference({ onDelete: "unset" }),
     });
     expect(await applyEach(db!, emitTable(T, { exists: "overwrite" }))).toEqual(
       [],

@@ -77,7 +77,7 @@ describe("fromTableDef", () => {
 
   test("record reference with ON DELETE", () => {
     const t = defineTable("comment", {
-      author: s.recordId("user").reference({ onDelete: "cascade" }),
+      author: s.recordId("user").$reference({ onDelete: "cascade" }),
     });
     expect(normalizeTable(fromTableDef(t)).fields).toEqual([
       {

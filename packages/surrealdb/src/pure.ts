@@ -107,7 +107,7 @@ export interface SurrealMeta {
    * <name ?? <table>_<field>_idx> ON TABLE <table> FIELDS <field> <UNIQUE | spec>`. `spec` carries a
    * FULLTEXT/HNSW/DISKANN clause (built via `buildIndexSpec`); it is mutually exclusive with `unique`. */
   index?: { unique?: boolean; name?: string; spec?: string };
-  /** `REFERENCE [ON DELETE …]` on a record-link field. See `.reference()`. */
+  /** `REFERENCE [ON DELETE …]` on a record-link field. See `.$reference()`. */
   reference?:
     | true
     | { onDelete?: "reject" | "cascade" | "ignore" | "unset" | BoundQuery };
@@ -929,11 +929,11 @@ export class SField<
     return this.$unique(name);
   }
   /**
-   * Mark a record-link field as a `REFERENCE` so the DB tracks back-links. `onDelete` sets the
-   * `ON DELETE` action — `"reject" | "cascade" | "ignore" | "unset"`, or a `surql` expression
-   * (emitted as `ON DELETE THEN …`). Omit it for a bare `REFERENCE`.
+   * Mark a record-link field as a `REFERENCE` so the DB tracks back-links (`$`-prefixed like the other
+   * DDL clauses). `onDelete` sets the `ON DELETE` action — `"reject" | "cascade" | "ignore" | "unset"`,
+   * or a `surql` expression (emitted as `ON DELETE THEN …`). Omit it for a bare `REFERENCE`.
    */
-  reference(opts?: {
+  $reference(opts?: {
     onDelete?: "reject" | "cascade" | "ignore" | "unset" | BoundQuery;
   }): SField<S, Flags> {
     return new SField(this.schema, {

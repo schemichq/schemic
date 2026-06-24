@@ -104,7 +104,7 @@ describe("renderPerFile", () => {
     );
   });
 
-  test("a record field's REFERENCE round-trips to .reference(...) (VALUE preserved)", () => {
+  test("a record field's REFERENCE round-trips to .$reference(...) (VALUE preserved)", () => {
     const withRef: DbStructured = {
       tables: [
         t("account", [f("id", "string", "account")]),
@@ -116,7 +116,7 @@ describe("renderPerFile", () => {
           events: [],
           fields: [
             f("id", "string", "comment"),
-            // bare REFERENCE (or the materialized default IGNORE) -> .reference()
+            // bare REFERENCE (or the materialized default IGNORE) -> .$reference()
             {
               name: "ref",
               kind: "record<account>",
@@ -140,8 +140,8 @@ describe("renderPerFile", () => {
     };
     const out =
       renderPerFile(withRef, (_k, n) => `${n}.ts`).get("comment.ts") ?? "";
-    expect(out).toContain(".reference()");
-    expect(out).toContain('.reference({ onDelete: "unset" })');
+    expect(out).toContain(".$reference()");
+    expect(out).toContain('.$reference({ onDelete: "unset" })');
     expect(out).toContain(".$value(surql`fn::validate::user_exists()`)");
   });
 });

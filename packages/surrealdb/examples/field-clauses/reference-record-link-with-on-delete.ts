@@ -8,6 +8,6 @@ export default example(import.meta.url, {
 DEFINE FIELD author ON TABLE ref TYPE record<user> REFERENCE ON DELETE CASCADE;`,
   def: defineTable("ref", {
     id: s.string(),
-    author: s.recordId("user").reference({ onDelete: "cascade" }),
+    author: s.recordId("user").$reference({ onDelete: "cascade" }),
   }),
 });

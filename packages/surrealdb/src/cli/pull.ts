@@ -408,16 +408,16 @@ function renderField(node: FieldNode, indent: string, ctx?: RenderCtx): string {
 
   if (p) {
     // `REFERENCE [ON DELETE …]` on a record-link field. A bare reference (or the materialized default
-    // `IGNORE`) round-trips as `.reference()`; an action keyword as `{ onDelete: '<kw>' }`; anything
+    // `IGNORE`) round-trips as `.$reference()`; an action keyword as `{ onDelete: '<kw>' }`; anything
     // else (a `surql` expression) as `{ onDelete: surql\`…\` }`. Mirrors `canonicalField` in structure.ts.
     if (p.reference !== undefined) {
       const od = p.reference.on_delete;
       if (!od || od.toUpperCase() === "IGNORE") {
-        expr += ".reference()";
+        expr += ".$reference()";
       } else if (/^(REJECT|CASCADE|UNSET)$/i.test(od)) {
-        expr += `.reference({ onDelete: ${JSON.stringify(od.toLowerCase())} })`;
+        expr += `.$reference({ onDelete: ${JSON.stringify(od.toLowerCase())} })`;
       } else {
-        expr += `.reference({ onDelete: surql\`${od}\` })`;
+        expr += `.$reference({ onDelete: surql\`${od}\` })`;
       }
     }
     if (p.default !== undefined) {
