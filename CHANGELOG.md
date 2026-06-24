@@ -11,6 +11,16 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 
 ## [Unreleased]
 
+### Added
+- **surrealdb:** DEFINE FIELD syntax-coverage group — pins every authorable field clause (TYPE,
+  OVERWRITE / IF NOT EXISTS, FLEXIBLE, REFERENCE ON DELETE, DEFAULT / DEFAULT ALWAYS, READONLY, VALUE,
+  ASSERT, COMPUTED, PERMISSIONS, COMMENT) author -> emit.
+
+### Changed (BREAKING — alpha)
+- **surrealdb:** renamed `.reference()` -> `.$reference()` on field builders — field DDL clauses are
+  `$`-prefixed (consistent with `.$unique()` / `.$index()` / `.$default()`). Update callers + the pull
+  renderer migrated.
+
 ### Changed
 - **cli:** the driver loader now **requires** the `@schemic/<driver>/driver` entry (dropped the index
   fallback) — completes the M0.3 package split. Drivers must be >= 0.1.0-alpha.21.
