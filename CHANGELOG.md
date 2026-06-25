@@ -17,6 +17,11 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
   DEFAULT ALWAYS, READONLY, VALUE, ASSERT, COMPUTED, PERMISSIONS, COMMENT; INDEX: FIELDS, composite,
   UNIQUE, FULLTEXT analyzer + BM25 + HIGHLIGHTS, HNSW, DISKANN, COUNT, COMMENT). Plus
   `docs/SYNTAX-COVERAGE.md`, the engine-validated grammar + coverage tracker.
+- **surrealdb:** author-time DEFINE FIELD validation — `emit()` now rejects the combos the SurrealDB
+  parser rejects, with a clear gen-time error instead of a cryptic apply failure (`$computed` is
+  mutually exclusive with `$value`/`$default`/`$readonly`/`$reference`/`$assert` and top-level only;
+  `$reference` requires a record-link type and top-level; `FLEXIBLE` is schemafull-only). Invalid combos
+  that previously emitted bad DDL now throw (they failed at apply anyway).
 
 ### Changed (BREAKING — alpha)
 - **surrealdb:** renamed `.reference()` -> `.$reference()` on field builders — field DDL clauses are
