@@ -22,6 +22,8 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
   `async?: boolean | { retry?, maxDepth? }` and `comment?`, emitting `ASYNC [RETRY] [MAXDEPTH]` +
   `COMMENT` in grammar order, with a full round-trip (emit strips the materialized `RETRY 1` /
   `MAXDEPTH 3` defaults; introspect + `pull` regenerate clean authoring).
+- **surrealdb:** `defineAnalyzer().function(cb, name?)` — optional custom name for the auto-defined
+  function (mirrors `.$unique(name)` / `.$index(name)`); the collision check still applies.
 - **surrealdb:** author-time DEFINE FIELD validation — `emit()` now rejects the combos the SurrealDB
   parser rejects, with a clear gen-time error instead of a cryptic apply failure (`$computed` is
   mutually exclusive with `$value`/`$default`/`$readonly`/`$reference`/`$assert` and top-level only;
