@@ -604,7 +604,23 @@ function renderTableConst(
       ev.then.length === 1
         ? `surql\`${ev.then[0]}\``
         : `[${ev.then.map((e) => `surql\`${e}\``).join(", ")}]`;
-    close += `\n  .event(${JSON.stringify(ev.name)}, { ${when}then: ${then} })`;
+    // `async`: drop the materialized retry=1/maxdepth=3 defaults — a bare ASYNC regenerates as `true`,
+    // otherwise only the non-default knobs are kept.
+    let asyncOpt = "";
+    if (ev.async) {
+      const knobs = [
+        ev.retry !== undefined && ev.retry !== 1 ? `retry: ${ev.retry}` : "",
+        ev.maxdepth !== undefined && ev.maxdepth !== 3
+          ? `maxDepth: ${ev.maxdepth}`
+          : "",
+      ].filter(Boolean);
+      asyncOpt = `async: ${knobs.length ? `{ ${knobs.join(", ")} }` : "true"}, `;
+    }
+    const comment =
+      ev.comment !== undefined
+        ? `, comment: ${JSON.stringify(ev.comment)}`
+        : "";
+    close += `\n  .event(${JSON.stringify(ev.name)}, { ${asyncOpt}${when}then: ${then}${comment} })`;
   }
   body.push(`${close};`);
 

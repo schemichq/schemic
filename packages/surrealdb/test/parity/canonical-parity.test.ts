@@ -99,14 +99,26 @@ const Comp = defineTable("c_comp", {
   a: s.string(),
   b: s.string(),
 }).index("ab", ["a", "b"], { unique: true });
-const Ev = defineTable("c_ev", { id: z.string(), email: s.email() }).event(
-  "re",
-  {
+const Ev = defineTable("c_ev", { id: z.string(), email: s.email() })
+  .event("re", {
     when: surql`$before.email != $after.email`,
     // biome-ignore lint/suspicious/noThenProperty: `then` is the SurrealQL THEN clause, not a PromiseLike.
     then: surql`UPDATE $after.id SET email = $after.email`,
-  },
-);
+  })
+  // ASYNC with non-default knobs + COMMENT — full round-trip.
+  .event("re_async", {
+    async: { retry: 3, maxDepth: 5 },
+    // biome-ignore lint/suspicious/noThenProperty: SurrealQL THEN clause.
+    then: surql`UPDATE $after.id SET seen = time::now()`,
+    comment: "stamp on change",
+  })
+  // Bare ASYNC — the churn-prone case: the DB materializes retry=1/maxdepth=3, which canonical must
+  // strip back to a bare ASYNC so this compares equal (no diff).
+  .event("re_bare", {
+    async: true,
+    // biome-ignore lint/suspicious/noThenProperty: SurrealQL THEN clause.
+    then: surql`UPDATE $after.id SET touched = true`,
+  });
 const Rel = defineRelation("c_rel", { weight: s.number() }).from(Big).to(Big);
 const Fn = defineFunction("c_greet", { name: s.string() })
   .returns(s.string())

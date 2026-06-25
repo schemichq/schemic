@@ -33,6 +33,7 @@ export type {
   CallArgs,
   Create,
   DiskannOptions,
+  EventAsync,
   Expr,
   FieldRefs,
   Filter,

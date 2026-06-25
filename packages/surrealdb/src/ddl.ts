@@ -429,6 +429,23 @@ export function braceBody(e: Expr): string {
 }
 
 /** `DEFINE EVENT <name> ON TABLE <table> [WHEN <when>] THEN <then>`. Multiple `then`s run in order. */
+/** SurrealDB's materialized ASYNC defaults (v3.1.x/3.2): a bare `ASYNC` stores `RETRY 1` + `MAXDEPTH 3`.
+ *  Stripped from canonical output so an authored `ASYNC` and an introspected `ASYNC RETRY 1 MAXDEPTH 3`
+ *  produce the same string (no diff churn). */
+export const ASYNC_DEFAULT_RETRY = 1;
+export const ASYNC_DEFAULT_MAXDEPTH = 3;
+
+/** The `ASYNC [RETRY @r] [MAXDEPTH @m]` clause, omitting the materialized defaults. Shared by the
+ *  emitter (authored side) and `canonicalEvent` (introspected side) so the two can't drift. */
+export function renderAsync(retry?: number, maxDepth?: number): string {
+  let s = "ASYNC";
+  if (retry !== undefined && retry !== ASYNC_DEFAULT_RETRY)
+    s += ` RETRY ${retry}`;
+  if (maxDepth !== undefined && maxDepth !== ASYNC_DEFAULT_MAXDEPTH)
+    s += ` MAXDEPTH ${maxDepth}`;
+  return s;
+}
+
 function emitEvent(
   table: string,
   ev: TableEvent,
@@ -437,12 +454,18 @@ function emitEvent(
   const parts = [
     `DEFINE EVENT ${existsPrefix(opts)}${escapeIdent(ev.name)} ON TABLE ${escapeIdent(table)}`,
   ];
+  // Clause order matches the grammar: ASYNC, WHEN, THEN, COMMENT.
+  if (ev.async) {
+    const a = ev.async === true ? {} : ev.async;
+    parts.push(renderAsync(a.retry, a.maxDepth));
+  }
   if (ev.when !== undefined) parts.push(`WHEN ${eventClause(ev.when)}`);
   const thens = (Array.isArray(ev.then) ? ev.then : [ev.then]).map(eventClause);
   // One `THEN` rides bare; several are parenthesized so the comma list parses unambiguously.
   parts.push(
     `THEN ${thens.length === 1 ? thens[0] : thens.map((t) => `(${t})`).join(", ")}`,
   );
+  if (ev.comment) parts.push(`COMMENT ${JSON.stringify(ev.comment)}`);
   return `${parts.join(" ")};`;
 }
 

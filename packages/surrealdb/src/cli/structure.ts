@@ -1,5 +1,5 @@
 import { escapeIdent, type Surreal } from "surrealdb";
-import type { DefineStatement } from "../ddl";
+import { type DefineStatement, renderAsync } from "../ddl";
 
 /** A snapshot statement: the emitted DDL plus the source file it came from (for `diff` annotations). */
 export type SnapshotStatement = DefineStatement & {
@@ -79,6 +79,12 @@ export interface StructEvent {
   when?: string;
   /** One or more `THEN` expressions (parens/`;` already stripped). */
   then: string[];
+  /** `ASYNC` — true for async events; `retry`/`maxdepth` are materialized (default 1 / 3). */
+  async?: boolean;
+  retry?: number;
+  maxdepth?: number;
+  /** `COMMENT @string`. */
+  comment?: string;
 }
 
 export interface StructFunction {
@@ -455,9 +461,12 @@ function canonicalIndex(t: StructTable, idx: StructIndex): string {
  */
 function canonicalEvent(t: StructTable, ev: StructEvent): string {
   const parts = [`DEFINE EVENT ${ev.name} ON TABLE ${t.name}`];
+  // Clause order matches `emitEvent`: ASYNC, WHEN, THEN, COMMENT (so both sides compare equal).
+  if (ev.async) parts.push(renderAsync(ev.retry, ev.maxdepth));
   if (ev.when !== undefined && ev.when !== "true")
     parts.push(`WHEN ${ev.when}`);
   parts.push(`THEN ${ev.then.join(", ")}`);
+  if (ev.comment) parts.push(`COMMENT ${JSON.stringify(ev.comment)}`);
   return `${parts.join(" ")};`;
 }
 

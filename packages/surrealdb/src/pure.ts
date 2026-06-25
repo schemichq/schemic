@@ -1644,10 +1644,18 @@ export type Expr = BoundQuery | string;
  * body sees `$before`/`$after`/`$event`/`$value`. `then` may be one expression or several
  * (run in order). Author expressions with `surql\`…\`` (bindings inline) or a raw string.
  */
+/** `ASYNC` runs the event off the write path. `true` is a bare `ASYNC`; the object form tunes
+ *  `RETRY @retry` (re-runs on failure) and/or `MAXDEPTH @max_depth` (cascade-recursion limit). */
+export type EventAsync = boolean | { retry?: number; maxDepth?: number };
+
 export interface TableEvent {
   name: string;
   when?: Expr;
   then: Expr | Expr[];
+  /** `ASYNC [RETRY @retry] [MAXDEPTH @max_depth]` — fire the event asynchronously. */
+  async?: EventAsync;
+  /** `COMMENT @string` — a stored description. */
+  comment?: string;
 }
 
 function normalizeFields<S extends Shape>(shape: S): Fields<S> {
@@ -2197,12 +2205,27 @@ export class TableDef<Name extends string, S extends Shape> {
     });
   }
   /**
-   * Add a row-change event: `DEFINE EVENT <name> ON TABLE <table> [WHEN <when>] THEN <then>`.
-   * The body sees `$before`/`$after`/`$event`/`$value`; author with `surql\`…\`` or a raw string.
+   * Add a row-change event: `DEFINE EVENT <name> ON TABLE <table> [ASYNC …] [WHEN <when>] THEN <then>
+   * [COMMENT …]`. The body sees `$before`/`$after`/`$event`/`$value`; author with `surql\`…\`` or a raw
+   * string. `async` fires it off the write path; `comment` stores a description.
    */
-  event(name: string, spec: { when?: Expr; then: Expr | Expr[] }) {
-    // biome-ignore lint/suspicious/noThenProperty: `then` is the SurrealQL THEN clause (a string/BoundQuery), not a PromiseLike.
-    const event: TableEvent = { name, when: spec.when, then: spec.then };
+  event(
+    name: string,
+    spec: {
+      when?: Expr;
+      then: Expr | Expr[];
+      async?: EventAsync;
+      comment?: string;
+    },
+  ) {
+    const event: TableEvent = {
+      name,
+      when: spec.when,
+      // biome-ignore lint/suspicious/noThenProperty: `then` is the SurrealQL THEN clause (a string/BoundQuery), not a PromiseLike.
+      then: spec.then,
+      async: spec.async,
+      comment: spec.comment,
+    };
     return this.withConfig({
       events: [...(this.config.events ?? []), event],
     });
@@ -2699,6 +2722,8 @@ export class EventDef {
     readonly name: string,
     readonly when: Expr | undefined,
     readonly then: Expr | Expr[],
+    readonly async?: EventAsync,
+    readonly comment?: string,
   ) {}
 }
 
@@ -2711,10 +2736,22 @@ export class EventDef {
 export function defineEvent(
   table: TableDef<string, Shape> | string,
   name: string,
-  spec: { when?: Expr; then: Expr | Expr[] },
+  spec: {
+    when?: Expr;
+    then: Expr | Expr[];
+    async?: EventAsync;
+    comment?: string;
+  },
 ): EventDef {
   const tableName = typeof table === "string" ? table : table.name;
-  return new EventDef(tableName, name, spec.when, spec.then);
+  return new EventDef(
+    tableName,
+    name,
+    spec.when,
+    spec.then,
+    spec.async,
+    spec.comment,
+  );
 }
 
 interface FunctionConfig {
@@ -2793,7 +2830,13 @@ export class FunctionDef<A extends Shape = Shape, R = unknown> {
     if (!callable)
       throw new Error("the surrealdb driver has no `callable` capability.");
     const returns = this.config.returns?.schema ?? z.unknown();
-    return callFunction(callable, db, this.name, encoded, returns) as Promise<R>;
+    return callFunction(
+      callable,
+      db,
+      this.name,
+      encoded,
+      returns,
+    ) as Promise<R>;
   }
 }
 
