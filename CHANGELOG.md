@@ -38,6 +38,10 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
   fallback) — completes the M0.3 package split. Drivers must be >= 0.1.0-alpha.21.
 
 ### Fixed
+- **surrealdb:** `defineAnalyzer().function()` now emits its auto-defined `DEFINE FUNCTION` — `gen`
+  previously produced an analyzer referencing a non-existent `<analyzer>_fn`. The inlined function is
+  emitted before the analyzer and deduped; a name collision with a differently-bodied function throws
+  (no silent clobber).
 - **cli:** `schemic gen` now shows the rendered migration **before** the title prompt (you review the
   actual DDL while naming it), instead of after writing.
 
