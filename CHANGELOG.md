@@ -12,9 +12,11 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 ## [Unreleased]
 
 ### Added
-- **surrealdb:** DEFINE FIELD syntax-coverage group — pins every authorable field clause (TYPE,
-  OVERWRITE / IF NOT EXISTS, FLEXIBLE, REFERENCE ON DELETE, DEFAULT / DEFAULT ALWAYS, READONLY, VALUE,
-  ASSERT, COMPUTED, PERMISSIONS, COMMENT) author -> emit.
+- **surrealdb:** DEFINE FIELD + DEFINE INDEX syntax-coverage groups — pin every authorable clause
+  author -> emit (FIELD: TYPE, OVERWRITE / IF NOT EXISTS, FLEXIBLE, REFERENCE ON DELETE, DEFAULT /
+  DEFAULT ALWAYS, READONLY, VALUE, ASSERT, COMPUTED, PERMISSIONS, COMMENT; INDEX: FIELDS, composite,
+  UNIQUE, FULLTEXT analyzer + BM25 + HIGHLIGHTS, HNSW, DISKANN, COUNT, COMMENT). Plus
+  `docs/SYNTAX-COVERAGE.md`, the engine-validated grammar + coverage tracker.
 
 ### Changed (BREAKING — alpha)
 - **surrealdb:** renamed `.reference()` -> `.$reference()` on field builders — field DDL clauses are
