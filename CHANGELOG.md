@@ -12,11 +12,12 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 ## [Unreleased]
 
 ### Added
-- **surrealdb:** DEFINE FIELD + DEFINE INDEX syntax-coverage groups — pin every authorable clause
+- **surrealdb:** DEFINE FIELD + INDEX + EVENT syntax-coverage groups — pin every authorable clause
   author -> emit (FIELD: TYPE, OVERWRITE / IF NOT EXISTS, FLEXIBLE, REFERENCE ON DELETE, DEFAULT /
   DEFAULT ALWAYS, READONLY, VALUE, ASSERT, COMPUTED, PERMISSIONS, COMMENT; INDEX: FIELDS, composite,
-  UNIQUE, FULLTEXT analyzer + BM25 + HIGHLIGHTS, HNSW, DISKANN, COUNT, COMMENT). Plus
-  `docs/SYNTAX-COVERAGE.md`, the engine-validated grammar + coverage tracker.
+  UNIQUE, FULLTEXT analyzer + BM25 + HIGHLIGHTS, HNSW, DISKANN, COUNT, COMMENT; EVENT: WHEN + THEN,
+  OVERWRITE, IF NOT EXISTS, WHEN-omitted, ordered THEN). Plus `docs/SYNTAX-COVERAGE.md`, the
+  engine-validated grammar + coverage tracker.
 - **surrealdb:** author-time DEFINE FIELD validation — `emit()` now rejects the combos the SurrealDB
   parser rejects, with a clear gen-time error instead of a cryptic apply failure (`$computed` is
   mutually exclusive with `$value`/`$default`/`$readonly`/`$reference`/`$assert` and top-level only;
