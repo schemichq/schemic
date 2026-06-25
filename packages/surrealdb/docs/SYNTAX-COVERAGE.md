@@ -137,8 +137,8 @@ DEFINE EVENT [ IF NOT EXISTS | OVERWRITE ] @name ON [ TABLE ] @table
 ```
 
 - [x] `IF NOT EXISTS` · [x] `OVERWRITE` · [x] `ON [ TABLE ] @table`
-- [ ] `ASYNC` · [ ] `ASYNC RETRY @retry` · [ ] `ASYNC MAXDEPTH @max_depth` _(no `s.*` authoring surface yet)_
-- [x] `WHEN @condition` · [x] `THEN @action` · [x] `THEN [ … ]` (ordered actions) · [ ] `COMMENT @string` _(no `s.*` authoring surface yet)_
+- [x] `ASYNC` · [x] `ASYNC RETRY @retry` · [x] `ASYNC MAXDEPTH @max_depth` _(materialized defaults RETRY 1 / MAXDEPTH 3 are stripped on emit — `catalog/schema/event.rs`)_
+- [x] `WHEN @condition` · [x] `THEN @action` · [x] `THEN [ … ]` (ordered actions) · [x] `COMMENT @string`
 
 ## DEFINE FUNCTION
 
