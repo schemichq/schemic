@@ -12,11 +12,12 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 ## [Unreleased]
 
 ### Added
-- **surrealdb:** DEFINE FIELD + INDEX + EVENT syntax-coverage groups — pin every authorable clause
-  author -> emit (FIELD: TYPE, OVERWRITE / IF NOT EXISTS, FLEXIBLE, REFERENCE ON DELETE, DEFAULT /
+- **surrealdb:** DEFINE FIELD + INDEX + EVENT + FUNCTION syntax-coverage groups — pin every authorable
+  clause author -> emit (FIELD: TYPE, OVERWRITE / IF NOT EXISTS, FLEXIBLE, REFERENCE ON DELETE, DEFAULT /
   DEFAULT ALWAYS, READONLY, VALUE, ASSERT, COMPUTED, PERMISSIONS, COMMENT; INDEX: FIELDS, composite,
   UNIQUE, FULLTEXT analyzer + BM25 + HIGHLIGHTS, HNSW, DISKANN, COUNT, COMMENT; EVENT: WHEN + THEN,
-  OVERWRITE, IF NOT EXISTS, WHEN-omitted, ordered THEN). Plus `docs/SYNTAX-COVERAGE.md`, the
+  OVERWRITE, IF NOT EXISTS, WHEN-omitted, ordered THEN; FUNCTION: args, return type, no-args,
+  OVERWRITE / IF NOT EXISTS, PERMISSIONS FULL/NONE/WHERE, COMMENT). Plus `docs/SYNTAX-COVERAGE.md`, the
   engine-validated grammar + coverage tracker.
 - **surrealdb:** DEFINE EVENT `async` + `comment` authoring — `.event()` / `defineEvent` now take
   `async?: boolean | { retry?, maxDepth? }` and `comment?`, emitting `ASYNC [RETRY] [MAXDEPTH]` +
