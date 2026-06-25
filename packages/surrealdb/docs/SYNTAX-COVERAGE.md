@@ -150,10 +150,10 @@ DEFINE FUNCTION [ OVERWRITE | IF NOT EXISTS ] fn::@name
 } [ COMMENT @string ] [ GRAPHQL_ALIAS @string ] [ GRAPHQL_DEPRECATED @string ] [ PERMISSIONS [ NONE | FULL | WHERE @condition]]
 ```
 
-- [ ] `OVERWRITE` · [ ] `IF NOT EXISTS` · [ ] `fn::@name`
-- [ ] `( @argument: @type, … )` · [ ] `-> @type` · [ ] `{ @query … }` body · [ ] `RETURN @returned`
-- [ ] `COMMENT @string` · [ ] `GRAPHQL_ALIAS @string` · [ ] `GRAPHQL_DEPRECATED @string` _(engine-confirmed; undocumented on the reference site)_
-- [ ] `PERMISSIONS NONE` · [ ] `PERMISSIONS FULL` · [ ] `PERMISSIONS WHERE @condition`
+- [x] `OVERWRITE` · [x] `IF NOT EXISTS` · [x] `fn::@name`
+- [x] `( @argument: @type, … )` · [x] `-> @type` · [x] `{ @query … }` body · [x] `RETURN @returned`
+- [x] `COMMENT @string` · [ ] `GRAPHQL_ALIAS @string` · [ ] `GRAPHQL_DEPRECATED @string` _(engine-confirmed; undocumented on the reference site — no `s.*` authoring surface yet)_
+- [x] `PERMISSIONS NONE` · [x] `PERMISSIONS FULL` · [x] `PERMISSIONS WHERE @condition`
 
 ## DEFINE ANALYZER
 
