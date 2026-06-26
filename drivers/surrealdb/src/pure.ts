@@ -414,6 +414,45 @@ export abstract class SFieldBase<
     return this.safeDecodeAsync(value);
   }
 
+  // --- Mirrored from @schemic/core's SFieldBase. The full unification (extending core's base) is
+  // blocked by surreal's smart-id table covariance (see surrealdb-sfieldbase-unification-blocked), so
+  // shared-base methods are mirrored here instead — each delegates to the inner Zod schema exactly as
+  // core does. `test/unit/sfieldbase-parity.test.ts` reflects core's prototype and fails loudly if core
+  // adds a base method this copy hasn't mirrored. ---
+  /** Zod `.nonoptional()` — require a value (strips an `.optional()`). */
+  nonoptional(): SFieldBase<z.ZodNonOptional<S>, Flags, N> {
+    return this.rebuild(this.schema.nonoptional(), this.native);
+  }
+  /** Zod `.exactOptional()` — exact-optional semantics (absent vs explicit `undefined`). */
+  exactOptional(): SFieldBase<z.ZodExactOptional<S>, Flags, N> {
+    return this.rebuild(this.schema.exactOptional(), this.native);
+  }
+  /** Does this field accept `undefined`? (Zod reflection.) */
+  isOptional(): boolean {
+    return this.schema.isOptional();
+  }
+  /** Does this field accept `null`? (Zod reflection.) */
+  isNullable(): boolean {
+    return this.schema.isNullable();
+  }
+  /** Read back the description set via {@link describe} / {@link meta}. */
+  get description(): string | undefined {
+    return this.schema.description;
+  }
+  /** JSON Schema for this field's wire shape (delegates to `z.toJSONSchema`). */
+  toJSONSchema() {
+    return z.toJSONSchema(this.schema);
+  }
+  /** Register the wrapped schema in a Zod registry for metadata interop; returns the field. */
+  register(...args: Parameters<S["register"]>): this {
+    Reflect.apply(this.schema.register, this.schema, args);
+    return this;
+  }
+  /** Zod's `.spa` alias for {@link safeParseAsync} (drop-in). */
+  spa(value: unknown) {
+    return this.safeParseAsync(value);
+  }
+
   // Zod wrappers — delegate to the inner schema, carry native metadata + flags forward.
   optional(): SFieldBase<z.ZodOptional<S>, Flags, N> {
     return this.rebuild(this.schema.optional(), this.native);
@@ -663,6 +702,12 @@ export class SField<
   // Each just delegates to the SFieldBase body (which rebuilds a SField via the `rebuild` hook).
   override optional(): SField<z.ZodOptional<S>, Flags> {
     return super.optional() as SField<z.ZodOptional<S>, Flags>;
+  }
+  override nonoptional(): SField<z.ZodNonOptional<S>, Flags> {
+    return super.nonoptional() as SField<z.ZodNonOptional<S>, Flags>;
+  }
+  override exactOptional(): SField<z.ZodExactOptional<S>, Flags> {
+    return super.exactOptional() as SField<z.ZodExactOptional<S>, Flags>;
   }
   override nullable(): SField<z.ZodNullable<S>, Flags> {
     return super.nullable() as SField<z.ZodNullable<S>, Flags>;
