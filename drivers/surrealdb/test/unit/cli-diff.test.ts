@@ -3,6 +3,7 @@ import { formatPatch, summarizeKinds, tokenDiff } from "@schemic/core";
 // Import `s`/`table` by package name (like the CLI does) so the table types line up with the
 // `@schemic/core`-typed signatures in cli/diff (avoids src-vs-lib duplicate-declaration errors).
 import {
+  type AccessDef,
   defineAccess,
   defineEvent,
   defineFunction,
@@ -472,11 +473,12 @@ describe("functions", () => {
 });
 
 describe("access", () => {
-  const ddlOf = (a: ReturnType<typeof defineAccess>) =>
+  const ddlOf = (a: AccessDef) =>
     diffSnapshots(EMPTY_SNAPSHOT, buildSnapshot([], [a])).up[0];
 
   test("emits DEFINE ACCESS RECORD with auto-braced SIGNUP/SIGNIN + DURATION", () => {
-    const account = defineAccess("account").onDatabase()
+    const account = defineAccess("account")
+      .onDatabase()
       .record()
       .signup(surql`CREATE user CONTENT { email: $email }`)
       .signin(surql`SELECT * FROM user WHERE email = $email`)
@@ -490,7 +492,10 @@ describe("access", () => {
   });
 
   test("adding access → DEFINE ACCESS up / REMOVE ACCESS down", () => {
-    const a = defineAccess("account").onDatabase().record().signin(surql`SELECT 1`);
+    const a = defineAccess("account")
+      .onDatabase()
+      .record()
+      .signin(surql`SELECT 1`);
     const diff = diffSnapshots(EMPTY_SNAPSHOT, buildSnapshot([], [a]));
     expect(diff.up[0]).toContain(
       "DEFINE ACCESS account ON DATABASE TYPE RECORD",
@@ -506,7 +511,8 @@ describe("access", () => {
   });
 
   test("TYPE JWT with alg + key, and with a JWKS url", () => {
-    const sym = defineAccess("api").onDatabase()
+    const sym = defineAccess("api")
+      .onDatabase()
       .jwt({ alg: "HS512", key: "secret" })
       .duration({ token: "1h" });
     expect(ddlOf(sym)).toBe(
@@ -521,7 +527,8 @@ describe("access", () => {
   });
 
   test("TYPE BEARER FOR RECORD/USER with grant duration", () => {
-    const svc = defineAccess("svc").onDatabase()
+    const svc = defineAccess("svc")
+      .onDatabase()
       .bearer({ for: "record" })
       .duration({ grant: "30d", session: "12h" });
     expect(ddlOf(svc)).toBe(

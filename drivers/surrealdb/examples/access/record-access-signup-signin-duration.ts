@@ -4,7 +4,8 @@ import { example } from "../_kit";
 export default example(import.meta.url, {
   title: "RECORD access (SIGNUP / SIGNIN / DURATION)",
   ddl: `DEFINE ACCESS user ON DATABASE TYPE RECORD SIGNUP { CREATE user SET email = $email, pass = crypto::argon2::generate($pass) } SIGNIN { SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) } DURATION FOR TOKEN 1h, FOR SESSION 12h;`,
-  def: defineAccess("user").onDatabase()
+  def: defineAccess("user")
+    .onDatabase()
     .record()
     .signup(
       surql`CREATE user SET email = $email, pass = crypto::argon2::generate($pass)`,

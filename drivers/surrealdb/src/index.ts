@@ -73,6 +73,7 @@ export {
   s,
   surrealTypeRegistry,
   TableDef,
+  UnscopedAccessDef,
   ViewBuilder,
 } from "./pure";
 /** Type a `database/seed/*.ts` default export: `export default defineSeed(async (db, ctx) => { … })`. */

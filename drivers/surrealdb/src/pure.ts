@@ -2915,12 +2915,6 @@ export class AccessDef {
   bearer(opts: { for: "record" | "user" }): AccessDef {
     return this.withConfig({ kind: { type: "bearer", subject: opts.for } });
   }
-  onNamespace(): AccessDef {
-    return this.withConfig({ on: "namespace" });
-  }
-  onDatabase(): AccessDef {
-    return this.withConfig({ on: "database" });
-  }
   /** `SIGNUP { … }` (RECORD) — a `surql\`…\`` block (braces optional) run on sign-up. */
   signup(body: Expr): AccessDef {
     return this.withConfig({ signup: body });
@@ -2948,12 +2942,37 @@ export class AccessDef {
 }
 
 /**
- * Declare an access definition: `export const account = defineAccess("account").onDatabase().record()
- * .signup(surql\`…\`).signin(surql\`…\`).duration({ token: "1h", session: "12h" })`. See {@link AccessDef}
- * for `.jwt(…)` / `.bearer(…)`.
+ * The pre-scope stage of {@link defineAccess}: you must pick a scope (`.onDatabase()` /
+ * `.onNamespace()`) before choosing a type or adding clauses. This makes the scope a deliberate,
+ * type-enforced first step — `defineAccess("x").record()` is a compile error; `defineAccess("x")
+ * .onDatabase().record()` is the way. (`TYPE RECORD` is database-only, so namespace access is JWT/BEARER.)
  */
-export function defineAccess(name: string): AccessDef {
-  return new AccessDef(name);
+export class UnscopedAccessDef {
+  constructor(readonly name: string) {}
+  /** `ON DATABASE` — database-scoped access (the only scope that supports `TYPE RECORD`). */
+  onDatabase(): AccessDef {
+    return new AccessDef(this.name, {
+      on: "database",
+      kind: { type: "record" },
+    });
+  }
+  /** `ON NAMESPACE` — namespace-scoped access (`TYPE JWT` / `TYPE BEARER`; not RECORD). */
+  onNamespace(): AccessDef {
+    return new AccessDef(this.name, {
+      on: "namespace",
+      kind: { type: "record" },
+    });
+  }
+}
+
+/**
+ * Declare an access definition: `export const account = defineAccess("account").onDatabase().record()
+ * .signup(surql\`…\`).signin(surql\`…\`).duration({ token: "1h", session: "12h" })`. Returns an
+ * {@link UnscopedAccessDef} — the scope (`.onDatabase()`/`.onNamespace()`) is a required first step;
+ * see {@link AccessDef} for `.record()`/`.jwt(…)`/`.bearer(…)` and the rest.
+ */
+export function defineAccess(name: string): UnscopedAccessDef {
+  return new UnscopedAccessDef(name);
 }
 
 /** SurrealDB's built-in tokenizers (autocompletable). The list is open — any other string is accepted

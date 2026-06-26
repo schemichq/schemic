@@ -2,16 +2,30 @@ import { describe, expect, test } from "bun:test";
 import { buildSnapshot } from "../../src/cli/surreal-diff";
 import { emitDefStatement, emitTable } from "../../src/driver";
 import { surql } from "../../src/index";
-import { defineAccess, defineTable, s } from "../../src/pure";
+import { AccessDef, defineAccess, defineTable, s } from "../../src/pure";
 
-test("DEFINE ACCESS requires an explicit scope (.onDatabase()/.onNamespace())", () => {
-  // No implicit ON DATABASE default — emitting without a scope throws.
-  expect(() => emitDefStatement(defineAccess("a").record())).toThrow(
-    /no scope set — call \.onDatabase\(\) or \.onNamespace\(\)/,
-  );
-  // With a scope it emits fine.
+test("DEFINE ACCESS scope is a type-enforced first step (.onDatabase()/.onNamespace())", () => {
+  // The type/clause methods don't exist until a scope is picked — a COMPILE error, which is the whole
+  // point (you can't author an unscoped access). Kept in a never-called fn so tsc checks it but it
+  // doesn't run (the methods genuinely aren't there at runtime).
+  const _typeGate = () => {
+    // @ts-expect-error — `.record()` is not on the pre-scope builder
+    defineAccess("a").record();
+    // @ts-expect-error — `.bearer()` is not on the pre-scope builder either
+    defineAccess("a").bearer({ for: "user" });
+  };
+  void _typeGate;
+  // Scope first, then the type:
   expect(emitDefStatement(defineAccess("a").onDatabase().record()).ddl).toBe(
     "DEFINE ACCESS a ON DATABASE TYPE RECORD;",
+  );
+});
+
+test("emit defensively throws if an access somehow has no scope", () => {
+  // The type-gate makes this unreachable via the public API; a directly-constructed AccessDef with no
+  // scope still throws a clear error rather than emitting invalid DDL.
+  expect(() => emitDefStatement(new AccessDef("a"))).toThrow(
+    /no scope set — call \.onDatabase\(\) or \.onNamespace\(\)/,
   );
 });
 
