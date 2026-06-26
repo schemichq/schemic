@@ -778,3 +778,67 @@ describe("Zod chain methods (string + number; App-side, no DDL change)", () => {
     }
   });
 });
+
+describe("composite factories (record/tuple/union/intersection/discriminatedUnion/lazy -> jsonb)", () => {
+  test("all emit jsonb columns", () => {
+    const t = defineTable("comp", {
+      rec: s.record(z.string(), s.integer()),
+      tup: s.tuple([s.text(), s.integer()]),
+      uni: s.union([s.text(), s.integer()]),
+      inter: s.intersection(
+        s.object({ a: s.text() }),
+        s.object({ b: s.integer() }),
+      ),
+    });
+    const out = emitKinds(registry, postgresDriver.explode([t], [])).join("\n");
+    expect(out).toContain('"rec" jsonb NOT NULL');
+    expect(out).toContain('"tup" jsonb NOT NULL');
+    expect(out).toContain('"uni" jsonb NOT NULL');
+    expect(out).toContain('"inter" jsonb NOT NULL');
+  });
+
+  test("validate App-side per the composite shape", () => {
+    expect(s.tuple([s.text(), s.integer()]).safeDecode(["a", 1]).success).toBe(
+      true,
+    );
+    expect(
+      s.tuple([s.text(), s.integer()]).safeDecode(["a", "b"]).success,
+    ).toBe(false);
+    expect(s.union([s.text(), s.integer()]).safeDecode(7).success).toBe(true);
+    expect(s.union([s.text(), s.integer()]).safeDecode(true).success).toBe(
+      false,
+    );
+    expect(s.record(z.string(), s.integer()).safeDecode({ x: 1 }).success).toBe(
+      true,
+    );
+    expect(
+      s.record(z.string(), s.integer()).safeDecode({ x: "no" }).success,
+    ).toBe(false);
+    const du = s.discriminatedUnion("kind", [
+      s.object({ kind: s.literal("a"), x: s.text() }),
+      s.object({ kind: s.literal("b"), y: s.integer() }),
+    ]);
+    expect(du.safeDecode({ kind: "a", x: "hi" }).success).toBe(true);
+    expect(du.safeDecode({ kind: "a", y: 1 }).success).toBe(false);
+  });
+
+  test("a composites table round-trips (all jsonb)", async () => {
+    const t = defineTable("comprt", {
+      rec: s.record(z.string(), s.integer()),
+      tup: s.tuple([s.text(), s.boolean()]),
+      uni: s.union([s.text(), s.integer()]),
+    });
+    const objs = postgresDriver.explode([t], []);
+    const conn = (await postgresDriver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
+    try {
+      await postgresDriver.apply(conn, emitKinds(registry, objs));
+      const live = await postgresDriver.introspectAll(conn);
+      const { up, down } = buildKindDiff(registry, live, objs);
+      expect({ up, down }).toEqual({ up: [], down: [] });
+    } finally {
+      await conn.close();
+    }
+  });
+});

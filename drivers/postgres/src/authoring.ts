@@ -322,6 +322,11 @@ const mk = <S extends z.ZodType>(
 ): PgField<S> =>
   new PgField<S>(schema, { pg: params ? { type, params } : { type } });
 
+/** Map a tuple of fields/Zod schemas to their inner Zod schemas (for tuple/union/discriminatedUnion). */
+type ZodsOf<T extends readonly (AnyField | z.ZodType)[]> = {
+  [K in keyof T]: SchemaOf<T[K]>;
+};
+
 /** The Postgres authoring namespace. Zod drop-ins (string/number/…) + native pg types + `$postgres`. */
 export const s = {
   // Zod drop-ins (the canonical superset; each maps to a sensible pg default). Native aliases below
@@ -426,6 +431,66 @@ export const s = {
     new PgField(
       z.array(toZod(elem)),
       elem instanceof PgField ? elem.native : {},
+    ),
+  // composite types -> jsonb (the App value is the composite; stored opaquely as one jsonb column,
+  // validated app-side by Zod). Accept fields OR raw Zod (toZod each), mirroring s.object/s.array.
+  record: <K extends z.core.$ZodRecordKey, V extends AnyField | z.ZodType>(
+    key: K,
+    value: V,
+  ): PgField<z.ZodRecord<K, SchemaOf<V>>> =>
+    mk("jsonb", z.record(key, toZod(value) as SchemaOf<V>)),
+  tuple: <
+    const T extends readonly [
+      AnyField | z.ZodType,
+      ...(AnyField | z.ZodType)[],
+    ],
+  >(
+    items: T,
+  ): PgField<z.ZodTuple<ZodsOf<T>>> =>
+    mk("jsonb", z.tuple(items.map(toZod) as ZodsOf<T>)),
+  union: <
+    const T extends readonly [
+      AnyField | z.ZodType,
+      ...(AnyField | z.ZodType)[],
+    ],
+  >(
+    options: T,
+  ): PgField<z.ZodUnion<ZodsOf<T>>> =>
+    mk("jsonb", z.union(options.map(toZod) as ZodsOf<T>)),
+  discriminatedUnion: <
+    Disc extends string,
+    const T extends readonly [
+      AnyField | z.ZodType,
+      ...(AnyField | z.ZodType)[],
+    ],
+  >(
+    discriminator: Disc,
+    options: T,
+  ): PgField<z.ZodDiscriminatedUnion<ZodsOf<T>, Disc>> =>
+    mk(
+      "jsonb",
+      z.discriminatedUnion(
+        discriminator,
+        options.map(toZod) as never,
+      ) as unknown as z.ZodDiscriminatedUnion<ZodsOf<T>, Disc>,
+    ),
+  intersection: <
+    A extends AnyField | z.ZodType,
+    B extends AnyField | z.ZodType,
+  >(
+    a: A,
+    b: B,
+  ): PgField<z.ZodIntersection<SchemaOf<A>, SchemaOf<B>>> =>
+    mk(
+      "jsonb",
+      z.intersection(toZod(a) as SchemaOf<A>, toZod(b) as SchemaOf<B>),
+    ),
+  lazy: <V extends AnyField | z.ZodType>(
+    getter: () => V,
+  ): PgField<z.ZodLazy<SchemaOf<V>>> =>
+    mk(
+      "jsonb",
+      z.lazy(() => toZod(getter()) as SchemaOf<V>),
     ),
   // foreign key: `text` column + FK to `table(id)`
   references: (

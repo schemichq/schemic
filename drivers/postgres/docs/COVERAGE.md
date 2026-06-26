@@ -88,6 +88,7 @@ round-trip (author `s.*` → lower → emit → introspect → diff = 0) · `[n/
 - [x] `defineEnum(name, values)` → a NATIVE pg enum (`CREATE TYPE … AS ENUM`); `mood.column()` types a column as it (App = the literal union). Full round-trip; the standalone, reusable, introspected alternative to the `s.enum` text projection
 - [~] `citext` (emit-only; needs the extension — gap below)
 - [x] `T[]` arrays of canonical element types; [~] arrays of pg-native element types (udt-name mismatch)
+- [x] composite jsonb factories — `s.record(key, value)` / `s.tuple([...])` / `s.union([...])` / `s.discriminatedUnion(disc, [...])` / `s.intersection(a, b)` / `s.lazy(() => ...)` → a single `jsonb` column, App value = the composite, validated App-side (mirrors surreal's set). `map`/`set` skipped (need a Map/Set↔jsonb codec); `nativeEnum` covered by `s.enum`/`defineEnum`
 
 ### Nullability & identity
 - [x] `NULL` / `NOT NULL`; `option<T>` and `T | null` both collapse to a nullable column (documented projection)
