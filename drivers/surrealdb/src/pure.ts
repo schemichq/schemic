@@ -103,10 +103,16 @@ export interface SurrealMeta {
    * excluded from the public app/create/update surface. See `.$internal()` / `.system`. */
   internal?: boolean;
   /** Single-field index: `.$index()` (normal) / `.$unique()` (uniqueness) / `.$fulltext()` /
-   * `.$hnsw()` / `.$diskann()`, with an optional custom `name`. Emits `DEFINE INDEX
-   * <name ?? <table>_<field>_idx> ON TABLE <table> FIELDS <field> <UNIQUE | spec>`. `spec` carries a
-   * FULLTEXT/HNSW/DISKANN clause (built via `buildIndexSpec`); it is mutually exclusive with `unique`. */
-  index?: { unique?: boolean; name?: string; spec?: string };
+   * `.$hnsw()` / `.$diskann()`, each with an optional custom name. `name` names the plain/spec index
+   * (`<table>_<field>_idx` fallback); `uniqueName` names the UNIQUE index (`<table>_<field>_uq` fallback
+   * when paired with a spec). When BOTH a `spec` and `unique` are set, two indexes are emitted — one per
+   * name slot — so each is independently nameable. */
+  index?: {
+    unique?: boolean;
+    name?: string;
+    uniqueName?: string;
+    spec?: string;
+  };
   /** `REFERENCE [ON DELETE …]` on a record-link field. See `.$reference()`. */
   reference?:
     | true
@@ -867,15 +873,17 @@ export class SField<
     });
   }
   /** Index this field with a uniqueness constraint (`… UNIQUE`). `name` overrides the derived name.
-   *  Chaining `.$fulltext()`/`.$hnsw()`/`.$diskann()` after this emits TWO indexes on the same field
-   *  (a UNIQUE index and a FULLTEXT/vector index) with auto-derived names. */
+   * Chaining `.$fulltext()`/`.$hnsw()`/`.$diskann()` after this emits TWO indexes on the same
+   *  field (UNIQUE + spec), each independently nameable — `name` here names the UNIQUE index. */
   $unique(name?: string): SField<S, Flags> {
     return new SField(this.schema, {
       ...this.surreal,
       index: {
         ...this.surreal.index,
         unique: true,
-        ...(name !== undefined ? { name } : {}),
+        // The name lands on the UNIQUE index specifically, so it survives when a spec index
+        // (.$fulltext()/.$hnsw()/.$diskann()) is also chained on the same field.
+        ...(name !== undefined ? { uniqueName: name } : {}),
       },
     });
   }
@@ -887,7 +895,7 @@ export class SField<
    * `bm25: [k1, b]` tunes the (always-on) scoring; `highlights` enables `search::highlight`.
    * The DEFAULT analyzer/bm25 are omitted from emitted DDL (SurrealDB always applies them) — see
    * {@link FulltextOptions}. Chaining `.$unique()` emits TWO indexes (FULLTEXT + UNIQUE) on the same
-   * field with auto-derived names.
+   * field, each independently nameable (this `name` names the FULLTEXT/vector index).
    */
   $fulltext(analyzer?: string | AnalyzerDef): SField<S, Flags>;
   $fulltext(opts: FulltextFieldOptions): SField<S, Flags>;
@@ -916,7 +924,8 @@ export class SField<
     return this.withIndexSpec(buildIndexSpec({ diskann: opts }), opts.name);
   }
   /** Set a FULLTEXT/HNSW/DISKANN index `spec` (+ optional custom `name`) on this field. When `.$unique()`
-   *  is also set, the DDL layer emits TWO indexes (UNIQUE + spec) with auto-derived names. */
+   *  is also set, the DDL layer emits TWO indexes (UNIQUE + spec) — this `name` names the spec index,
+   *  `.$unique(name)` names the UNIQUE one. */
   private withIndexSpec(
     spec: string | undefined,
     name?: string,

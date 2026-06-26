@@ -767,15 +767,17 @@ function emit(
     const base = `${table}_${sanitize(path)}`;
 
     if (surreal.index.spec && surreal.index.unique) {
-      // Two indexes on the same field — spec keeps `_idx`, UNIQUE gets `_uq`.
-      const specName = `${base}_idx`;
+      // Two indexes on the same field — each independently nameable: the spec index takes the name
+      // from `.$fulltext()/.$hnsw()/.$diskann()` (`_idx` fallback); the UNIQUE index takes the name
+      // from `.$unique()` (`_uq` fallback).
+      const specName = surreal.index.name ?? `${base}_idx`;
       out.push({
         kind: "index",
         name: specName,
         table,
         ddl: `DEFINE INDEX ${existsPrefix(opts)}${escapeIdent(specName)} ON TABLE ${escapeIdent(table)} FIELDS ${path} ${surreal.index.spec};`,
       });
-      const uniqName = `${base}_uq`;
+      const uniqName = surreal.index.uniqueName ?? `${base}_uq`;
       out.push({
         kind: "index",
         name: uniqName,
@@ -783,9 +785,11 @@ function emit(
         ddl: `DEFINE INDEX ${existsPrefix(opts)}${escapeIdent(uniqName)} ON TABLE ${escapeIdent(table)} FIELDS ${path} UNIQUE;`,
       });
     } else {
+      // A lone index: a UNIQUE-only index takes `.$unique()`'s name; a spec/plain index takes its own.
       const idxName =
-        surreal.index.name ??
-        `${base}_idx`;
+        (surreal.index.unique
+          ? (surreal.index.uniqueName ?? surreal.index.name)
+          : surreal.index.name) ?? `${base}_idx`;
       const tail = surreal.index.spec
         ? ` ${surreal.index.spec}`
         : surreal.index.unique

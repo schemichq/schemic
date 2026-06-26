@@ -171,19 +171,23 @@ function lowerField(
       const base = `${table}_${sanitize(path)}`;
 
       if (surreal.index.spec && surreal.index.unique) {
-        // Two indexes on the same field — spec keeps `_idx`, UNIQUE gets `_uq`.
+        // Two indexes on the same field — each independently nameable (mirrors `emit`): spec index
+        // takes `name`, UNIQUE index takes `uniqueName`.
         indexes.push({
-          name: `${base}_idx`,
+          name: surreal.index.name ?? `${base}_idx`,
           cols: [path],
           index: surreal.index.spec,
         });
         indexes.push({
-          name: `${base}_uq`,
+          name: surreal.index.uniqueName ?? `${base}_uq`,
           cols: [path],
           index: "UNIQUE",
         });
       } else {
-        const idxName = surreal.index.name ?? `${base}_idx`;
+        const idxName =
+          (surreal.index.unique
+            ? (surreal.index.uniqueName ?? surreal.index.name)
+            : surreal.index.name) ?? `${base}_idx`;
         indexes.push({
           name: idxName,
           cols: [path],
