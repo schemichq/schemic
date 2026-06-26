@@ -11,6 +11,19 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 
 ## [Unreleased]
 
+### Added
+- **core:** `s.*` fields now expose the [Standard Schema](https://standardschema.dev) `~standard`
+  interface (forwarded from the wrapped Zod schema on `SFieldBase`), so a Schemic field drops straight
+  into any Standard Schema consumer (tRPC, TanStack Form/Router, …) without unwrapping to `.schema`.
+  Both drivers inherit it free; `validate` runs the decode direction (wire -> app).
+
+### Changed (BREAKING — alpha)
+- **postgres:** `connect()` now **fails loud** on a `postgres://` (any non-`file:` URL scheme)
+  connection url — it throws instead of silently spinning up an in-memory throwaway (a silent
+  data-loss footgun where a user pointing at a real server "succeeded" against a disposable DB).
+  `connect` is now async. `file:<dir>` (persistent) and `""`/omitted (in-memory) are unchanged;
+  hosted `postgres://` is reserved for a future node-postgres client.
+
 ## [0.1.0-alpha.22] - 2026-06-26
 
 ### Added
