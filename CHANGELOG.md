@@ -12,7 +12,10 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 ## [Unreleased]
 
 ### Added
-- **surrealdb:** DEFINE FIELD + INDEX + EVENT + FUNCTION syntax-coverage groups — pin every authorable
+- **surrealdb:** DEFINE ACCESS (Phase 1, non-secret) — `.comment()` + `.withRefresh()` with a full
+  round-trip (emit / introspect / canonical / lower / pull) and a RECORD-is-database-only guard (throws
+  on `ON NAMESPACE`/`ON ROOT` + RECORD). Secret-key forms (`WITH JWT`/`ISSUER`) deferred to Phase 2.
+- **surrealdb:** DEFINE FIELD + INDEX + EVENT + FUNCTION + ACCESS syntax-coverage groups — pin every authorable
   clause author -> emit (FIELD: TYPE, OVERWRITE / IF NOT EXISTS, FLEXIBLE, REFERENCE ON DELETE, DEFAULT /
   DEFAULT ALWAYS, READONLY, VALUE, ASSERT, COMPUTED, PERMISSIONS, COMMENT; INDEX: FIELDS, composite,
   UNIQUE, FULLTEXT analyzer + BM25 + HIGHLIGHTS, HNSW, DISKANN, COUNT, COMMENT; EVENT: WHEN + THEN,
