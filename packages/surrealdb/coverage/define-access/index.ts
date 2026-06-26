@@ -1,17 +1,17 @@
 import { coverage } from "../_kit";
-import authenticate from "./authenticate";
-import base from "./base";
-import bearerRecord from "./bearer-record";
-import bearerUser from "./bearer-user";
-import comment from "./comment";
-import duration from "./duration";
-import ifNotExists from "./if-not-exists";
-import jwtAlgorithmKey from "./jwt-algorithm-key";
-import jwtUrl from "./jwt-url";
-import onNamespace from "./on-namespace";
-import overwrite from "./overwrite";
-import recordSignupSignin from "./record-signup-signin";
-import withRefresh from "./with-refresh";
+import authenticate from "./11-authenticate";
+import base from "./01-base";
+import bearerRecord from "./07-bearer-record";
+import bearerUser from "./08-bearer-user";
+import comment from "./13-comment";
+import duration from "./12-duration";
+import ifNotExists from "./03-if-not-exists";
+import jwtAlgorithmKey from "./06-jwt-algorithm-key";
+import jwtUrl from "./05-jwt-url";
+import onNamespace from "./04-on-namespace";
+import overwrite from "./02-overwrite";
+import recordSignupSignin from "./09-record-signup-signin";
+import withRefresh from "./10-with-refresh";
 
 /** Every permutation of the `DEFINE ACCESS` statement, in grammar order. A standalone def
  *  (`defineAccess(name).record()/.jwt()/.bearer()…`), so each item pins its single `DEFINE ACCESS …`

@@ -1,18 +1,18 @@
 import { coverage } from "../_kit";
-import base from "./base";
-import comment from "./comment";
-import composite from "./composite";
-import count from "./count";
-import diskann from "./diskann";
-import diskannTuned from "./diskann-tuned";
-import fulltextAnalyzer from "./fulltext-analyzer";
-import fulltextBm25 from "./fulltext-bm25";
-import fulltextHighlights from "./fulltext-highlights";
-import hnsw from "./hnsw";
-import hnswTuned from "./hnsw-tuned";
-import ifNotExists from "./if-not-exists";
-import overwrite from "./overwrite";
-import unique from "./unique";
+import base from "./01-base";
+import comment from "./14-comment";
+import composite from "./04-composite";
+import count from "./13-count";
+import diskann from "./11-diskann";
+import diskannTuned from "./12-diskann-tuned";
+import fulltextAnalyzer from "./06-fulltext-analyzer";
+import fulltextBm25 from "./07-fulltext-bm25";
+import fulltextHighlights from "./08-fulltext-highlights";
+import hnsw from "./09-hnsw";
+import hnswTuned from "./10-hnsw-tuned";
+import ifNotExists from "./03-if-not-exists";
+import overwrite from "./02-overwrite";
+import unique from "./05-unique";
 
 /** Every permutation of the `DEFINE INDEX` statement, in grammar order. Indexes are authored on a table
  *  (`.index(name, fields, spec?)`) or inline on a field (`.$unique()`/`.$index()`/`.$fulltext()`/

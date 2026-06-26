@@ -1,24 +1,24 @@
 import { coverage } from "../_kit";
-import assert from "./assert";
-import base from "./base";
-import comment from "./comment";
-import computed from "./computed";
-import defaultAlways from "./default-always";
-import defaultExpr from "./default";
-import flexible from "./flexible";
-import ifNotExists from "./if-not-exists";
-import overwrite from "./overwrite";
-import permissionsForOps from "./permissions-for-ops";
-import permissionsFull from "./permissions-full";
-import permissionsNone from "./permissions-none";
-import permissionsSameAs from "./permissions-same-as";
-import readonly from "./readonly";
-import referenceOnDeleteCascade from "./reference-on-delete-cascade";
-import referenceOnDeleteIgnore from "./reference-on-delete-ignore";
-import referenceOnDeleteReject from "./reference-on-delete-reject";
-import referenceOnDeleteThen from "./reference-on-delete-then";
-import referenceOnDeleteUnset from "./reference-on-delete-unset";
-import value from "./value";
+import assert from "./14-assert";
+import base from "./01-base";
+import comment from "./20-comment";
+import computed from "./15-computed";
+import defaultAlways from "./11-default-always";
+import defaultExpr from "./10-default";
+import flexible from "./04-flexible";
+import ifNotExists from "./03-if-not-exists";
+import overwrite from "./02-overwrite";
+import permissionsForOps from "./18-permissions-for-ops";
+import permissionsFull from "./17-permissions-full";
+import permissionsNone from "./16-permissions-none";
+import permissionsSameAs from "./19-permissions-same-as";
+import readonly from "./12-readonly";
+import referenceOnDeleteCascade from "./06-reference-on-delete-cascade";
+import referenceOnDeleteIgnore from "./07-reference-on-delete-ignore";
+import referenceOnDeleteReject from "./05-reference-on-delete-reject";
+import referenceOnDeleteThen from "./09-reference-on-delete-then";
+import referenceOnDeleteUnset from "./08-reference-on-delete-unset";
+import value from "./13-value";
 
 /** Every permutation of the `DEFINE FIELD` statement, in grammar order. A field is authored inline on
  *  a table (`s.*` builders + `$`-methods), so each item is a minimal table whose emit includes the

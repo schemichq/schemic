@@ -1,13 +1,13 @@
 import { coverage } from "../_kit";
-import base from "./base";
-import comment from "./comment";
-import ifNotExists from "./if-not-exists";
-import noArgs from "./no-args";
-import overwrite from "./overwrite";
-import permissionsFull from "./permissions-full";
-import permissionsNone from "./permissions-none";
-import permissionsWhere from "./permissions-where";
-import returns from "./returns";
+import base from "./01-base";
+import comment from "./09-comment";
+import ifNotExists from "./03-if-not-exists";
+import noArgs from "./05-no-args";
+import overwrite from "./02-overwrite";
+import permissionsFull from "./06-permissions-full";
+import permissionsNone from "./07-permissions-none";
+import permissionsWhere from "./08-permissions-where";
+import returns from "./04-returns";
 
 /** Every permutation of the `DEFINE FUNCTION` statement, in grammar order. A function is a standalone
  *  def (`defineFunction(name, args).body(…)`), so each item pins its single `DEFINE FUNCTION …` line.

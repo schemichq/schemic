@@ -1,12 +1,12 @@
 import { coverage } from "../_kit";
-import asyncEvent from "./async";
-import asyncTuned from "./async-tuned";
-import base from "./base";
-import comment from "./comment";
-import ifNotExists from "./if-not-exists";
-import overwrite from "./overwrite";
-import thenOrdered from "./then-ordered";
-import whenOmitted from "./when-omitted";
+import asyncEvent from "./04-async";
+import asyncTuned from "./05-async-tuned";
+import base from "./01-base";
+import comment from "./08-comment";
+import ifNotExists from "./03-if-not-exists";
+import overwrite from "./02-overwrite";
+import thenOrdered from "./07-then-ordered";
+import whenOmitted from "./06-when-omitted";
 
 /** Every permutation of the `DEFINE EVENT` statement, in grammar order. An event is authored on a table
  *  (`.event(name, { when?, then, async?, comment? })`), so each item is a minimal table whose emit pins
