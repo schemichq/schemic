@@ -61,7 +61,7 @@ The connection lives in `schemic.config.ts` — a named connection from the
 
 ```ts
 import { defineConfig } from "@schemic/core/config";
-import { postgresConnection } from "@schemic/postgres";
+import { postgresConnection } from "@schemic/postgres/connection";
 
 export default defineConfig({
   connections: {

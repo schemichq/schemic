@@ -1,5 +1,5 @@
 import { defineConfig } from "@schemic/core/config";
-import { postgresConnection } from "@schemic/postgres";
+import { postgresConnection } from "@schemic/postgres/connection";
 
 // Connections-only config: the single-connection `db` sugar is gone — a project is a map of named
 // CONNECTIONS, each produced by a driver's `<driver>Connection(...)` factory. Connection VALUES are

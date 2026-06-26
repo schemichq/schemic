@@ -949,7 +949,7 @@ export const postgresDriver: Driver<PgConn> = {
 // --- `schemic init` scaffold templates ----------------------------------------------------------
 
 const INIT_CONFIG_TS = `import { defineConfig } from "@schemic/core/config";
-import { postgresConnection } from "@schemic/postgres";
+import { postgresConnection } from "@schemic/postgres/connection";
 
 // Connections-only config: a map of named connections, each from a driver factory. Values are
 // explicit — read env yourself (no magic env vars).
