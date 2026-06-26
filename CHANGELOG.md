@@ -35,6 +35,9 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
   that previously emitted bad DDL now throw (they failed at apply anyway).
 
 ### Changed (BREAKING — alpha)
+- **surrealdb:** `defineAccess(name)` now **requires** an explicit scope — `.onDatabase()` /
+  `.onNamespace()` — and `emit()` throws if it is unset (the silent `ON DATABASE` default is gone).
+  Access scope is a security boundary, so it must be chosen, not defaulted.
 - **surrealdb:** renamed `.reference()` -> `.$reference()` on field builders — field DDL clauses are
   `$`-prefixed (consistent with `.$unique()` / `.$index()` / `.$default()`). Update callers + the pull
   renderer migrated.
