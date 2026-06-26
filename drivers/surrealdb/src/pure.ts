@@ -860,7 +860,9 @@ export class SField<
       index: { ...this.surreal.index, ...(name !== undefined ? { name } : {}) },
     });
   }
-  /** Index this field with a uniqueness constraint (`… UNIQUE`). `name` overrides the derived name. */
+  /** Index this field with a uniqueness constraint (`… UNIQUE`). `name` overrides the derived name.
+   *  Chaining `.$fulltext()`/`.$hnsw()`/`.$diskann()` after this emits TWO indexes on the same field
+   *  (a UNIQUE index and a FULLTEXT/vector index) with auto-derived names. */
   $unique(name?: string): SField<S, Flags> {
     return new SField(this.schema, {
       ...this.surreal,
@@ -878,7 +880,8 @@ export class SField<
    *   `.$fulltext()` · `.$fulltext("english")` · `.$fulltext(english)` · `.$fulltext({ analyzer: english, highlights: true })`.
    * `bm25: [k1, b]` tunes the (always-on) scoring; `highlights` enables `search::highlight`.
    * The DEFAULT analyzer/bm25 are omitted from emitted DDL (SurrealDB always applies them) — see
-   * {@link FulltextOptions}. Mutually exclusive with `.$unique()`.
+   * {@link FulltextOptions}. Chaining `.$unique()` emits TWO indexes (FULLTEXT + UNIQUE) on the same
+   * field with auto-derived names.
    */
   $fulltext(analyzer?: string | AnalyzerDef): SField<S, Flags>;
   $fulltext(opts: FulltextFieldOptions): SField<S, Flags>;
@@ -906,7 +909,8 @@ export class SField<
   $diskann(opts: DiskannOptions & { name?: string }): SField<S, Flags> {
     return this.withIndexSpec(buildIndexSpec({ diskann: opts }), opts.name);
   }
-  /** Set a FULLTEXT/HNSW/DISKANN index `spec` (+ optional custom `name`) on this field. */
+  /** Set a FULLTEXT/HNSW/DISKANN index `spec` (+ optional custom `name`) on this field. When `.$unique()`
+   *  is also set, the DDL layer emits TWO indexes (UNIQUE + spec) with auto-derived names. */
   private withIndexSpec(
     spec: string | undefined,
     name?: string,

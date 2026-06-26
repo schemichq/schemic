@@ -759,22 +759,45 @@ function emit(
   out.push({ kind: "field", name: path, table, ddl, clauses });
 
   // A single-field index via `.$index()`/`.$unique()` (plain/UNIQUE) or `.$fulltext()`/`.$hnsw()`/
-  // `.$diskann()` (a FULLTEXT/HNSW/DISKANN `spec`). `spec` and UNIQUE are mutually exclusive.
+  // `.$diskann()` (a FULLTEXT/HNSW/DISKANN `spec`). When BOTH `spec` and UNIQUE are set, two indexes
+  // are emitted with auto-derived names (`_idx` for the spec, `_uq` for UNIQUE).
   if (surreal?.index) {
-    const idxName =
-      surreal.index.name ??
-      `${table}_${path.replace(/[`]/g, "").replace(/[^a-zA-Z0-9]+/g, "_")}_idx`;
-    const tail = surreal.index.spec
-      ? ` ${surreal.index.spec}`
-      : surreal.index.unique
-        ? " UNIQUE"
-        : "";
-    out.push({
-      kind: "index",
-      name: idxName,
-      table,
-      ddl: `DEFINE INDEX ${existsPrefix(opts)}${escapeIdent(idxName)} ON TABLE ${escapeIdent(table)} FIELDS ${path}${tail};`,
-    });
+    const sanitize = (p: string) =>
+      p.replace(/[`]/g, "").replace(/[^a-zA-Z0-9]+/g, "_");
+    const base = `${table}_${sanitize(path)}`;
+
+    if (surreal.index.spec && surreal.index.unique) {
+      // Two indexes on the same field — spec keeps `_idx`, UNIQUE gets `_uq`.
+      const specName = `${base}_idx`;
+      out.push({
+        kind: "index",
+        name: specName,
+        table,
+        ddl: `DEFINE INDEX ${existsPrefix(opts)}${escapeIdent(specName)} ON TABLE ${escapeIdent(table)} FIELDS ${path} ${surreal.index.spec};`,
+      });
+      const uniqName = `${base}_uq`;
+      out.push({
+        kind: "index",
+        name: uniqName,
+        table,
+        ddl: `DEFINE INDEX ${existsPrefix(opts)}${escapeIdent(uniqName)} ON TABLE ${escapeIdent(table)} FIELDS ${path} UNIQUE;`,
+      });
+    } else {
+      const idxName =
+        surreal.index.name ??
+        `${base}_idx`;
+      const tail = surreal.index.spec
+        ? ` ${surreal.index.spec}`
+        : surreal.index.unique
+          ? " UNIQUE"
+          : "";
+      out.push({
+        kind: "index",
+        name: idxName,
+        table,
+        ddl: `DEFINE INDEX ${existsPrefix(opts)}${escapeIdent(idxName)} ON TABLE ${escapeIdent(table)} FIELDS ${path}${tail};`,
+      });
+    }
   }
 
   // SurrealDB auto-creates an array's `.*` element from the `array<…>` type. A TRIVIAL element is

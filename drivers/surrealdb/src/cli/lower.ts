@@ -166,16 +166,31 @@ function lowerField(
       sf.permissions = lowerPermissions(surreal.permissions, FIELD_PERM_OPS);
     }
     if (surreal.index) {
-      // Custom name if given, else the derived `<table>_<sanitized-path>_idx`.
-      const idxName =
-        surreal.index.name ??
-        `${table}_${path.replace(/[`]/g, "").replace(/[^a-zA-Z0-9]+/g, "_")}_idx`;
-      indexes.push({
-        name: idxName,
-        cols: [path],
-        // FULLTEXT/HNSW/DISKANN spec (`.$fulltext()`/`.$hnsw()`/`.$diskann()`) or UNIQUE/plain.
-        index: surreal.index.spec ?? (surreal.index.unique ? "UNIQUE" : ""),
-      });
+      const sanitize = (p: string) =>
+        p.replace(/[`]/g, "").replace(/[^a-zA-Z0-9]+/g, "_");
+      const base = `${table}_${sanitize(path)}`;
+
+      if (surreal.index.spec && surreal.index.unique) {
+        // Two indexes on the same field — spec keeps `_idx`, UNIQUE gets `_uq`.
+        indexes.push({
+          name: `${base}_idx`,
+          cols: [path],
+          index: surreal.index.spec,
+        });
+        indexes.push({
+          name: `${base}_uq`,
+          cols: [path],
+          index: "UNIQUE",
+        });
+      } else {
+        const idxName = surreal.index.name ?? `${base}_idx`;
+        indexes.push({
+          name: idxName,
+          cols: [path],
+          // FULLTEXT/HNSW/DISKANN spec (`.$fulltext()`/`.$hnsw()`/`.$diskann()`) or UNIQUE/plain.
+          index: surreal.index.spec ?? (surreal.index.unique ? "UNIQUE" : ""),
+        });
+      }
     }
   }
   fields.push(sf);
