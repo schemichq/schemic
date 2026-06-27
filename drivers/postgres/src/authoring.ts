@@ -423,6 +423,58 @@ type ZodsOf<T extends readonly (AnyField | z.ZodType)[]> = {
   [K in keyof T]: SchemaOf<T[K]>;
 };
 
+/**
+ * Infer the pg column type for an `s.codec(wire, app, …)` from its RAW-Zod WIRE schema (the on-disk
+ * side). `s.*` factories normally set `native.pg` explicitly, but a codec's wire is a bare Zod schema,
+ * so map its base type here (peeling option/nullable/etc.). Mirrors the canonical scalar choices the
+ * leaf factories make; structural/unknown wires fall back to `jsonb`.
+ */
+function wirePgType(schema: z.ZodType): PgTypeRef {
+  let cur = schema as {
+    _zod?: { def?: { type?: string; innerType?: z.ZodType } };
+  };
+  const peel = new Set([
+    "optional",
+    "nullable",
+    "default",
+    "prefault",
+    "catch",
+    "readonly",
+    "nonoptional",
+    "pipe",
+  ]);
+  while (
+    cur?._zod?.def &&
+    peel.has(cur._zod.def.type ?? "") &&
+    cur._zod.def.innerType
+  )
+    cur = cur._zod.def.innerType as typeof cur;
+  switch (cur?._zod?.def?.type) {
+    case "string":
+      return { type: "text" };
+    case "int":
+      return { type: "integer" };
+    case "number":
+      return { type: "double precision" };
+    case "bigint":
+      return { type: "bigint" };
+    case "boolean":
+      return { type: "boolean" };
+    case "date":
+      return { type: "timestamptz" };
+    case "object":
+    case "array":
+    case "tuple":
+    case "record":
+    case "map":
+    case "set":
+    case "union":
+      return { type: "jsonb" };
+    default:
+      return { type: "text" };
+  }
+}
+
 /** The Postgres authoring namespace. Zod drop-ins (string/number/…) + native pg types + `$postgres`. */
 export const s = {
   // Zod drop-ins (the canonical superset; each maps to a sensible pg default). Native aliases below
@@ -462,6 +514,36 @@ export const s = {
     mk("text", z.base64url(params)),
   e164: (params?: Parameters<typeof z.e164>[0]) => mk("text", z.e164(params)),
   jwt: (params?: Parameters<typeof z.jwt>[0]) => mk("text", z.jwt(params)),
+  // long-tail string formats (also -> text, App-side). uuid version variants, http-only url, network
+  // name/hex/mac, and keyed hashes. `s.uuid()` stays the native `uuid` type; these are text validators.
+  uuidv4: (params?: Parameters<typeof z.uuidv4>[0]) =>
+    mk("text", z.uuidv4(params)),
+  uuidv6: (params?: Parameters<typeof z.uuidv6>[0]) =>
+    mk("text", z.uuidv6(params)),
+  uuidv7: (params?: Parameters<typeof z.uuidv7>[0]) =>
+    mk("text", z.uuidv7(params)),
+  httpUrl: (params?: Parameters<typeof z.httpUrl>[0]) =>
+    mk("text", z.httpUrl(params)),
+  hostname: (params?: Parameters<typeof z.hostname>[0]) =>
+    mk("text", z.hostname(params)),
+  hex: (params?: Parameters<typeof z.hex>[0]) => mk("text", z.hex(params)),
+  mac: (params?: Parameters<typeof z.mac>[0]) => mk("text", z.mac(params)),
+  hash: (...args: Parameters<typeof z.hash>) => mk("text", z.hash(...args)),
+  // ISO string formats (nested, mirroring z.iso.*) — App-side validators on `text`. DISTINCT from the
+  // native temporal types s.date()/s.timestamptz()/s.interval() (those are real pg date/time columns).
+  iso: {
+    date: (params?: Parameters<typeof z.iso.date>[0]) =>
+      mk("text", z.iso.date(params)),
+    time: (params?: Parameters<typeof z.iso.time>[0]) =>
+      mk("text", z.iso.time(params)),
+    datetime: (params?: Parameters<typeof z.iso.datetime>[0]) =>
+      mk("text", z.iso.datetime(params)),
+    duration: (params?: Parameters<typeof z.iso.duration>[0]) =>
+      mk("text", z.iso.duration(params)),
+  },
+  // string-on-disk, boolean in the app (Zod's z.stringbool codec): column is `text`, App value is bool.
+  stringbool: (params?: Parameters<typeof z.stringbool>[0]) =>
+    mk("text", z.stringbool(params)),
   // numeric
   smallint: () => mk("smallint", z.int().gte(-32768).lte(32767)),
   integer: () => mk("integer", z.int()),
@@ -499,10 +581,12 @@ export const s = {
   cidr: () => mk("cidr", z.string()),
   macaddr: () => mk("macaddr", z.string()),
   // json
-  jsonb: <T extends z.ZodType = z.ZodUnknown>(shape?: T) =>
-    mk("jsonb", shape ?? z.unknown()),
-  json: <T extends z.ZodType = z.ZodUnknown>(shape?: T) =>
-    mk("json", shape ?? z.unknown()),
+  // no shape -> z.json() (the recursive JSON-value schema), not z.unknown(): a no-shape json/jsonb
+  // column still only holds valid JSON, and it makes `s.json()` a literal drop-in for `z.json()`.
+  jsonb: <T extends z.ZodType = ReturnType<typeof z.json>>(shape?: T) =>
+    mk("jsonb", shape ?? z.json()),
+  json: <T extends z.ZodType = ReturnType<typeof z.json>>(shape?: T) =>
+    mk("json", shape ?? z.json()),
   // enum (string-literal union -> text) and single literal. Returns a PgEnumField so `.exclude`/
   // `.extract` are available to derive narrower enums (the column stays text).
   enum: <const T extends readonly [string, ...string[]]>(values: T) =>
@@ -530,6 +614,12 @@ export const s = {
       ) as z.ZodObject<{ [K in keyof Sh]: SchemaOf<Sh[K]> }>,
       { pg: { type: "jsonb" } },
     ),
+  // z.strictObject / z.looseObject drop-ins — same jsonb column, unknown-key mode preset (still a
+  // composable PgObjectField). strict rejects extra keys; loose passes them through.
+  strictObject: <Sh extends Record<string, AnyField | z.ZodType>>(shape: Sh) =>
+    s.object(shape).strict(),
+  looseObject: <Sh extends Record<string, AnyField | z.ZodType>>(shape: Sh) =>
+    s.object(shape).loose(),
   // array(elem) -> `<elem>[]`; carries the element's pg metadata so it lowers to an array of that type.
   array: (elem: AnyField | z.ZodType): PgField =>
     new PgField(
@@ -611,6 +701,16 @@ export const s = {
    */
   $postgres: <C extends z.ZodType>(pgType: string, codec: C): PgField<C> =>
     new PgField<C>(codec, { pg: { type: pgType } }),
+  // z.codec drop-in: a low-level codec whose pg column type is INFERRED from the wire schema A (the
+  // on-disk side). Mirrors z.codec's arg order — (wire/INPUT, app/OUTPUT, {decode, encode}); A/B are raw
+  // Zod (pass `field.schema` for an s.* field). Unlike $postgres (which names the pg type explicitly),
+  // s.codec derives it from a schema-expressible wire. App = output(B), Wire = input(A).
+  codec: <A extends z.ZodType, B extends z.ZodType>(
+    wire: A,
+    app: B,
+    params: Parameters<typeof z.codec<A, B>>[2],
+  ): PgField<z.ZodCodec<A, B>> =>
+    new PgField(z.codec(wire, app, params), { pg: wirePgType(wire) }),
 };
 
 // --- defineTable: a pg table builder producing an `Authored` object -----------------------------

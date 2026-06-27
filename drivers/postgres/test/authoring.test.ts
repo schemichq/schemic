@@ -990,3 +990,98 @@ describe("s.enum().exclude()/.extract() (PgEnumField — derive narrower enums)"
     }
   });
 });
+
+describe("Tier-3 long-tail factories (z.* -> s.* literal drop-ins)", () => {
+  test("long-tail string formats validate App-side, emit text", () => {
+    expect(
+      s.uuidv7().safeDecode("0192f0a0-0000-7000-8000-000000000000").success,
+    ).toBe(true);
+    expect(
+      s.uuidv7().safeDecode("00000000-0000-4000-8000-000000000000").success,
+    ).toBe(false); // a v4 is not a v7
+    expect(s.httpUrl().safeDecode("https://schemic.dev").success).toBe(true);
+    expect(s.hex().safeDecode("deadBEEF").success).toBe(true);
+    expect(s.hex().safeDecode("nothex!").success).toBe(false);
+    expect(s.hash("sha256").safeDecode("a".repeat(64)).success).toBe(true);
+    const t = defineTable("lt", {
+      a: s.uuidv4(),
+      b: s.httpUrl(),
+      c: s.hostname(),
+      d: s.mac(),
+    });
+    const out = emitKinds(registry, postgresDriver.explode([t], [])).join("\n");
+    for (const col of ["a", "b", "c", "d"])
+      expect(out).toContain(`"${col}" text NOT NULL`);
+  });
+
+  test("nested s.iso.* are ISO string-format validators on text", () => {
+    expect(s.iso.date().safeDecode("2020-01-02").success).toBe(true);
+    expect(s.iso.date().safeDecode("nope").success).toBe(false);
+    expect(s.iso.datetime().safeDecode("2020-01-02T03:04:05Z").success).toBe(
+      true,
+    );
+    expect(s.iso.time().safeDecode("03:04:05").success).toBe(true);
+    const out = emitKinds(
+      registry,
+      postgresDriver.explode([defineTable("ic", { d: s.iso.date() })], []),
+    ).join("\n");
+    expect(out).toContain('"d" text NOT NULL');
+  });
+
+  test("s.stringbool — string wire, boolean app", () => {
+    const sb = s.stringbool();
+    expect(sb.decode("true")).toBe(true);
+    expect(typeof sb.decode("true")).toBe("boolean");
+    expect(sb.encode(true as never)).toBe("true"); // app bool -> wire string
+    expect(
+      emitKinds(
+        registry,
+        postgresDriver.explode([defineTable("sb", { on: sb })], []),
+      ).join("\n"),
+    ).toContain('"on" text NOT NULL');
+  });
+
+  test("s.json() no-shape is the recursive JSON schema", () => {
+    expect(s.json().safeDecode({ a: [1, "x", null] }).success).toBe(true);
+  });
+
+  test("s.strictObject rejects extra keys; s.looseObject allows them", () => {
+    expect(
+      s.strictObject({ a: s.text() }).safeDecode({ a: "x", b: 1 }).success,
+    ).toBe(false);
+    expect(
+      s.looseObject({ a: s.text() }).safeDecode({ a: "x", b: 1 }).success,
+    ).toBe(true);
+  });
+
+  test("s.codec infers the column type from the wire schema A + round-trips", async () => {
+    // wire string -> app Date (column text); wire number -> app bigint (column double precision)
+    const at = s.codec(z.string(), z.date(), {
+      decode: (x) => new Date(x),
+      encode: (d) => d.toISOString(),
+    });
+    expect(at.decode("2020-01-02T03:04:05.000Z") instanceof Date).toBe(true);
+    const t = defineTable("cdc", {
+      at,
+      n: s.codec(z.number(), z.bigint(), {
+        decode: (n) => BigInt(n),
+        encode: (b) => Number(b),
+      }),
+    });
+    const objs = postgresDriver.explode([t], []);
+    const out = emitKinds(registry, objs).join("\n");
+    expect(out).toContain('"at" text NOT NULL');
+    expect(out).toContain('"n" double precision NOT NULL');
+    const conn = (await postgresDriver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
+    try {
+      await postgresDriver.apply(conn, emitKinds(registry, objs));
+      const live = await postgresDriver.introspectAll(conn);
+      const { up, down } = buildKindDiff(registry, live, objs);
+      expect({ up, down }).toEqual({ up: [], down: [] });
+    } finally {
+      await conn.close();
+    }
+  });
+});
