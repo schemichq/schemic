@@ -328,13 +328,6 @@ type ContainsObjectInUnion<O> = O extends readonly [infer H, ...infer R]
     ? true
     : ContainsObjectInUnion<R>
   : false;
-/** The `this`-parameter constraint for the object-mode methods: the field itself when its type
- *  contains an object, else a hint string the real receiver isn't assignable to (a compile error). */
-export type ObjectModeReceiver<S, T> =
-  ContainsObject<S> extends true
-    ? T
-    : "`.flexible()` / `.loose()` / `.strict()` is only valid on object-typed fields (object, array<object>, or a union containing one)";
-
 /**
  * The PORTABLE, dialect-agnostic field base (extraction phase B — see docs/AUTHORING-SPLIT.md).
  * Holds the Zod schema, an opaque per-dialect `native` metadata slot, the field-level codecs, and
@@ -593,19 +586,23 @@ export abstract class SFieldBase<
     >;
   }
 
+  // Unguarded (no `this:`-receiver type-guard) so an object-field SUBCLASS like SObjectField stays
+  // assignable to `AnyField` — a `this`-param guard makes object fields' `this` type diverge from
+  // `AnyField`'s and breaks structural assignability (it's why postgres ships these unguarded too).
+  // On a non-object field `applyObjectMode` is a pass-through, so the call is a harmless no-op.
   /** Allow arbitrary extra keys on the field's object(s) — `FLEXIBLE` in DDL. Mirrors Zod's `.loose()`,
-   *  but descends through `array`/`set`/union/wrapper layers so `s.array(s.object({…})).flexible()`
-   *  emits `array<object> FLEXIBLE`. Only valid on object-typed fields (a compile error otherwise). */
-  loose(this: ObjectModeReceiver<S, this>): this {
+   *  and descends through `array`/`set`/union/wrapper layers so `s.array(s.object({…})).flexible()`
+   *  emits `array<object> FLEXIBLE`. A no-op on non-object fields. */
+  loose(): this {
     return (this as SFieldBase<S, Flags, N>).objectMode("loose") as this;
   }
   /** Reject unknown keys on the field's object(s) — non-`FLEXIBLE` (the default). Mirrors Zod's
-   *  `.strict()`; descends like {@link loose}. Only valid on object-typed fields. */
-  strict(this: ObjectModeReceiver<S, this>): this {
+   *  `.strict()`; descends like {@link loose}. A no-op on non-object fields. */
+  strict(): this {
     return (this as SFieldBase<S, Flags, N>).objectMode("strict") as this;
   }
   /** Alias for {@link loose} — a `FLEXIBLE` object accepting arbitrary keys. */
-  flexible(this: ObjectModeReceiver<S, this>): this {
+  flexible(): this {
     return (this as SFieldBase<S, Flags, N>).objectMode("loose") as this;
   }
   private objectMode(mode: "loose" | "strict"): this {
@@ -1350,6 +1347,138 @@ type ZodsOf<T extends readonly (AnyField | z.ZodType)[]> = {
   -readonly [K in keyof T]: SchemaOf<T[K]>;
 };
 
+/** Lift a `Shape` to its `{ zshape, fields }` — raw Zod values get a bare `SField`. Shared by
+ *  `s.object` and {@link SObjectField}'s composition methods so both register the same per-field map. */
+function liftShape(shape: Shape): {
+  zshape: Record<string, z.ZodType>;
+  fields: Record<string, AnyField>;
+} {
+  const zshape: Record<string, z.ZodType> = {};
+  const fields: Record<string, AnyField> = {};
+  for (const [k, v] of Object.entries(shape)) {
+    const f = v instanceof SField ? v : new SField(v);
+    fields[k] = f;
+    zshape[k] = f.schema;
+  }
+  return { zshape, fields };
+}
+
+/**
+ * The composable object field returned by {@link s.object}. Mirrors Zod's `ZodObject` (and
+ * `@schemic/postgres`'s `PgObjectField`): the composition methods (`.extend`/`.pick`/`.omit`/…) live on
+ * THIS subclass, not the base `SField`, so the base + `AnyField` stay free of the generic-return methods
+ * that would break structural assignability (see the SFieldBase-unification catch-22). Each method
+ * forwards to the inner `z.object`, re-registers the `objectFieldsRegistry` entry (so nested DDL keeps
+ * each field's `$default`/`$assert`/… clauses), and re-wraps as an `SObjectField` so the chain stays
+ * composable + precisely typed.
+ */
+export class SObjectField<
+  S extends Shape = Shape,
+  Flags extends string = never,
+> extends SField<SZObject<S>, Flags> {
+  // Object-producing ops (incl. the inherited .loose()/.strict()/.flexible()) stay an SObjectField;
+  // anything else (.optional()/.array()/…) degrades to a base SField, matching the wrapper's type.
+  protected rebuild<S2 extends z.ZodType, F2 extends string>(
+    schema: S2,
+    native: SurrealMeta,
+  ): SField<S2, F2> {
+    if (schema instanceof z.ZodObject) {
+      const fields = objectFieldsRegistry.get(this.schema);
+      if (fields) objectFieldsRegistry.set(schema, fields);
+      return new SObjectField(
+        schema as unknown as SZObject<Shape>,
+        native,
+      ) as unknown as SField<S2, F2>;
+    }
+    return new SField<S2, F2>(schema, native);
+  }
+
+  /** This object's registered per-field SField wrappers (the source of nested-DDL clauses). */
+  private get fields(): Record<string, AnyField> {
+    return objectFieldsRegistry.get(this.schema) ?? {};
+  }
+
+  /** Re-register `fields` for `schema` and wrap it as a new `SObjectField`. */
+  private wrap<S2 extends Shape>(
+    schema: z.ZodObject<z.ZodRawShape>,
+    fields: Record<string, AnyField>,
+  ): SObjectField<S2, Flags> {
+    objectFieldsRegistry.set(schema, fields);
+    return new SObjectField<S2, Flags>(
+      schema as unknown as SZObject<S2>,
+      this.native,
+    );
+  }
+
+  /** Add/override fields. Accepts fields OR raw Zod, exactly like `s.object`. */
+  extend<T extends Shape>(shape: T): SObjectField<Omit<S, keyof T> & T, Flags> {
+    const { zshape, fields } = liftShape(shape);
+    return this.wrap(this.schema.extend(zshape), { ...this.fields, ...fields });
+  }
+
+  /** Merge another object field's shape in (its fields win on conflict). */
+  merge<T extends Shape>(
+    other: SObjectField<T>,
+  ): SObjectField<Omit<S, keyof T> & T, Flags> {
+    return this.wrap(this.schema.extend(other.schema.shape), {
+      ...this.fields,
+      ...other.fields,
+    });
+  }
+
+  /** Keep only the masked keys. */
+  pick<M extends { readonly [K in keyof S]?: true }>(
+    mask: M,
+  ): SObjectField<Pick<S, keyof M & keyof S>, Flags> {
+    const keep = new Set(Object.keys(mask));
+    const fields = Object.fromEntries(
+      Object.entries(this.fields).filter(([k]) => keep.has(k)),
+    );
+    return this.wrap(this.schema.pick(mask as never), fields);
+  }
+
+  /** Drop the masked keys. */
+  omit<M extends { readonly [K in keyof S]?: true }>(
+    mask: M,
+  ): SObjectField<Omit<S, keyof M>, Flags> {
+    const drop = new Set(Object.keys(mask));
+    const fields = Object.fromEntries(
+      Object.entries(this.fields).filter(([k]) => !drop.has(k)),
+    );
+    return this.wrap(this.schema.omit(mask as never), fields);
+  }
+
+  /** Make all fields optional. */
+  partial(): SObjectField<PartialShape<S>, Flags> {
+    return this.wrap(this.schema.partial(), this.fields);
+  }
+
+  /** Make all fields required. */
+  required(): SObjectField<RequiredShape<S>, Flags> {
+    return this.wrap(this.schema.required(), this.fields);
+  }
+
+  /** Type unknown keys with a schema (field OR raw Zod) — an `unknown` catchall emits `FLEXIBLE`. */
+  catchall<C extends AnyField | z.ZodType>(schema: C): SObjectField<S, Flags> {
+    return this.wrap(this.schema.catchall(toZod(schema)), this.fields);
+  }
+
+  /** Allow arbitrary extra keys (`FLEXIBLE`) — alias for the inherited {@link SField.flexible}. */
+  passthrough(): this {
+    return (this as SObjectField<S, Flags>).flexible() as this;
+  }
+
+  /** A `ZodEnum` of this object's keys (degrades to a base `SField`, mirroring Zod's `.keyof()`). */
+  keyof(): SField<ReturnType<z.ZodObject<ZShape<S>>["keyof"]>> {
+    return new SField(this.schema.keyof());
+  }
+
+  /** The object's Zod field shape (mirrors Zod's `.shape`). */
+  get shape(): ZShape<S> {
+    return this.schema.shape as ZShape<S>;
+  }
+}
+
 /** Field constructors — the authoring surface. */
 export const s = {
   string: () => new SField(z.string()),
@@ -1461,17 +1590,11 @@ export const s = {
    * `$`-method and Zod wrapper (`.optional()`/`.array()`/`.$default()`), which all reuse
    * `this.schema`.
    */
-  object: <S extends Shape>(shape: S): SField<SZObject<S>> => {
-    const fields: Record<string, AnyField> = {};
-    const zshape: Record<string, z.ZodType> = {};
-    for (const [k, v] of Object.entries(shape)) {
-      const f = v instanceof SField ? v : new SField(v);
-      fields[k] = f;
-      zshape[k] = f.schema;
-    }
+  object: <S extends Shape>(shape: S): SObjectField<S> => {
+    const { zshape, fields } = liftShape(shape);
     const schema = z.object(zshape) as SZObject<S>;
     objectFieldsRegistry.set(schema, fields);
-    return new SField(schema);
+    return new SObjectField<S>(schema);
   },
   /** An array of `element`. `opts.max` -> sized `array<T, N>` (N is the MAX length). */
   array: <F extends AnyField | z.ZodType>(

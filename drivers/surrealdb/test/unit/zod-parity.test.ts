@@ -157,3 +157,75 @@ describe("native Zod chain methods (Tier-2: app-side, DDL unchanged)", () => {
     );
   });
 });
+
+describe("object composition (Tier-2: SObjectField, mirrors Zod's ZodObject)", () => {
+  const lines = (
+    t: Parameters<typeof emitTable>[0],
+    prefix: string,
+  ): string[] =>
+    emitTable(t)
+      .split("\n")
+      .filter((l) => l.includes(` ${prefix}`))
+      .map((l) => l.trim());
+
+  const base = s.object({ a: s.string(), b: s.int().$default(0) });
+
+  test(".extend() adds fields AND preserves nested $-clauses (registry maintained)", () => {
+    const T = defineTable("t", {
+      id: s.string(),
+      o: base.extend({ c: s.boolean() }),
+    });
+    expect(lines(T, "o")).toEqual([
+      "DEFINE FIELD o ON TABLE t TYPE object;",
+      "DEFINE FIELD o.a ON TABLE t TYPE string;",
+      "DEFINE FIELD o.b ON TABLE t TYPE int DEFAULT 0;", // $default survived .extend()
+      "DEFINE FIELD o.c ON TABLE t TYPE bool;",
+    ]);
+  });
+
+  test(".pick() / .omit() select keys", () => {
+    const P = defineTable("t", { id: s.string(), o: base.pick({ a: true }) });
+    const O = defineTable("t", { id: s.string(), o: base.omit({ a: true }) });
+    expect(lines(P, "o")).toEqual([
+      "DEFINE FIELD o ON TABLE t TYPE object;",
+      "DEFINE FIELD o.a ON TABLE t TYPE string;",
+    ]);
+    expect(lines(O, "o")).toEqual([
+      "DEFINE FIELD o ON TABLE t TYPE object;",
+      "DEFINE FIELD o.b ON TABLE t TYPE int DEFAULT 0;",
+    ]);
+  });
+
+  test(".partial() makes fields optional, keeping clauses", () => {
+    const T = defineTable("t", { id: s.string(), o: base.partial() });
+    expect(lines(T, "o")).toEqual([
+      "DEFINE FIELD o ON TABLE t TYPE object;",
+      "DEFINE FIELD o.a ON TABLE t TYPE option<string>;",
+      "DEFINE FIELD o.b ON TABLE t TYPE int DEFAULT 0;",
+    ]);
+  });
+
+  test("result stays composable + .flexible() composes (FLEXIBLE + extend)", () => {
+    const T = defineTable("t", {
+      id: s.string(),
+      o: base.flexible().extend({ c: s.boolean() }),
+    });
+    expect(lines(T, "o")[0]).toBe(
+      "DEFINE FIELD o ON TABLE t TYPE object FLEXIBLE;",
+    );
+    // still composable after a chain of ops
+    expect(typeof base.extend({ c: s.boolean() }).pick).toBe("function");
+  });
+
+  test("app-side validation reflects the composed shape", () => {
+    expect(
+      base.extend({ c: s.boolean() }).safeDecode({ a: "x", b: 1 }).success,
+    ).toBe(false);
+    expect(
+      base.extend({ c: s.boolean() }).safeDecode({ a: "x", b: 1, c: true })
+        .success,
+    ).toBe(true);
+    expect(base.pick({ a: true }).safeDecode({ a: "x" }).success).toBe(true);
+    expect(base.partial().safeDecode({}).success).toBe(true);
+  });
+});
