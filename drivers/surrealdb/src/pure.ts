@@ -1574,6 +1574,32 @@ export const s = {
     formatField(z.jwt(params), "jwt"),
   emoji: (params?: Parameters<typeof z.emoji>[0]) =>
     formatField(z.emoji(params), "emoji"),
+  /** A v7 UUID string (app-side format; no `string::is_*` validator for v7, so assert-free). */
+  uuidv7: (params?: Parameters<typeof z.uuidv7>[0]) =>
+    formatField(z.uuidv7(params), "uuidv7"),
+  /** An `http`/`https` URL string (stricter than {@link s.url}; app-side, assert-free). */
+  httpUrl: (params?: Parameters<typeof z.httpUrl>[0]) =>
+    formatField(z.httpUrl(params), "httpUrl"),
+  /** A v4 UUID string (app-side; assert-free). */
+  uuidv4: (params?: Parameters<typeof z.uuidv4>[0]) =>
+    formatField(z.uuidv4(params), "uuidv4"),
+  /** A v6 UUID string (app-side; assert-free). */
+  uuidv6: (params?: Parameters<typeof z.uuidv6>[0]) =>
+    formatField(z.uuidv6(params), "uuidv6"),
+  /** A hostname string (app-side; assert-free). */
+  hostname: (params?: Parameters<typeof z.hostname>[0]) =>
+    formatField(z.hostname(params), "hostname"),
+  /** A hex string (app-side; assert-free). */
+  hex: (params?: Parameters<typeof z.hex>[0]) =>
+    formatField(z.hex(params), "hex"),
+  /** A MAC-address string (app-side; assert-free). */
+  mac: (params?: Parameters<typeof z.mac>[0]) =>
+    formatField(z.mac(params), "mac"),
+  /** A hash string for the given algorithm, e.g. `s.hash("sha256")` (app-side; assert-free). */
+  hash: (
+    alg: Parameters<typeof z.hash>[0],
+    params?: Parameters<typeof z.hash>[1],
+  ) => formatField(z.hash(alg, params), "hash"),
 
   // String fields validated by SurrealDB's `string::is_*` (no Zod format — plain string
   // app-side, the baked ASSERT enforces the format in the DB).
@@ -1604,6 +1630,18 @@ export const s = {
   date: () => new SField(datetimeCodec()),
   /** Surreal `duration` (a `Duration` instance). */
   duration: () => new SField(native(z.instanceof(Duration), "duration")),
+  /** ISO-8601 STRING formats (Zod `z.iso.*`) — app-side validated, stored as `string`. Distinct from
+   *  the native `s.datetime`/`s.duration` codecs, which use SurrealDB's `datetime`/`duration` types. */
+  iso: {
+    date: (params?: Parameters<typeof z.iso.date>[0]) =>
+      formatField(z.iso.date(params), "isoDate"),
+    time: (params?: Parameters<typeof z.iso.time>[0]) =>
+      formatField(z.iso.time(params), "isoTime"),
+    datetime: (params?: Parameters<typeof z.iso.datetime>[0]) =>
+      formatField(z.iso.datetime(params), "isoDatetime"),
+    duration: (params?: Parameters<typeof z.iso.duration>[0]) =>
+      formatField(z.iso.duration(params), "isoDuration"),
+  },
   /** Surreal `decimal` (a `Decimal` instance — arbitrary precision). */
   decimal: () => new SField(native(z.instanceof(Decimal), "decimal")),
   /** Surreal `bytes` (a `Uint8Array`). */
@@ -1646,6 +1684,31 @@ export const s = {
     objectFieldsRegistry.set(schema, fields);
     return new SObjectField<S>(schema);
   },
+  /** Like {@link s.object} but rejects unknown keys (the default already; Zod-parity factory). */
+  strictObject: <S extends Shape>(shape: S): SObjectField<S> => {
+    const { zshape, fields } = liftShape(shape);
+    const schema = z.object(zshape) as SZObject<S>;
+    objectFieldsRegistry.set(schema, fields);
+    return new SObjectField<S>(schema).strict();
+  },
+  /** Like {@link s.object} but allows arbitrary extra keys — emits `FLEXIBLE` (Zod-parity factory). */
+  looseObject: <S extends Shape>(shape: S): SObjectField<S> => {
+    const { zshape, fields } = liftShape(shape);
+    const schema = z.object(zshape) as SZObject<S>;
+    objectFieldsRegistry.set(schema, fields);
+    return new SObjectField<S>(schema).loose();
+  },
+  /** Any JSON value (recursive: string/number/bool/null/array/object) — the DDL is the JSON union. */
+  json: () => new SField(z.json()),
+  /** A CODEC: app-side `boolean`, wire/DB `string` (Zod `z.stringbool`). DDL is `string` (the DB form). */
+  stringbool: (params?: Parameters<typeof z.stringbool>[0]) =>
+    new SField(z.stringbool(params)),
+  /** The Zod-native general codec: app = `app` output, wire/DB = `wire` input; DDL from the WIRE schema. */
+  codec: <A extends z.ZodType, B extends z.ZodType>(
+    wire: A,
+    app: B,
+    params: Parameters<typeof z.codec<A, B>>[2],
+  ) => new SField(z.codec(wire, app, params)),
   /** An array of `element`. `opts.max` -> sized `array<T, N>` (N is the MAX length). */
   array: <F extends AnyField | z.ZodType>(
     element: F,
