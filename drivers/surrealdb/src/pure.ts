@@ -883,12 +883,31 @@ export class SField<
       );
     return this.rebuild(fn.apply(this.schema, args) as S, this.native);
   }
-  // string + number length/bounds (app-side; use $min/$max/$length for the DB ASSERT)
-  min(value: number, params?: unknown): SField<S, Flags> {
-    return this.chain("min", value, params);
+  // string/number length+bounds AND datetime bounds (app-side; use $min/$max/$length for the DB ASSERT).
+  // A `Date` value is CODEC-AWARE: a surreal datetime is a `z.codec(DateTime, z.date())`, so a naive
+  // `schema.min()` fails (the codec has no `.min`); instead the bound is piped onto the codec's decoded
+  // `Date` output (`codec -> z.date().min(d)`), validating decode + encode while the column stays
+  // `datetime`. A `number` forwards to the inner schema (string length / number value / array length).
+  min(value: number | Date, params?: unknown): SField<S, Flags> {
+    return value instanceof Date
+      ? this.dateBound("min", value, params)
+      : this.chain("min", value, params);
   }
-  max(value: number, params?: unknown): SField<S, Flags> {
-    return this.chain("max", value, params);
+  max(value: number | Date, params?: unknown): SField<S, Flags> {
+    return value instanceof Date
+      ? this.dateBound("max", value, params)
+      : this.chain("max", value, params);
+  }
+  private dateBound(
+    op: "min" | "max",
+    value: Date,
+    params?: unknown,
+  ): SField<S, Flags> {
+    const bound = z.date()[op](value, params as never);
+    return this.rebuild(
+      this.schema.pipe(bound as never) as unknown as S,
+      this.native,
+    );
   }
   length(value: number, params?: unknown): SField<S, Flags> {
     return this.chain("length", value, params);
@@ -1479,6 +1498,37 @@ export class SObjectField<
   }
 }
 
+/**
+ * The enum field returned by {@link s.enum}. Adds Zod's `.exclude`/`.extract` to derive a narrower enum
+ * (the App type narrows; the column stays `string`). Methods live on this subclass (mirrors
+ * {@link SObjectField}), so the base `SField` + `AnyField` are untouched.
+ */
+export class SEnumField<
+  T extends Record<string, string> = Record<string, string>,
+  Flags extends string = never,
+> extends SField<z.ZodEnum<T>, Flags> {
+  /** Derive an enum without the given members. */
+  exclude<const U extends readonly (keyof T)[]>(
+    values: U,
+    params?: unknown,
+  ): SEnumField<Omit<T, U[number]>, Flags> {
+    return new SEnumField(
+      this.schema.exclude(values, params as never) as never,
+      this.native,
+    );
+  }
+  /** Derive an enum keeping only the given members. */
+  extract<const U extends readonly (keyof T)[]>(
+    values: U,
+    params?: unknown,
+  ): SEnumField<Pick<T, U[number]>, Flags> {
+    return new SEnumField(
+      this.schema.extract(values, params as never) as never,
+      this.native,
+    );
+  }
+}
+
 /** Field constructors — the authoring surface. */
 export const s = {
   string: () => new SField(z.string()),
@@ -1613,7 +1663,7 @@ export const s = {
     new SField(z.literal(value)),
   /** A string enum. */
   enum: <const T extends readonly [string, ...string[]]>(values: T) =>
-    new SField(z.enum(values)),
+    new SEnumField(z.enum(values)),
   /** A union of fields/schemas. */
   union: <
     const T extends readonly [

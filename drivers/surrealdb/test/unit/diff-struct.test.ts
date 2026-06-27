@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { isEmptyDiff } from "@schemic/core";
 import { buildSnapshot, diffSnapshots } from "../../src/cli/surreal-diff";
-import { defineTable, s } from "../../src/pure";
+import { defineTable, type SField, s } from "../../src/pure";
 
-const snap = (role: ReturnType<typeof s.enum>) => {
+// `SField` (the base), not `ReturnType<typeof s.enum>`: s.enum now returns the invariant `SEnumField<T>`
+// subclass, so a specific enum isn't assignable to the widened default — every enum is still an SField.
+const snap = (role: SField) => {
   const User = defineTable("user", { id: s.string(), role });
   const tables = [User] as unknown as Parameters<typeof buildSnapshot>[0];
   return (withStruct: boolean) => buildSnapshot(tables, [], { withStruct });

@@ -229,3 +229,63 @@ describe("object composition (Tier-2: SObjectField, mirrors Zod's ZodObject)", (
     expect(base.partial().safeDecode({}).success).toBe(true);
   });
 });
+
+describe("date / enum / array Zod parity (Tier-2 last edges)", () => {
+  const line = (t: Parameters<typeof emitTable>[0], n: string) =>
+    emitTable(t)
+      .split("\n")
+      .find((l) => l.includes(` ${n} `))
+      ?.trim();
+
+  test("date .min/.max validate app-side (codec-aware) with the column unchanged", () => {
+    const min = new Date(Date.UTC(2030, 0, 1));
+    const f = s.datetime().min(min);
+    // get a real surreal DateTime by round-tripping through the codec (its own DateTime class)
+    const enc = (d: Date) =>
+      (s.datetime().schema as { encode: (x: Date) => unknown }).encode(d);
+    expect(f.safeDecode(enc(new Date(Date.UTC(2031, 0, 1)))).success).toBe(
+      true,
+    );
+    expect(f.safeDecode(enc(new Date(Date.UTC(2020, 0, 1)))).success).toBe(
+      false,
+    );
+    // app-side only — DDL stays `datetime` (the $-channel would be the DB form, but dates have none)
+    const T = defineTable("t", {
+      id: s.string(),
+      w: s
+        .datetime()
+        .min(min)
+        .max(new Date(Date.UTC(2040, 0, 1))),
+    });
+    expect(line(T, "w")).toBe("DEFINE FIELD w ON TABLE t TYPE datetime;");
+  });
+
+  test("enum .exclude/.extract derive a narrower enum (type + DDL narrow)", () => {
+    const role = s.enum(["admin", "user", "guest"]);
+    expect(role.exclude(["guest"]).safeDecode("guest").success).toBe(false);
+    expect(role.exclude(["guest"]).safeDecode("admin").success).toBe(true);
+    expect(role.extract(["admin"]).safeDecode("user").success).toBe(false);
+    const T = defineTable("t", {
+      id: s.string(),
+      ex: role.exclude(["guest"]),
+      ex2: role.extract(["admin"]),
+    });
+    expect(line(T, "ex")).toBe(
+      'DEFINE FIELD ex ON TABLE t TYPE "admin" | "user";',
+    );
+    expect(line(T, "ex2")).toBe('DEFINE FIELD ex2 ON TABLE t TYPE "admin";');
+  });
+
+  test("array .min/.max/.length/.nonempty validate app-side, column unchanged", () => {
+    expect(s.array(s.string()).min(2).safeDecode(["a"]).success).toBe(false);
+    expect(s.array(s.string()).nonempty().safeDecode([]).success).toBe(false);
+    expect(s.array(s.string()).length(2).safeDecode(["a", "b"]).success).toBe(
+      true,
+    );
+    const T = defineTable("t", {
+      id: s.string(),
+      a: s.array(s.string()).min(2),
+    });
+    expect(line(T, "a")).toBe("DEFINE FIELD a ON TABLE t TYPE array<string>;");
+  });
+});
