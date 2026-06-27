@@ -867,6 +867,137 @@ export class SField<
     return this;
   }
 
+  // --- Native Zod chain methods (APP-SIDE ONLY — the DDL is UNCHANGED). These forward to the inner Zod
+  // schema's same-named method so `s.string().email().min(3).trim()` is a true Zod drop-in (copy Zod
+  // code, identical behaviour on every driver). They do NOT emit a DB ASSERT: the $-prefixed forms
+  // ($min/$assert/…) are the explicit DDL channel. This is the deliberate two-channel split — non-$ =
+  // app validation, $ = DB constraint — Schemic's core mental model, identical across drivers. ---
+  // Runtime-dispatched: the method just calls the inner schema's same-named method, throwing the way
+  // Zod would if it doesn't apply to this field's base type (e.g. `.regex()` on a number).
+  private chain(method: string, ...args: unknown[]): SField<S, Flags> {
+    const inner = this.schema as unknown as Record<
+      string,
+      ((...a: unknown[]) => z.ZodType) | undefined
+    >;
+    const fn = inner[method];
+    if (typeof fn !== "function")
+      throw new Error(
+        `surrealdb: .${method}() is not available on this field's base type.`,
+      );
+    return this.rebuild(fn.apply(this.schema, args) as S, this.native);
+  }
+  // string + number length/bounds (app-side; use $min/$max/$length for the DB ASSERT)
+  min(value: number, params?: unknown): SField<S, Flags> {
+    return this.chain("min", value, params);
+  }
+  max(value: number, params?: unknown): SField<S, Flags> {
+    return this.chain("max", value, params);
+  }
+  length(value: number, params?: unknown): SField<S, Flags> {
+    return this.chain("length", value, params);
+  }
+  // string patterns / transforms
+  regex(re: RegExp, params?: unknown): SField<S, Flags> {
+    return this.chain("regex", re, params);
+  }
+  startsWith(value: string, params?: unknown): SField<S, Flags> {
+    return this.chain("startsWith", value, params);
+  }
+  endsWith(value: string, params?: unknown): SField<S, Flags> {
+    return this.chain("endsWith", value, params);
+  }
+  includes(value: string, params?: unknown): SField<S, Flags> {
+    return this.chain("includes", value, params);
+  }
+  nonempty(params?: unknown): SField<S, Flags> {
+    return this.chain("nonempty", params);
+  }
+  trim(): SField<S, Flags> {
+    return this.chain("trim");
+  }
+  toLowerCase(): SField<S, Flags> {
+    return this.chain("toLowerCase");
+  }
+  toUpperCase(): SField<S, Flags> {
+    return this.chain("toUpperCase");
+  }
+  lowercase(params?: unknown): SField<S, Flags> {
+    return this.chain("lowercase", params);
+  }
+  uppercase(params?: unknown): SField<S, Flags> {
+    return this.chain("uppercase", params);
+  }
+  normalize(form?: unknown): SField<S, Flags> {
+    return this.chain("normalize", form);
+  }
+  // number bounds + checks (app-side; use $gt/$gte/$lt/$lte for the DB ASSERT)
+  gt(value: number, params?: unknown): SField<S, Flags> {
+    return this.chain("gt", value, params);
+  }
+  gte(value: number, params?: unknown): SField<S, Flags> {
+    return this.chain("gte", value, params);
+  }
+  lt(value: number, params?: unknown): SField<S, Flags> {
+    return this.chain("lt", value, params);
+  }
+  lte(value: number, params?: unknown): SField<S, Flags> {
+    return this.chain("lte", value, params);
+  }
+  positive(params?: unknown): SField<S, Flags> {
+    return this.chain("positive", params);
+  }
+  negative(params?: unknown): SField<S, Flags> {
+    return this.chain("negative", params);
+  }
+  nonnegative(params?: unknown): SField<S, Flags> {
+    return this.chain("nonnegative", params);
+  }
+  nonpositive(params?: unknown): SField<S, Flags> {
+    return this.chain("nonpositive", params);
+  }
+  multipleOf(value: number, params?: unknown): SField<S, Flags> {
+    return this.chain("multipleOf", value, params);
+  }
+  // string FORMAT chain methods — `s.string().email()` is a Zod drop-in (validates app-side; the
+  // column type is unchanged). The prefer-native equivalents are the `s.email()` etc. FACTORIES, which
+  // additionally push a TYPE-level DB ASSERT (per-driver type capability, separate from these methods).
+  email(params?: unknown): SField<S, Flags> {
+    return this.chain("email", params);
+  }
+  url(params?: unknown): SField<S, Flags> {
+    return this.chain("url", params);
+  }
+  emoji(params?: unknown): SField<S, Flags> {
+    return this.chain("emoji", params);
+  }
+  uuid(params?: unknown): SField<S, Flags> {
+    return this.chain("uuid", params);
+  }
+  guid(params?: unknown): SField<S, Flags> {
+    return this.chain("guid", params);
+  }
+  nanoid(params?: unknown): SField<S, Flags> {
+    return this.chain("nanoid", params);
+  }
+  cuid(params?: unknown): SField<S, Flags> {
+    return this.chain("cuid", params);
+  }
+  cuid2(params?: unknown): SField<S, Flags> {
+    return this.chain("cuid2", params);
+  }
+  ulid(params?: unknown): SField<S, Flags> {
+    return this.chain("ulid", params);
+  }
+  xid(params?: unknown): SField<S, Flags> {
+    return this.chain("xid", params);
+  }
+  ksuid(params?: unknown): SField<S, Flags> {
+    return this.chain("ksuid", params);
+  }
+  jwt(params?: unknown): SField<S, Flags> {
+    return this.chain("jwt", params);
+  }
+
   /** The underlying Zod schema's `def.type` ("string" / "number" / …). */
   private get schemaType(): string {
     return (this.schema._zod.def as { type: string }).type;

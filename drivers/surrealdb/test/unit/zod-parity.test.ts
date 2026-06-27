@@ -97,3 +97,63 @@ describe("native Zod passthrough", () => {
     expect(field(T, "ro")).toBe("DEFINE FIELD ro ON TABLE t TYPE int;");
   });
 });
+
+describe("native Zod chain methods (Tier-2: app-side, DDL unchanged)", () => {
+  // The bedrock invariant: non-$ chain methods validate APP-SIDE only and must NOT touch the DDL.
+  // (The $-forms remain the DB-ASSERT channel — guarded below.)
+  test("string formats/length/transforms emit NO DB clause", () => {
+    const T = defineTable("t", {
+      id: s.string(),
+      a: s.string().email(),
+      b: s.string().min(3).max(10),
+      c: s.string().regex(/^x/).trim().toLowerCase(),
+      n: s.int().gt(0).positive().multipleOf(2),
+    });
+    expect(field(T, "a")).toBe("DEFINE FIELD a ON TABLE t TYPE string;");
+    expect(field(T, "b")).toBe("DEFINE FIELD b ON TABLE t TYPE string;");
+    expect(field(T, "c")).toBe("DEFINE FIELD c ON TABLE t TYPE string;");
+    expect(field(T, "n")).toBe("DEFINE FIELD n ON TABLE t TYPE int;");
+  });
+
+  test("the methods DO validate app-side (real Zod checks)", () => {
+    expect(s.string().email().safeDecode("nope").success).toBe(false);
+    expect(s.string().email().safeDecode("a@b.co").success).toBe(true);
+    expect(s.string().min(3).safeDecode("ab").success).toBe(false);
+    expect(s.int().gt(5).safeDecode(3).success).toBe(false);
+    expect(s.int().positive().safeDecode(-1).success).toBe(false);
+    // transform runs
+    expect(s.string().trim().toLowerCase().decode("  AB ")).toBe("ab");
+  });
+
+  test("the $-forms STILL push the DB ASSERT (two-channel split intact)", () => {
+    const T = defineTable("t", {
+      id: s.string(),
+      m: s.string().$min(3),
+      g: s.int().$gt(0),
+    });
+    expect(field(T, "m")).toBe(
+      "DEFINE FIELD m ON TABLE t TYPE string ASSERT string::len($value) >= 3;",
+    );
+    expect(field(T, "g")).toBe(
+      "DEFINE FIELD g ON TABLE t TYPE int ASSERT $value > 0;",
+    );
+  });
+
+  test("chain preserves SurrealMeta + flags (rebuild carries native forward)", () => {
+    const T = defineTable("t", {
+      id: s.string(),
+      // $default (create-optional flag + DB DEFAULT) survives a following app-side .min()
+      d: s.string().$default("x").min(1),
+    });
+    expect(field(T, "d")).toBe(
+      'DEFINE FIELD d ON TABLE t TYPE string DEFAULT "x";',
+    );
+  });
+
+  test("wrong base type throws a clear error", () => {
+    // biome-ignore lint/suspicious/noExplicitAny: probing a runtime guard
+    expect(() => (s.int() as any).email()).toThrow(
+      "surrealdb: .email() is not available on this field's base type.",
+    );
+  });
+});
