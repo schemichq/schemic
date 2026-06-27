@@ -439,9 +439,12 @@ export const s = {
   smallint: () => mk("smallint", z.int().gte(-32768).lte(32767)),
   integer: () => mk("integer", z.int()),
   int: () => mk("integer", z.int()),
-  bigint: () => mk("bigint", z.int()),
+  // 64-bit: backed by z.bigint() (App value is a JS bigint), NOT z.int() — a pg bigint exceeds JS's
+  // safe-integer range (2^53), so a number would silently lose precision. PGlite returns bigint columns
+  // as native JS bigint and round-trips them exactly, so no codec is needed.
+  bigint: () => mk("bigint", z.bigint()),
   serial: () => mk("integer", z.int()).$identity("by-default"),
-  bigserial: () => mk("bigint", z.int()).$identity("by-default"),
+  bigserial: () => mk("bigint", z.bigint()).$identity("by-default"),
   numeric: (precision?: number, scale?: number) =>
     precision === undefined
       ? mk("numeric", z.number())

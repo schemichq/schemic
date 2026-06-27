@@ -3,6 +3,7 @@ import { buildKindDiff, emitKinds } from "@schemic/core";
 import * as z from "zod";
 import { postgresDriver } from "../src/driver";
 import {
+  type App,
   defineDomain,
   defineEnum,
   defineExtension,
@@ -17,6 +18,7 @@ import {
   PgField,
   s,
   sqlExpr,
+  type Wire,
 } from "../src/index";
 import { registry, splitTables } from "../src/kinds";
 import { lowerTable, pgLower } from "../src/lower";
@@ -894,6 +896,54 @@ describe("object composition (PgObjectField: .extend/.merge/.pick/.omit/.partial
     } as never)) as PgConn;
     try {
       await postgresDriver.apply(conn, emitKinds(registry, objs));
+      const live = await postgresDriver.introspectAll(conn);
+      const { up, down } = buildKindDiff(registry, live, objs);
+      expect({ up, down }).toEqual({ up: [], down: [] });
+    } finally {
+      await conn.close();
+    }
+  });
+});
+
+describe("s.bigint() precision — z.bigint(), no silent loss past 2^53", () => {
+  const HUGE = 9007199254740993n; // 2^53 + 1 — not representable exactly as a JS number
+
+  test("App / Wire are bigint (not number)", () => {
+    const t = defineTable("bp_types", { big: s.bigint() });
+    // compiles only if both sides are `bigint`:
+    const app: App<typeof t> = { big: HUGE };
+    const wire: Wire<typeof t> = { big: HUGE };
+    expect(app.big).toBe(HUGE);
+    expect(wire.big).toBe(HUGE);
+  });
+
+  test("field encode/decode are bigint-precise (identity, no codec)", () => {
+    const f = s.bigint();
+    expect(f.decode(HUGE)).toBe(HUGE); // wire bigint -> app bigint
+    expect(f.encode(HUGE)).toBe(HUGE); // app bigint -> wire bigint (create-input/seed path)
+  });
+
+  test("round-trips a value past 2^53 through PGlite EXACTLY", async () => {
+    const acct = defineTable("bp_acct", { balance: s.bigint() });
+    const objs = postgresDriver.explode([acct], []);
+    const conn = (await postgresDriver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
+    try {
+      await postgresDriver.apply(conn, emitKinds(registry, objs));
+      // write through the field's encode (app bigint -> wire), as a create/seed path would:
+      await conn.query(
+        `INSERT INTO "bp_acct" ("id", "balance") VALUES ($1, $2);`,
+        ["a", acct.fields.balance.encode(HUGE)],
+      );
+      const { rows } = await conn.query<{ balance: bigint }>(
+        `SELECT "balance" FROM "bp_acct";`,
+      );
+      expect(typeof rows[0].balance).toBe("bigint");
+      expect(rows[0].balance).toBe(HUGE); // precise — was lossy when backed by z.int()/number
+      // and through the table's row codec:
+      expect(acct.decode(rows[0]).balance).toBe(HUGE);
+      // a schema-DDL round-trip is unchanged (pg type is still "bigint"):
       const live = await postgresDriver.introspectAll(conn);
       const { up, down } = buildKindDiff(registry, live, objs);
       expect({ up, down }).toEqual({ up: [], down: [] });

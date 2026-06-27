@@ -78,7 +78,7 @@ round-trip (author `s.*` → lower → emit → introspect → diff = 0) · `[n/
 ### Column types — pg-native (round-trip via `native{params}`)
 - [x] `varchar(n)` / `char(n)` (length preserved)
 - [x] `numeric(p, s)` (precision/scale preserved)
-- [x] `bigint`, `smallint`, `real`
+- [x] `bigint` (App value is a **`bigint`** — backed by `z.bigint()`, NOT `z.int()`/number — so values past 2^53 don't silently lose precision; PGlite round-trips native bigint, no codec), `smallint`, `real`
 - [x] `timestamp` (without tz), `date`, `time`, `timetz`
 - [x] `inet`, `cidr`, `macaddr`, `money`
 - [x] `jsonb` (opaque on disk, sub-structure by App-side Zod), `s.object(shape)` → `jsonb`; `s.object()` returns a **`PgObjectField`** carrying the Zod object-COMPOSITION methods `.extend/.merge/.pick/.omit/.partial/.required/.catchall` (+ inherited `.loose/.strict/.flexible`) + a `.shape` getter — all keep precise App types and stay one `jsonb` column. The methods live on the object subclass (not base `PgField`), so base-field ↔ `AnyField` assignability is untouched
