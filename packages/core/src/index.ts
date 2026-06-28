@@ -146,3 +146,12 @@ export {
 } from "./kind";
 // --- seed context (the `(db, ctx)` helper passed to each seed) ---------------------------------
 export type { SeedContext } from "./seed";
+// --- secret refs (apply-time-resolved placeholders for secret-bearing DDL; drivers re-export) ----
+export {
+  env,
+  envSecretProvider,
+  isSecretRef,
+  type SecretProvider,
+  type SecretRef,
+  secret,
+} from "./secrets";
