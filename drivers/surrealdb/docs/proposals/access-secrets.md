@@ -125,3 +125,45 @@ All deferred in Phase 1 precisely because they carry keys:
 2. Secret-provider config ownership (Q2).
 3. `writeOnly` IR marker shape — driver-specific vs reusable (Q3).
 4. Rotation UX — `rotate` verb vs `apply --rotate-keys` (Q4).
+
+---
+
+## 11. RESOLVED answers (per core-dev's leans, 2026-06-27 — **for ratification**)
+
+core-dev ratifies/adjusts; this is the agreed shape unless flagged.
+
+### Contract ownership (the 3 core-owned pieces)
+- **(a) Apply-time resolution — CORE.** The IR carries `SecretRef` **placeholders only** (write-only,
+  never the value). Each statement carries `bindings: Record<string, SecretRef>`. The **CLI/apply layer**
+  resolves `env()`/`secret()` → values at apply (it owns the runtime env + provider access) and passes
+  them as **query bindings** alongside the DDL (`db.query(ddl, resolved)`). Core defines `SecretRef` +
+  the "apply resolves" contract; the **driver emits `KEY $param`** + populates `bindings`. *(Answers Q1:
+  per-statement `bindings` carrier, not a side-channel.)*
+- **(b) `writeOnly` marker — CORE, reusable.** A neutral field-level `writeOnly`/secret flag on the IR
+  value: the **diff excludes it** from the structural compare (a redacted secret never churns) and the
+  **snapshot omits it**. NOT surreal-specific — postgres shares it for its redacted secrets. The driver
+  only *marks* which clauses are write-only. *(Answers Q3: reusable neutral marker.)*
+- **(c) Rotation + provider config — CORE.** Rotation = an **`apply --rotate-keys` flag** (no new verb —
+  keep the CLI small) → re-emits `DEFINE ACCESS … OVERWRITE` with the freshly-resolved secret. The
+  **secret-provider config lives in core** (neutral + pluggable: env default, vault/file providers); the
+  driver supplies only the dialect emit. *(Answers Q2 + Q4.)*
+
+### One refinement to ratify: where do `env()`/`secret()` live?
+Since **core owns `SecretRef`** and **both drivers need secrets**, recommend `env()`/`secret()` are
+**core neutral authoring helpers** (return a `SecretRef`), **re-exported by each driver** so
+`import { env, secret } from "@schemic/surrealdb"` still works (the proposal's §3 ergonomics) without
+duplicating the type. (Alternative: driver-local factories returning the core `SecretRef` — also fine,
+just duplicates trivia. Lean: core helpers + driver re-export.)
+
+### Resulting split (build order = §9 phasing)
+- **CORE (2a):** `SecretRef` type + `env()`/`secret()` helpers; the per-statement `bindings` carrier on
+  the define-statement IR; the `writeOnly` field marker + diff-exclude + snapshot-omit; apply-time
+  resolution + `--rotate-keys`; the pluggable provider config surface.
+- **DRIVER / surreal (2a):** emit `KEY $param` placeholder from a `SecretRef`; populate `bindings`; mark
+  the access key clause `writeOnly`; route `.jwt({ key })` through `SecretRef`; the dialect re-export.
+- **DRIVER / surreal (2b):** the §8 key-bearing clauses (`WITH ISSUER KEY`, `RECORD WITH JWT`,
+  `RECORD WITH ISSUER KEY`), each routing its key through `SecretRef`.
+
+### Shipping NOW, independent of the contract (per core-dev — no secrets involved)
+- `.jwt({ url })` JWKS + public-key (PEM) verify documented as the recommended **secret-free** path.
+- the **inline-literal-key lint** ("inline access key — prefer `env()`/`secret()`").
