@@ -17,6 +17,7 @@ import type { Diff } from "../cli-kit/diff";
 import type { Filter } from "../cli-kit/filter";
 import type { PullPlan } from "../cli-kit/merge";
 import type { Definable, KindRegistry, PortableObject } from "../kind";
+import type { SecretRef } from "../secrets";
 
 /**
  * The dialect-NEUTRAL authoring contract — the only structure the orchestration reads off an
@@ -51,6 +52,12 @@ export interface Statement {
   table?: string;
   ddl: string;
   clauses?: Record<string, string>;
+  /**
+   * Apply-time secret bindings for this statement's `$param` placeholders — `param` name ->
+   * a write-only {@link SecretRef}. Collected into {@link Diff.bindings}; the value never lives here
+   * (resolved at apply through a `SecretProvider`). See {@link Diff.bindings}.
+   */
+  bindings?: Record<string, SecretRef>;
 }
 
 /** Options for {@link Driver.emit} — mirrors the existing `DefineOptions` (e.g. IF NOT EXISTS). */

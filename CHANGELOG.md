@@ -12,6 +12,12 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 ## [Unreleased]
 
 ### Added
+- **core:** secret-bearing DDL foundations (Phase-2a of the DEFINE ACCESS secret contract) — `SecretRef`
+  + `env()`/`secret()` author-time helpers + a pluggable `SecretProvider` (default reads `process.env`),
+  and a write-only `bindings` carrier (`$param` -> `SecretRef`) on `Statement` + `Diff`. The secret
+  value never lives in the schema, snapshot, or migration: it is resolved at apply through the provider
+  and passed as a bound parameter. Drivers re-export `env`/`secret`; apply-time resolution + migration
+  persistence land next.
 - **core:** `s.*` fields now expose the [Standard Schema](https://standardschema.dev) `~standard`
   interface (forwarded from the wrapped Zod schema on `SFieldBase`), so a Schemic field drops straight
   into any Standard Schema consumer (tRPC, TanStack Form/Router, …) without unwrapping to `.schema`.
