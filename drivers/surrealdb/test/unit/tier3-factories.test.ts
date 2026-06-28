@@ -96,3 +96,32 @@ describe("Tier-3 structural: json / stringbool / codec", () => {
     expect(c.safeEncode(42).data).toBe("42");
   });
 });
+
+describe("Bucket-2 numerics (float32/float64/int64/uint64)", () => {
+  const line = (t: Parameters<typeof emitTable>[0], n: string) =>
+    emitTable(t)
+      .split("\n")
+      .find((l) => l.includes(` ${n} `))
+      ?.trim();
+
+  test("float* -> `float`, int64/uint64 -> `int`", () => {
+    const T = defineTable("t", {
+      id: s.string(),
+      a: s.float32(),
+      b: s.float64(),
+      c: s.int64(),
+      d: s.uint64(),
+    });
+    expect(line(T, "a")).toBe("DEFINE FIELD a ON TABLE t TYPE float;");
+    expect(line(T, "b")).toBe("DEFINE FIELD b ON TABLE t TYPE float;");
+    expect(line(T, "c")).toBe("DEFINE FIELD c ON TABLE t TYPE int;");
+    expect(line(T, "d")).toBe("DEFINE FIELD d ON TABLE t TYPE int;");
+  });
+
+  test("they validate app-side", () => {
+    expect(s.float32().safeDecode(1e40).success).toBe(false);
+    expect(s.int64().safeDecode(5n).success).toBe(true);
+    expect(s.int64().safeDecode(5).success).toBe(false); // bigint only
+    expect(s.uint64().safeDecode(-1n).success).toBe(false); // unsigned
+  });
+});

@@ -1624,6 +1624,18 @@ export const s = {
     new SField(z.uint32(params)),
   bigint: (params?: Parameters<typeof z.bigint>[0]) =>
     new SField(z.bigint(params)),
+  /** A 32-bit float (app-side range-checked) — DDL `float`. */
+  float32: (params?: Parameters<typeof z.float32>[0]) =>
+    new SField(z.float32(params)),
+  /** A 64-bit float — DDL `float` (synonym of {@link s.float}). */
+  float64: (params?: Parameters<typeof z.float64>[0]) =>
+    new SField(z.float64(params)),
+  /** A 64-bit signed integer (app `bigint`) — DDL `int`. */
+  int64: (params?: Parameters<typeof z.int64>[0]) =>
+    new SField(z.int64(params)),
+  /** A 64-bit unsigned integer (app `bigint`, non-negative) — DDL `int`. */
+  uint64: (params?: Parameters<typeof z.uint64>[0]) =>
+    new SField(z.uint64(params)),
 
   datetime: () => new SField(datetimeCodec()),
   /** Alias of `datetime` (Surreal stores a `datetime`; there is no plain date). */
