@@ -17,6 +17,9 @@ import {
   Uuid,
 } from "surrealdb";
 import { z } from "zod";
+// Type-only (erased at runtime, so the authoring index stays side-effect-free): a `DEFINE ACCESS` key
+// may be an env()/secret() reference instead of an inline literal.
+import type { SecretRef } from "@schemic/core";
 
 /**
  * The "pure" approach: a field is a stock Zod schema + SurrealQL DDL metadata.
@@ -3357,7 +3360,7 @@ export function defineFunction<A extends Shape = Record<string, never>>(
 /** The access type + its type-specific config. `RECORD` (default) / `JWT` / `BEARER`. */
 export type AccessKind =
   | { type: "record" }
-  | { type: "jwt"; alg?: string; key?: string; url?: string }
+  | { type: "jwt"; alg?: string; key?: string | SecretRef; url?: string }
   | { type: "bearer"; subject: "record" | "user" };
 
 /** Token/session/grant lifetimes, e.g. `{ token: "1h", session: "12h", grant: "30d" }`. */
@@ -3406,7 +3409,7 @@ export class AccessDef {
     return this.withConfig({ kind: { type: "record" } });
   }
   /** `TYPE JWT` — validate tokens from an external issuer: `{ alg, key }` (symmetric/PEM) or `{ url }` (JWKS). */
-  jwt(opts: { alg?: string; key?: string; url?: string }): AccessDef {
+  jwt(opts: { alg?: string; key?: string | SecretRef; url?: string }): AccessDef {
     return this.withConfig({ kind: { type: "jwt", ...opts } });
   }
   /** `TYPE BEARER FOR USER|RECORD` — bearer-token / API-key grants. */
