@@ -348,3 +348,13 @@ export abstract class SFieldBase<
 /** Unwrap a field to its Zod schema (raw Zod schemas pass through). */
 export const toZod = (v: AnyField | z.ZodType): z.ZodType =>
   v instanceof SFieldBase ? v.schema : v;
+
+// Secret-ref authoring helpers (env/secret) live here on the SIDE-EFFECT-FREE authoring subpath, so a
+// driver's authoring index can re-export them without dragging the engine. (Also on the main index.)
+export {
+  env,
+  isSecretRef,
+  type SecretProvider,
+  type SecretRef,
+  secret,
+} from "./secrets";
