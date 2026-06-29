@@ -13,7 +13,7 @@ import type {
   CommandContext,
   DriverCommand,
   ParsedCommandArgs,
-} from "@schemic/core";
+} from "@schemic/core/driver";
 import { identifier, type PgConn, pgSql, raw } from "./connection";
 
 type Ctx = CommandContext<PgConn>;
