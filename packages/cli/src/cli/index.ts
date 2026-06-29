@@ -49,6 +49,7 @@ import { Command, Help, Option } from "commander";
 // The CLI's own version — sourced from package.json (inlined at build) so it never drifts from the
 // published package version the way a hardcoded string does.
 import { version as CLI_VERSION } from "../../package.json";
+import { registerDriverCommands } from "./driver-commands";
 import { init } from "./init";
 import {
   baseline,
@@ -1342,4 +1343,13 @@ if (process.argv.length <= 2) {
   program.outputHelp();
   process.exit(0);
 }
-program.parse();
+
+// Driver-contributed commands (`sc <kind> <verb>`) are discovered from the project's driver, so they
+// register asynchronously before parse. `parseAsync` awaits their async actions.
+registerDriverCommands(program)
+  .catch(() => {
+    // A driver-command registration failure must never block the built-in commands.
+  })
+  .finally(() => {
+    program.parseAsync();
+  });

@@ -16,8 +16,12 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
   `sc <kind> <verb> [args]` (e.g. surreal `access rotate <name>`, postgres `matview refresh <name>`).
   Core owns only the general mechanism: it discovers `driver.commands`, parses argv (variadic positionals
   + value/boolean flags), resolves the connection, and dispatches to `run` with a `CommandContext`
-  ({conn, config, io with prompt(), secrets}); the driver owns each kind/verb's meaning. This commit
-  lands the contract types; the CLI dispatch follows.
+  ({conn, config, io with prompt(), secrets}); the driver owns each kind/verb's meaning.
+- **cli:** the dispatch for `DriverCommand`s — the `schemic`/`sc` bin discovers the active driver's
+  `commands` (from the project config) and registers each as `sc <kind> <verb> [args]`, grouped by kind,
+  with `--help`. It parses the invocation (variadic positionals + value/boolean flags), opens the
+  connection, and runs the command with its `CommandContext`. No project / no driver commands -> no-op
+  (built-in commands unaffected).
 - **core:** secret-bearing DDL foundations (Phase-2a of the DEFINE ACCESS secret contract) — `SecretRef`
   + `env()`/`secret()` author-time helpers + a pluggable `SecretProvider` (default reads `process.env`),
   and a write-only `bindings` carrier (`$param` -> `SecretRef`) on `Statement` + `Diff`. The secret
