@@ -1,9 +1,9 @@
 // Phase-2a: DEFINE ACCESS keys as env()/secret() references — emitted as bound `$param` placeholders
 // (value never in the DDL), with the `$param -> SecretRef` bindings attached for apply-time resolution.
 import { describe, expect, test } from "bun:test";
-import { env, secret } from "@schemic/core";
 import { emitDefStatement } from "../../src/driver";
-import { defineAccess } from "../../src/index";
+// env/secret imported from the surrealdb index — verifies the side-effect-free re-export path too.
+import { defineAccess, env, secret } from "../../src/index";
 
 const st = (a: unknown) =>
   emitDefStatement(a as Parameters<typeof emitDefStatement>[0]);
@@ -11,7 +11,9 @@ const st = (a: unknown) =>
 describe("DEFINE ACCESS secret keys (env/secret -> $param)", () => {
   test("env() key emits a $param placeholder + attaches the binding (value never in DDL)", () => {
     const s = st(
-      defineAccess("api").onDatabase().jwt({ alg: "HS512", key: env("JWT_SECRET") }),
+      defineAccess("api")
+        .onDatabase()
+        .jwt({ alg: "HS512", key: env("JWT_SECRET") }),
     );
     expect(s.ddl).toBe(
       "DEFINE ACCESS api ON DATABASE TYPE JWT ALGORITHM HS512 KEY $env_JWT_SECRET;",
@@ -35,7 +37,9 @@ describe("DEFINE ACCESS secret keys (env/secret -> $param)", () => {
 
   test("identical refs collapse to one $param; the value is never emitted", () => {
     const s = st(
-      defineAccess("a").onDatabase().jwt({ key: env("K") }),
+      defineAccess("a")
+        .onDatabase()
+        .jwt({ key: env("K") }),
     );
     expect(s.ddl).not.toContain('"'); // no quoted literal key
     expect(Object.keys(s.bindings ?? {})).toEqual(["env_K"]);
