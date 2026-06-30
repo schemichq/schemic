@@ -21,6 +21,15 @@ The CLI loader imports `/driver` to register (it **requires** the `/driver` entr
 so importing `s.*` never drags the diff/emit engine into an app bundle. Core mirrors this:
 `@schemic/core/query` is the neutral query toolkit (`Row`/`Project`/`decodeProjection`/`callFunction`).
 
+## Developer experience IS the product — always analyze through a DevEx lens
+
+Schemic is a **developer-focused product**: the authoring surface (`s.*`/`define*`) and the CLI ARE the
+product, so DX *is* the deliverable. **Analyze every API, change, and review (code + coverage) through a
+developer-experience lens** — is it type-safe, autocompletable, refactor-safe, hard to misuse, and obvious
+at the call site? Treat stringly-typed escape hatches, undeclared "magic" variables, and silent-failure
+APIs as **DX debt**: surface them and propose the strongly-typed form *even when the current behavior
+already "works"*. This analysis is mandatory in every review, not optional polish.
+
 ## Agent Code Ownership
 
 This repo is developed by **multiple AI agents in parallel**. Stay within your package(s); a change in
