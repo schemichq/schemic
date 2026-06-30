@@ -58,6 +58,7 @@ round-trip (author `s.*` → lower → emit → introspect → diff = 0) · `[n/
 
 ### Authoring (`s.*`, pg-native)
 - [x] `PgField extends SFieldBase` — Zod drop-in + `PgMeta` side-channel; full Zod wrapper/passthrough chain, type-preserving
+- [x] Zod CHAIN methods — string formats (`.email/.url/.uuid/.emoji/.nanoid/.cuid/.cuid2/.ulid/.guid/.xid/.ksuid/.base64/.base64url/.e164/.jwt`), string length/pattern/transform (`.min/.max/.length/.regex/.startsWith/.endsWith/.includes/.nonempty/.trim/.toLowerCase/.toUpperCase/.lowercase/.uppercase/.normalize`), number bounds (`.gt/.gte/.lt/.lte/.positive/.negative/.nonnegative/.nonpositive/.multipleOf`) — forwarded to the inner Zod schema, **App-side only (no DDL — the column type is unchanged)**; for a DB-side constraint use `.$check`. A method that doesn't apply to the base type throws (like Zod)
 - [x] `defineTable(name, { col: s.* })` → `PgTableDef` (an `Authored`); `.primaryKey(...)`, `.check(expr)`, `.index([...])`
 - [x] `postgresDriver.lower(tables, defs)` → portable IR (replaces the old `throw`)
 - [x] `s.$postgres(pgType, codec)` escape-hatch FACTORY (Zod codec App-side, stored as the given pg type)
@@ -77,15 +78,20 @@ round-trip (author `s.*` → lower → emit → introspect → diff = 0) · `[n/
 ### Column types — pg-native (round-trip via `native{params}`)
 - [x] `varchar(n)` / `char(n)` (length preserved)
 - [x] `numeric(p, s)` (precision/scale preserved)
-- [x] `bigint`, `smallint`, `real`
+- [x] `bigint` (App value is a **`bigint`** — never a `number`, so values past 2^53 don't silently lose precision), `smallint`, `real`. NOTE: PGlite returns a `bigint` (int8) column as a JS `number` when the value fits in 2^53 and a JS `bigint` only when larger, so every bigint-backed field (`bigint`/`bigserial`/`int64`/`uint32`) decodes through a number|bigint-tolerant codec that coerces to `bigint` (a `numeric` column always comes back as a string)
+- [x] Zod width-numerics: `s.int32()` → `integer`, `s.int64()` → `bigint` (App `bigint`), `s.uint32()` → `bigint` (App `number`; unsigned 32 exceeds signed int4), `s.uint64()` → `numeric` (App `bigint`; unsigned 64 exceeds signed int8), `s.float32()` → `real`, `s.float64()` → `double precision`. `s.ipv4()/ipv6()/cidrv4()/cidrv6()` → `text` format validators (distinct from native `s.inet()/cidr()`)
 - [x] `timestamp` (without tz), `date`, `time`, `timetz`
 - [x] `inet`, `cidr`, `macaddr`, `money`
-- [x] `jsonb` (opaque on disk, sub-structure by App-side Zod), `s.object(shape)` → `jsonb`
+- [x] `jsonb` (opaque on disk, sub-structure by App-side Zod), `s.object(shape)` → `jsonb`; `s.object()` returns a **`PgObjectField`** carrying the Zod object-COMPOSITION methods `.extend/.merge/.pick/.omit/.partial/.required/.catchall` (+ inherited `.loose/.strict/.flexible`) + a `.shape` getter — all keep precise App types and stay one `jsonb` column. The methods live on the object subclass (not base `PgField`), so base-field ↔ `AnyField` assignability is untouched
 - [~] `json` → `native "json"` (round-trips), distinct from `jsonb`
-- [~] `s.enum([...])` → `text` (App-side Zod enum, validated client-side only — a quick inline projection)
+- [x] string FORMAT factories `s.email()/url()/emoji()/nanoid()/cuid()/cuid2()/ulid()/guid()/xid()/ksuid()/base64()/base64url()/e164()/jwt()` plus the long-tail `s.uuidv4()/uuidv6()/uuidv7()/httpUrl()/hostname()/hex()/mac()/hash(alg)` → a `text` column with the Zod format validator App-side (validation is client-side; the column is plain `text`). `s.uuid()` stays the native `uuid` type; `s.inet()/cidr()/macaddr()` the native network types. Nested `s.iso.{date,time,datetime,duration}` are ISO-string validators on `text` (distinct from the native temporal types `s.date()/timestamptz()/interval()`).
+- [x] `s.stringbool()` → `text` column, App value `boolean` (Zod's string⇄bool codec). `s.codec(wire, app, {decode, encode})` → a low-level `z.codec` drop-in; the column type is INFERRED from the raw-Zod **wire** schema (string→text, int→integer, number→double precision, bigint→bigint, boolean→boolean, date→timestamptz, structural→jsonb). Complements `.$postgres`/`s.$postgres` (which name the pg type explicitly). `s.strictObject`/`s.looseObject` → `s.object` with the unknown-key mode preset (composable `PgObjectField`)
+- [~] `s.enum([...])` → `text` (App-side Zod enum, validated client-side only — a quick inline projection). Returns a **`PgEnumField`** carrying `.exclude([...])`/`.extract([...])` to derive a narrower enum (App type narrows precisely; column stays `text`). Methods on the subclass (like `PgObjectField`), so base `PgField`/`AnyField` are untouched
 - [x] `defineEnum(name, values)` → a NATIVE pg enum (`CREATE TYPE … AS ENUM`); `mood.column()` types a column as it (App = the literal union). Full round-trip; the standalone, reusable, introspected alternative to the `s.enum` text projection
 - [~] `citext` (emit-only; needs the extension — gap below)
 - [x] `T[]` arrays of canonical element types; [~] arrays of pg-native element types (udt-name mismatch)
+- [x] composite jsonb factories — `s.record(key, value)` / `s.tuple([...])` / `s.union([...])` / `s.discriminatedUnion(disc, [...])` / `s.intersection(a, b)` / `s.lazy(() => ...)` / `s.xor([...])` (exclusive union) / `s.partialRecord(k,v)` / `s.looseRecord(k,v)` → a single `jsonb` column, App value = the composite, validated App-side (mirrors surreal's set). `map`/`set` skipped (need a Map/Set↔jsonb codec); `nativeEnum` covered by `s.enum`/`defineEnum`
+- [x] schema-derivation factories — `s.stringFormat(name, fn)` / `s.templateLiteral([...])` → `text`; `s.keyof(objField | z.object)` → `text` (enum of keys); `s.preprocess(fn, inner)` → App-side wrapper that inherits the inner field's column type. (Skipped: `z.mime`/`z.slugify`/`z.property` are `$ZodCheck`es used via `.check()`, not factories; `z.function`/`z.promise`/`z.symbol` have no column meaning.)
 
 ### Nullability & identity
 - [x] `NULL` / `NOT NULL`; `option<T>` and `T | null` both collapse to a nullable column (documented projection)
@@ -146,6 +152,16 @@ round-trip (author `s.*` → lower → emit → introspect → diff = 0) · `[n/
 > `$postgres` codec params are now precisely typed (`encode(app)`, `decode(wire)`), since the `s.*` leaf
 > factories return a precise `PgField<S>` (the `mk<S>` generic) rather than a wide `PgField<ZodType>` —
 > so the earlier "wire-side codec types are loose" gap is closed.
+
+### CLI commands (`sc <kind> <verb>` — `Driver.commands`)
+Driver-contributed commands; core discovers + dispatches them (parses argv into `ParsedCommandArgs`,
+opens the connection, hands `run` a `CommandContext`). pg owns the dialect SQL in `./commands.ts`.
+- [x] `sc matview refresh <name> [--concurrently]` — `REFRESH MATERIALIZED VIEW [CONCURRENTLY]`
+- [x] `sc sequence set <name> <value> [--is-called true|false] [--dry-run]` — `setval(...)`; `sc sequence current <name>` — `last_value`
+- [x] `sc enum add <type> <value> [--before|--after <label>] [--dry-run]` — `ALTER TYPE … ADD VALUE` (string literal, not a bound param)
+- [x] `sc table count <name> [--where <expr>]`; `sc table find <name> <col=value> [--limit N]` (value bound as a param — pg infers its type); `sc table vacuum <name> [--full] [--analyze]`
+- [x] `sc index reindex <name>` — `REINDEX INDEX`
+- mutating commands honor `--dry-run` (print the SQL, don't run); identifiers quoted via `identifier()`, user `--where` spliced raw (CLI author trusted)
 
 ### Connection & engine
 - [x] `postgresConnection(...)` factory (static / resolver / keyed collection); `connect` reads `config.params.url`

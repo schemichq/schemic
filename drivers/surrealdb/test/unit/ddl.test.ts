@@ -584,15 +584,24 @@ describe("emitTable", () => {
     } as never);
   });
 
-  test("`.flexible()`/`.loose()`/`.strict()` are object-only at the type level", () => {
-    // @ts-expect-error a scalar field has no object to flex.
-    s.string().flexible();
-    // @ts-expect-error number is not object-typed.
-    s.number().loose();
-    // @ts-expect-error array<string> contains no object.
-    s.array(s.string()).flexible();
-    // @ts-expect-error strict() is likewise object-only.
-    s.int().strict();
+  test("`.flexible()`/`.loose()`/`.strict()` no-op on non-object fields", () => {
+    // The object-mode methods are unguarded (matching @schemic/postgres + enabling the SObjectField
+    // subclass); on a non-object field `applyObjectMode` passes the schema through unchanged, so there
+    // is no FLEXIBLE and the field emits exactly as without the call.
+    const T = defineTable("t", {
+      id: s.string(),
+      a: s.string().flexible(),
+      b: s.number().loose(),
+      c: s.array(s.string()).strict(),
+    });
+    const line = (n: string) =>
+      emitTable(T)
+        .split("\n")
+        .find((l) => l.includes(` ${n} `))
+        ?.trim();
+    expect(line("a")).toBe("DEFINE FIELD a ON TABLE t TYPE string;");
+    expect(line("b")).toBe("DEFINE FIELD b ON TABLE t TYPE number;");
+    expect(line("c")).toBe("DEFINE FIELD c ON TABLE t TYPE array<string>;");
   });
 
   test("existsPrefix: overwrite / ignore", () => {

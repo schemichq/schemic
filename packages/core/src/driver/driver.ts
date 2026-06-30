@@ -17,6 +17,7 @@ import type { Diff } from "../cli-kit/diff";
 import type { Filter } from "../cli-kit/filter";
 import type { PullPlan } from "../cli-kit/merge";
 import type { Definable, KindRegistry, PortableObject } from "../kind";
+import type { SecretProvider, SecretRef } from "../secrets";
 
 /**
  * The dialect-NEUTRAL authoring contract — the only structure the orchestration reads off an
@@ -51,6 +52,12 @@ export interface Statement {
   table?: string;
   ddl: string;
   clauses?: Record<string, string>;
+  /**
+   * Apply-time secret bindings for this statement's `$param` placeholders — `param` name ->
+   * a write-only {@link SecretRef}. Collected into {@link Diff.bindings}; the value never lives here
+   * (resolved at apply through a `SecretProvider`). See {@link Diff.bindings}.
+   */
+  bindings?: Record<string, SecretRef>;
 }
 
 /** Options for {@link Driver.emit} — mirrors the existing `DefineOptions` (e.g. IF NOT EXISTS). */
@@ -160,6 +167,76 @@ export interface CallableFunctions<Conn = unknown> {
   ): Promise<unknown>;
 }
 
+// --- driver-contributed CLI commands -----------------------------------------------------------
+// A driver may contribute dialect-specific commands invoked as `sc <kind> <verb> [args]` (e.g. surreal
+// `sc access rotate <name>`, postgres `sc matview refresh <name>`). CORE provides only the general
+// mechanism: it discovers `driver.commands`, registers each, parses argv against `args`, resolves the
+// connection, and dispatches to `run` with a {@link CommandContext}. The DRIVER owns the dialect logic
+// and the meaning of each kind/verb/arg — core never names one. Depth is fixed at kind/verb.
+
+/** A declared argument for a {@link DriverCommand} — used for parsing + `--help`. */
+export interface CommandArgs {
+  /**
+   * Positional args, in order. Core collects ALL positional tokens into a list (incl. raw `key=value`)
+   * and the driver interprets + validates arity; mark the last `variadic` for "one or more".
+   */
+  positionals?: readonly {
+    name: string;
+    required?: boolean;
+    variadic?: boolean;
+    help?: string;
+  }[];
+  /** Named flags. `value: true` takes a value (`--user U`); otherwise it's a boolean (`--dry-run`). */
+  flags?: readonly {
+    name: string;
+    value?: boolean;
+    required?: boolean;
+    help?: string;
+  }[];
+}
+
+/** argv parsed against a command's {@link CommandArgs}: positional tokens (driver-interpreted) + flags. */
+export interface ParsedCommandArgs {
+  /** Every positional token in order (incl. raw `key=value`); the driver interprets them. */
+  positionals: string[];
+  /** Flags: a value-flag -> its string, a boolean flag -> `true`, an absent flag -> `undefined`. */
+  flags: Record<string, string | boolean | undefined>;
+}
+
+/** Output + input helpers core hands a command (so a driver never touches stdio directly). */
+export interface CommandIo {
+  ok(message: string): void;
+  fail(message: string): void;
+  info(message: string): void;
+  /** Prompt for a line of input (`hidden` masks it) — for a sensitive value not passed inline (no shell-history leak). */
+  prompt(question: string, opts?: { hidden?: boolean }): Promise<string>;
+}
+
+/** The context core hands a {@link DriverCommand.run}: a connected db + the resolved config + io + secrets. */
+export interface CommandContext<Conn = unknown> {
+  conn: Conn;
+  config: ResolvedConfig;
+  io: CommandIo;
+  /** The configured secret provider (default reads `process.env`) for resolving {@link SecretRef}s. */
+  secrets: SecretProvider;
+}
+
+/**
+ * A driver-contributed CLI command — `sc <kind> <verb> [args]`. Core dispatches; the driver owns the
+ * dialect logic in {@link run}. The driver validates positional arity itself (core only collects them).
+ */
+export interface DriverCommand<Conn = unknown> {
+  /** Kind namespace — `sc <kind> …` (e.g. `"access"`, `"table"`). */
+  kind: string;
+  /** Verb under the kind — `sc <kind> <verb>` (e.g. `"rotate"`, `"check"`, `"find"`). */
+  verb: string;
+  /** One-line help shown in the command listing. */
+  summary: string;
+  /** Declared args for parsing + `--help`. */
+  args?: CommandArgs;
+  run(ctx: CommandContext<Conn>, args: ParsedCommandArgs): Promise<void>;
+}
+
 /**
  * A database dialect, expressed as a SET OF KINDS (core-v2). The driver registers its object kinds on
  * `registry`; core orchestrates schema ops GENERICALLY over it (`lowerSchema`/`buildKindDiff`/
@@ -217,6 +294,12 @@ export interface Driver<
   diffLive?(conn: Conn, config: ResolvedConfig, filter: Filter): Promise<Diff>;
   /** Reduce a live diff (from {@link diffLive}) to the statements `push` applies; `prune: false` keeps removals. */
   syncPlan?(diff: Diff, prune?: boolean): string[];
+  /**
+   * Dialect-specific CLI commands invoked as `sc <kind> <verb> [args]` — e.g. surreal `access rotate`,
+   * postgres `matview refresh`. Core discovers + dispatches them generically (see {@link DriverCommand});
+   * it never names a kind/verb. Absent -> this driver contributes no extra commands.
+   */
+  readonly commands?: readonly DriverCommand<Conn>[];
   /**
    * Render portable objects to per-file source in THIS dialect's `s.*` syntax, filtered — the codegen
    * behind the offline `diff --ts` and `pull`. Takes `PortableObject[]` (this driver's own portable

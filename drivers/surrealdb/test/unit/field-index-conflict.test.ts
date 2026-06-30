@@ -61,7 +61,9 @@ describe("field both .$unique() + spec (.$fulltext/hnsw/diskann)", () => {
     expect(ddl).toContain(
       "DEFINE INDEX d_body_idx ON TABLE d FIELDS body FULLTEXT ANALYZER eng BM25(1.5,0.75) HIGHLIGHTS;",
     );
-    expect(ddl).toContain("DEFINE INDEX d_body_uq ON TABLE d FIELDS body UNIQUE;");
+    expect(ddl).toContain(
+      "DEFINE INDEX d_body_uq ON TABLE d FIELDS body UNIQUE;",
+    );
   });
 
   test(".$unique().$hnsw() emits both a HNSW _idx and a UNIQUE _uq", () => {
@@ -119,19 +121,50 @@ describe("field both .$unique() + spec (.$fulltext/hnsw/diskann)", () => {
     expect(ddl).toContain(
       "DEFINE INDEX c_name_idx ON TABLE c FIELDS name FULLTEXT ANALYZER simple;",
     );
-    expect(ddl).toContain("DEFINE INDEX c_name_uq ON TABLE c FIELDS name UNIQUE;");
+    expect(ddl).toContain(
+      "DEFINE INDEX c_name_uq ON TABLE c FIELDS name UNIQUE;",
+    );
   });
 
-  test("custom name is ignored when both are present (use .index() for naming)", () => {
+  test("each index is independently nameable: .$unique(name) names UNIQUE, spec name names the spec", () => {
     const ddl = emitTable(
       defineTable("c", {
         id: s.string(),
-        name: s.string().$unique("my_custom_name").$fulltext("simple"),
+        name: s
+          .string()
+          .$unique("name_uq")
+          .$fulltext({ analyzer: "simple", name: "name_search" }),
       }),
     );
-    expect(ddl).toContain("DEFINE INDEX c_name_idx");
-    expect(ddl).toContain("DEFINE INDEX c_name_uq");
-    expect(ddl).not.toContain("my_custom_name");
+    expect(ddl).toContain(
+      "DEFINE INDEX name_search ON TABLE c FIELDS name FULLTEXT ANALYZER simple;",
+    );
+    expect(ddl).toContain(
+      "DEFINE INDEX name_uq ON TABLE c FIELDS name UNIQUE;",
+    );
+  });
+
+  test("naming one side only — the other falls back to its auto name", () => {
+    const ddl = emitTable(
+      defineTable("c", {
+        id: s.string(),
+        name: s.string().$unique("name_uq").$fulltext("simple"), // only the UNIQUE is named
+      }),
+    );
+    expect(ddl).toContain("DEFINE INDEX c_name_idx"); // spec auto
+    expect(ddl).toContain("DEFINE INDEX name_uq"); // UNIQUE named
+  });
+
+  test("a lone .$unique(name) still names the single UNIQUE index (back-compat)", () => {
+    const ddl = emitTable(
+      defineTable("c", {
+        id: s.string(),
+        email: s.string().$unique("email_uq"),
+      }),
+    );
+    expect(ddl).toContain(
+      "DEFINE INDEX email_uq ON TABLE c FIELDS email UNIQUE;",
+    );
   });
 
   test("backtick-escaped field paths produce both indexes with sanitized names", () => {

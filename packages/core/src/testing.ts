@@ -19,9 +19,14 @@ import type * as z from "zod";
 import { type Driver, driverNames, getDriver } from "./driver/driver";
 import { emitKinds, lowerSchema } from "./kind";
 
-/** The driver's authoring namespace (`s`) — a bag of field builders. Loosely typed (cross-driver). */
-// biome-ignore lint/suspicious/noExplicitAny: a driver's `s` is dialect-specific; the suite is generic.
-type Authoring = Record<string, (...args: any[]) => unknown>;
+/**
+ * The driver's authoring namespace (`s`) — a bag of field builders, some NESTED (e.g.
+ * `s.iso.{date,time,datetime,duration}`). Intentionally loose: the suite duck-types fields and
+ * enforces the real contract at RUNTIME, not via this type (see the header note), so a precise
+ * "function-or-nested-namespace" shape would only fight the internal `s.<key>()` calls for no gain.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: a driver's `s` is dialect-specific + may nest; runtime-duck-typed.
+type Authoring = Record<string, any>;
 
 export interface DriverConformanceOptions {
   /** The driver's registry name (e.g. `"surrealdb"`, `"postgres"`). */

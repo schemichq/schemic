@@ -44,6 +44,7 @@ import type { DbStructured } from "../cli/structure";
 import { connect as surrealConnect } from "../cli/surreal-connect";
 import { renderMigration } from "../cli/surreal-diff";
 import { filterStructured } from "../cli/surreal-filter";
+import { surrealCommands } from "../commands";
 import type { SurrealParams } from "../config";
 import {
   explodeSchema,
@@ -249,6 +250,9 @@ export const surrealDriver: Driver<
 
   shadow,
   migrations,
+
+  // Driver-contributed CLI commands — `sc access rotate/check`, `sc table find`.
+  commands: surrealCommands,
 
   // --- command capabilities (thin adapters over the existing surreal cli functions) ----------
 

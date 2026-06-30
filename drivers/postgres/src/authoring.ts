@@ -143,6 +143,145 @@ export class PgField<
     return this.with({ comment: text });
   }
 
+  // --- Zod chain methods (string + number constraints/transforms) ---
+  // These are native Zod refinements/transforms forwarded to the inner schema and rebuilt as a PgField,
+  // so a chain like `s.text().email().min(3).trim()` is a drop-in for Zod. They validate/normalize
+  // APP-SIDE only — the pg column type is UNCHANGED (no DDL). For a DB-side constraint use `$check`.
+  // Runtime-dispatched so the method just calls the inner schema's same-named method (throwing the same
+  // way Zod would if it doesn't apply to this field's base type, e.g. `.regex()` on a number).
+  private chain(method: string, ...args: unknown[]): PgField<S, Flags> {
+    const inner = this.schema as unknown as Record<
+      string,
+      ((...a: unknown[]) => z.ZodType) | undefined
+    >;
+    const fn = inner[method];
+    if (typeof fn !== "function")
+      throw new Error(
+        `postgres: .${method}() is not available on this field's base type.`,
+      );
+    return this.rebuild(fn.apply(this.schema, args) as S, this.native);
+  }
+  // string + number length/bounds
+  min(value: number, params?: unknown): PgField<S, Flags> {
+    return this.chain("min", value, params);
+  }
+  max(value: number, params?: unknown): PgField<S, Flags> {
+    return this.chain("max", value, params);
+  }
+  length(value: number, params?: unknown): PgField<S, Flags> {
+    return this.chain("length", value, params);
+  }
+  // string patterns / transforms
+  regex(re: RegExp, params?: unknown): PgField<S, Flags> {
+    return this.chain("regex", re, params);
+  }
+  startsWith(value: string, params?: unknown): PgField<S, Flags> {
+    return this.chain("startsWith", value, params);
+  }
+  endsWith(value: string, params?: unknown): PgField<S, Flags> {
+    return this.chain("endsWith", value, params);
+  }
+  includes(value: string, params?: unknown): PgField<S, Flags> {
+    return this.chain("includes", value, params);
+  }
+  nonempty(params?: unknown): PgField<S, Flags> {
+    return this.chain("nonempty", params);
+  }
+  trim(): PgField<S, Flags> {
+    return this.chain("trim");
+  }
+  toLowerCase(): PgField<S, Flags> {
+    return this.chain("toLowerCase");
+  }
+  toUpperCase(): PgField<S, Flags> {
+    return this.chain("toUpperCase");
+  }
+  // number bounds + checks
+  gt(value: number, params?: unknown): PgField<S, Flags> {
+    return this.chain("gt", value, params);
+  }
+  gte(value: number, params?: unknown): PgField<S, Flags> {
+    return this.chain("gte", value, params);
+  }
+  lt(value: number, params?: unknown): PgField<S, Flags> {
+    return this.chain("lt", value, params);
+  }
+  lte(value: number, params?: unknown): PgField<S, Flags> {
+    return this.chain("lte", value, params);
+  }
+  positive(params?: unknown): PgField<S, Flags> {
+    return this.chain("positive", params);
+  }
+  negative(params?: unknown): PgField<S, Flags> {
+    return this.chain("negative", params);
+  }
+  nonnegative(params?: unknown): PgField<S, Flags> {
+    return this.chain("nonnegative", params);
+  }
+  nonpositive(params?: unknown): PgField<S, Flags> {
+    return this.chain("nonpositive", params);
+  }
+  multipleOf(value: number, params?: unknown): PgField<S, Flags> {
+    return this.chain("multipleOf", value, params);
+  }
+  // string FORMAT chain methods (Zod-4 deprecated-but-present forms, so `s.text().email()` is a drop-in;
+  // the prefer-factory equivalents are `s.email()` etc.). All validate APP-SIDE; column stays `text`.
+  email(params?: unknown): PgField<S, Flags> {
+    return this.chain("email", params);
+  }
+  url(params?: unknown): PgField<S, Flags> {
+    return this.chain("url", params);
+  }
+  emoji(params?: unknown): PgField<S, Flags> {
+    return this.chain("emoji", params);
+  }
+  uuid(params?: unknown): PgField<S, Flags> {
+    return this.chain("uuid", params);
+  }
+  guid(params?: unknown): PgField<S, Flags> {
+    return this.chain("guid", params);
+  }
+  nanoid(params?: unknown): PgField<S, Flags> {
+    return this.chain("nanoid", params);
+  }
+  cuid(params?: unknown): PgField<S, Flags> {
+    return this.chain("cuid", params);
+  }
+  cuid2(params?: unknown): PgField<S, Flags> {
+    return this.chain("cuid2", params);
+  }
+  ulid(params?: unknown): PgField<S, Flags> {
+    return this.chain("ulid", params);
+  }
+  xid(params?: unknown): PgField<S, Flags> {
+    return this.chain("xid", params);
+  }
+  ksuid(params?: unknown): PgField<S, Flags> {
+    return this.chain("ksuid", params);
+  }
+  base64(params?: unknown): PgField<S, Flags> {
+    return this.chain("base64", params);
+  }
+  base64url(params?: unknown): PgField<S, Flags> {
+    return this.chain("base64url", params);
+  }
+  e164(params?: unknown): PgField<S, Flags> {
+    return this.chain("e164", params);
+  }
+  jwt(params?: unknown): PgField<S, Flags> {
+    return this.chain("jwt", params);
+  }
+  // string transforms
+  lowercase(params?: unknown): PgField<S, Flags> {
+    return this.chain("lowercase", params);
+  }
+  uppercase(params?: unknown): PgField<S, Flags> {
+    return this.chain("uppercase", params);
+  }
+  normalize(form?: string): PgField<S, Flags> {
+    return this.chain("normalize", form);
+  }
+
   /**
    * ESCAPE HATCH (chainable form) — teach the driver how to STORE this field's value in Postgres:
    * give the **wire type** as an `s.*`/Zod field (its pg column type is taken from it) plus a codec
@@ -172,6 +311,102 @@ export class PgField<
   }
 }
 
+/**
+ * A Postgres OBJECT field — the result of `s.object({...})`. A {@link PgField} over a `z.ZodObject`
+ * (one `jsonb` column) that additionally carries the Zod object-composition methods. They live HERE,
+ * on the object subclass — NOT on the base `PgField` — so the base field (and its `AnyField` erasure)
+ * stays free of generic-return methods that would break structural assignability. Each method forwards
+ * to the inner `z.object` and re-wraps as a `PgObjectField`, so the result stays composable and the
+ * App type stays precise (mirrors how Zod itself puts `.extend`/`.pick`/… on `ZodObject`, not `ZodType`).
+ */
+export class PgObjectField<
+  Sh extends z.ZodRawShape = z.ZodRawShape,
+  Flags extends string = never,
+> extends PgField<z.ZodObject<Sh>, Flags> {
+  // An object-producing op (incl. the inherited .loose()/.strict()/.flexible()) stays a PgObjectField;
+  // anything else (e.g. .optional()/.array()) degrades to a base PgField, matching the wrapper's type.
+  protected rebuild<S2 extends z.ZodType, F2 extends string>(
+    schema: S2,
+    native: PgMeta,
+  ): PgField<S2, F2> {
+    if (schema instanceof z.ZodObject)
+      return new PgObjectField(schema as never, native) as unknown as PgField<
+        S2,
+        F2
+      >;
+    return new PgField<S2, F2>(schema, native);
+  }
+  private obj<Sh2 extends z.ZodRawShape>(
+    schema: z.ZodObject<Sh2>,
+  ): PgObjectField<Sh2, Flags> {
+    return new PgObjectField<Sh2, Flags>(schema, this.native);
+  }
+  /** Add fields (existing keys are overwritten). Accepts fields OR raw Zod, like `s.object`. */
+  extend<T extends Record<string, AnyField | z.ZodType>>(shape: T) {
+    const lifted = Object.fromEntries(
+      Object.entries(shape).map(([k, v]) => [k, toZod(v)]),
+    ) as { [K in keyof T]: SchemaOf<T[K]> };
+    return this.obj(this.schema.extend(lifted));
+  }
+  /** Merge another object's shape in (its fields win on conflict). */
+  merge<T extends z.ZodRawShape>(other: PgObjectField<T> | z.ZodObject<T>) {
+    return this.obj(
+      this.schema.merge(other instanceof PgObjectField ? other.schema : other),
+    );
+  }
+  /** Keep only the masked keys. */
+  pick<M extends Parameters<z.ZodObject<Sh>["pick"]>[0]>(mask: M) {
+    return this.obj(this.schema.pick(mask));
+  }
+  /** Drop the masked keys. */
+  omit<M extends Parameters<z.ZodObject<Sh>["omit"]>[0]>(mask: M) {
+    return this.obj(this.schema.omit(mask));
+  }
+  /** Make all fields optional. */
+  partial() {
+    return this.obj(this.schema.partial());
+  }
+  /** Make all fields required. */
+  required() {
+    return this.obj(this.schema.required());
+  }
+  /** Type unknown keys with a schema (field OR raw Zod). */
+  catchall<C extends AnyField | z.ZodType>(schema: C) {
+    return this.obj(this.schema.catchall(toZod(schema) as SchemaOf<C>));
+  }
+  /** The object's field shape. */
+  get shape(): Sh {
+    return this.schema.shape;
+  }
+}
+
+/**
+ * A Postgres ENUM field — the result of `s.enum([...])` (a string-literal union projected to a `text`
+ * column). A {@link PgField} over a `z.ZodEnum` that additionally carries the Zod enum-derivation
+ * methods `.exclude`/`.extract`. Like {@link PgObjectField}, they live on THIS subclass — not base
+ * `PgField` — and forward to the inner `z.enum`, re-wrapping as a `PgEnumField` so the result stays a
+ * derivable enum and the App type narrows precisely (mirrors Zod, where `.exclude`/`.extract` are on
+ * `ZodEnum`). The pg column stays `text`.
+ */
+export class PgEnumField<
+  T extends z.core.util.EnumLike = z.core.util.EnumLike,
+  Flags extends string = never,
+> extends PgField<z.ZodEnum<T>, Flags> {
+  private enumField<T2 extends z.core.util.EnumLike>(
+    schema: z.ZodEnum<T2>,
+  ): PgEnumField<T2, Flags> {
+    return new PgEnumField<T2, Flags>(schema, this.native);
+  }
+  /** Derive an enum without the listed members. */
+  exclude<const U extends Parameters<z.ZodEnum<T>["exclude"]>[0]>(values: U) {
+    return this.enumField(this.schema.exclude(values));
+  }
+  /** Derive an enum with only the listed members. */
+  extract<const U extends Parameters<z.ZodEnum<T>["extract"]>[0]>(values: U) {
+    return this.enumField(this.schema.extract(values));
+  }
+}
+
 // --- the `s` vocabulary (pg lingo) -------------------------------------------------------------
 
 // Generic in the Zod schema so each `s.*` factory keeps its precise type — without this, `App<T>` (and
@@ -182,6 +417,78 @@ const mk = <S extends z.ZodType>(
   params?: (string | number)[],
 ): PgField<S> =>
   new PgField<S>(schema, { pg: params ? { type, params } : { type } });
+
+/** Map a tuple of fields/Zod schemas to their inner Zod schemas (for tuple/union/discriminatedUnion). */
+type ZodsOf<T extends readonly (AnyField | z.ZodType)[]> = {
+  [K in keyof T]: SchemaOf<T[K]>;
+};
+
+/**
+ * Infer the pg column type for an `s.codec(wire, app, …)` from its RAW-Zod WIRE schema (the on-disk
+ * side). `s.*` factories normally set `native.pg` explicitly, but a codec's wire is a bare Zod schema,
+ * so map its base type here (peeling option/nullable/etc.). Mirrors the canonical scalar choices the
+ * leaf factories make; structural/unknown wires fall back to `jsonb`.
+ */
+function wirePgType(schema: z.ZodType): PgTypeRef {
+  let cur = schema as {
+    _zod?: { def?: { type?: string; innerType?: z.ZodType } };
+  };
+  const peel = new Set([
+    "optional",
+    "nullable",
+    "default",
+    "prefault",
+    "catch",
+    "readonly",
+    "nonoptional",
+    "pipe",
+  ]);
+  while (
+    cur?._zod?.def &&
+    peel.has(cur._zod.def.type ?? "") &&
+    cur._zod.def.innerType
+  )
+    cur = cur._zod.def.innerType as typeof cur;
+  switch (cur?._zod?.def?.type) {
+    case "string":
+      return { type: "text" };
+    case "int":
+      return { type: "integer" };
+    case "number":
+      return { type: "double precision" };
+    case "bigint":
+      return { type: "bigint" };
+    case "boolean":
+      return { type: "boolean" };
+    case "date":
+      return { type: "timestamptz" };
+    case "object":
+    case "array":
+    case "tuple":
+    case "record":
+    case "map":
+    case "set":
+    case "union":
+      return { type: "jsonb" };
+    default:
+      return { type: "text" };
+  }
+}
+
+// PGlite returns an int8 (`bigint`) column as a JS `number` when the value fits in 2^53, and a JS
+// `bigint` only when it's larger — so any bigint-backed field must accept EITHER on the wire and coerce
+// to `bigint`. (A `numeric` column, by contrast, always comes back as a string.) Without this, decode of
+// a small value stored in a bigint column throws "expected bigint, received number".
+const INT8_WIRE = z.union([z.bigint(), z.number()]);
+/** A `bigint` column whose App value is a JS `bigint`, tolerant of PGlite's number|bigint wire. */
+const bigintField = (): PgField<z.ZodCodec<typeof INT8_WIRE, z.ZodBigInt>> =>
+  new PgField(
+    z.codec(INT8_WIRE, z.bigint(), {
+      decode: (w) => BigInt(w),
+      encode: (b) => b,
+    }),
+    { pg: { type: "bigint" } },
+  );
 
 /** The Postgres authoring namespace. Zod drop-ins (string/number/…) + native pg types + `$postgres`. */
 export const s = {
@@ -198,13 +505,78 @@ export const s = {
   char: (n?: number) =>
     n === undefined ? mk("char", z.string()) : mk("char", z.string(), [n]),
   citext: () => mk("citext", z.string()),
+  // string FORMATS — App-side Zod validators on a `text` column (pg has no format-specific column type;
+  // validation runs client-side, the column is plain `text`). `uuid`/`inet`/`cidr`/`macaddr` have their
+  // own native types above/below and are not repeated here. Params pass through to Zod (message/etc.).
+  email: (params?: Parameters<typeof z.email>[0]) =>
+    mk("text", z.email(params)),
+  url: (params?: Parameters<typeof z.url>[0]) => mk("text", z.url(params)),
+  emoji: (params?: Parameters<typeof z.emoji>[0]) =>
+    mk("text", z.emoji(params)),
+  nanoid: (params?: Parameters<typeof z.nanoid>[0]) =>
+    mk("text", z.nanoid(params)),
+  cuid: (params?: Parameters<typeof z.cuid>[0]) => mk("text", z.cuid(params)),
+  cuid2: (params?: Parameters<typeof z.cuid2>[0]) =>
+    mk("text", z.cuid2(params)),
+  ulid: (params?: Parameters<typeof z.ulid>[0]) => mk("text", z.ulid(params)),
+  guid: (params?: Parameters<typeof z.guid>[0]) => mk("text", z.guid(params)),
+  xid: (params?: Parameters<typeof z.xid>[0]) => mk("text", z.xid(params)),
+  ksuid: (params?: Parameters<typeof z.ksuid>[0]) =>
+    mk("text", z.ksuid(params)),
+  base64: (params?: Parameters<typeof z.base64>[0]) =>
+    mk("text", z.base64(params)),
+  base64url: (params?: Parameters<typeof z.base64url>[0]) =>
+    mk("text", z.base64url(params)),
+  e164: (params?: Parameters<typeof z.e164>[0]) => mk("text", z.e164(params)),
+  jwt: (params?: Parameters<typeof z.jwt>[0]) => mk("text", z.jwt(params)),
+  // long-tail string formats (also -> text, App-side). uuid version variants, http-only url, network
+  // name/hex/mac, and keyed hashes. `s.uuid()` stays the native `uuid` type; these are text validators.
+  uuidv4: (params?: Parameters<typeof z.uuidv4>[0]) =>
+    mk("text", z.uuidv4(params)),
+  uuidv6: (params?: Parameters<typeof z.uuidv6>[0]) =>
+    mk("text", z.uuidv6(params)),
+  uuidv7: (params?: Parameters<typeof z.uuidv7>[0]) =>
+    mk("text", z.uuidv7(params)),
+  httpUrl: (params?: Parameters<typeof z.httpUrl>[0]) =>
+    mk("text", z.httpUrl(params)),
+  hostname: (params?: Parameters<typeof z.hostname>[0]) =>
+    mk("text", z.hostname(params)),
+  hex: (params?: Parameters<typeof z.hex>[0]) => mk("text", z.hex(params)),
+  mac: (params?: Parameters<typeof z.mac>[0]) => mk("text", z.mac(params)),
+  hash: (...args: Parameters<typeof z.hash>) => mk("text", z.hash(...args)),
+  // network string-format validators -> text (App-side; DISTINCT from the native s.inet()/cidr()/
+  // macaddr() columns — these are the z.ipv4/ipv6/cidrv4/cidrv6 drop-ins, validated client-side).
+  ipv4: (params?: Parameters<typeof z.ipv4>[0]) => mk("text", z.ipv4(params)),
+  ipv6: (params?: Parameters<typeof z.ipv6>[0]) => mk("text", z.ipv6(params)),
+  cidrv4: (params?: Parameters<typeof z.cidrv4>[0]) =>
+    mk("text", z.cidrv4(params)),
+  cidrv6: (params?: Parameters<typeof z.cidrv6>[0]) =>
+    mk("text", z.cidrv6(params)),
+  // ISO string formats (nested, mirroring z.iso.*) — App-side validators on `text`. DISTINCT from the
+  // native temporal types s.date()/s.timestamptz()/s.interval() (those are real pg date/time columns).
+  iso: {
+    date: (params?: Parameters<typeof z.iso.date>[0]) =>
+      mk("text", z.iso.date(params)),
+    time: (params?: Parameters<typeof z.iso.time>[0]) =>
+      mk("text", z.iso.time(params)),
+    datetime: (params?: Parameters<typeof z.iso.datetime>[0]) =>
+      mk("text", z.iso.datetime(params)),
+    duration: (params?: Parameters<typeof z.iso.duration>[0]) =>
+      mk("text", z.iso.duration(params)),
+  },
+  // string-on-disk, boolean in the app (Zod's z.stringbool codec): column is `text`, App value is bool.
+  stringbool: (params?: Parameters<typeof z.stringbool>[0]) =>
+    mk("text", z.stringbool(params)),
   // numeric
   smallint: () => mk("smallint", z.int().gte(-32768).lte(32767)),
   integer: () => mk("integer", z.int()),
   int: () => mk("integer", z.int()),
-  bigint: () => mk("bigint", z.int()),
+  // 64-bit: App value is a JS bigint (NOT a number — a pg bigint exceeds JS's 2^53 safe-integer range,
+  // so a number would silently lose precision). Uses {@link bigintField} so decode tolerates PGlite
+  // returning the column as number (<=2^53) or bigint (larger) and coerces to bigint either way.
+  bigint: () => bigintField(),
   serial: () => mk("integer", z.int()).$identity("by-default"),
-  bigserial: () => mk("bigint", z.int()).$identity("by-default"),
+  bigserial: () => bigintField().$identity("by-default"),
   numeric: (precision?: number, scale?: number) =>
     precision === undefined
       ? mk("numeric", z.number())
@@ -215,6 +587,40 @@ export const s = {
   doublePrecision: () => mk("double precision", z.number()),
   float: () => mk("double precision", z.number()),
   money: () => mk("money", z.string()),
+  // Zod width-numeric drop-ins. Clean fits: float32->real, float64->double precision, int32->integer,
+  // int64->bigint (App bigint, like s.bigint). Postgres has NO unsigned types, so uint32/uint64 store
+  // in the next type up via a codec (App keeps z.uint*'s value type): uint32 (0..2^32-1) -> bigint
+  // column (wire bigint <-> app number), uint64 (0..2^64-1) -> numeric column (wire string <-> app bigint).
+  float32: (params?: Parameters<typeof z.float32>[0]) =>
+    mk("real", z.float32(params)),
+  float64: (params?: Parameters<typeof z.float64>[0]) =>
+    mk("double precision", z.float64(params)),
+  int32: (params?: Parameters<typeof z.int32>[0]) =>
+    mk("integer", z.int32(params)),
+  int64: (params?: Parameters<typeof z.int64>[0]) =>
+    new PgField(
+      z.codec(INT8_WIRE, z.int64(params), {
+        decode: (w) => BigInt(w),
+        encode: (b) => b,
+      }),
+      { pg: { type: "bigint" } },
+    ),
+  uint32: (params?: Parameters<typeof z.uint32>[0]) =>
+    new PgField(
+      z.codec(INT8_WIRE, z.uint32(params), {
+        decode: (w) => Number(w),
+        encode: (n) => BigInt(n),
+      }),
+      { pg: { type: "bigint" } },
+    ),
+  uint64: (params?: Parameters<typeof z.uint64>[0]) =>
+    new PgField(
+      z.codec(z.string(), z.uint64(params), {
+        decode: (s) => BigInt(s),
+        encode: (b) => String(b),
+      }),
+      { pg: { type: "numeric" } },
+    ),
   // boolean
   boolean: () => mk("boolean", z.boolean()),
   bool: () => mk("boolean", z.boolean()),
@@ -232,13 +638,16 @@ export const s = {
   cidr: () => mk("cidr", z.string()),
   macaddr: () => mk("macaddr", z.string()),
   // json
-  jsonb: <T extends z.ZodType = z.ZodUnknown>(shape?: T) =>
-    mk("jsonb", shape ?? z.unknown()),
-  json: <T extends z.ZodType = z.ZodUnknown>(shape?: T) =>
-    mk("json", shape ?? z.unknown()),
-  // enum (string-literal union -> text) and single literal
+  // no shape -> z.json() (the recursive JSON-value schema), not z.unknown(): a no-shape json/jsonb
+  // column still only holds valid JSON, and it makes `s.json()` a literal drop-in for `z.json()`.
+  jsonb: <T extends z.ZodType = ReturnType<typeof z.json>>(shape?: T) =>
+    mk("jsonb", shape ?? z.json()),
+  json: <T extends z.ZodType = ReturnType<typeof z.json>>(shape?: T) =>
+    mk("json", shape ?? z.json()),
+  // enum (string-literal union -> text) and single literal. Returns a PgEnumField so `.exclude`/
+  // `.extract` are available to derive narrower enums (the column stays text).
   enum: <const T extends readonly [string, ...string[]]>(values: T) =>
-    mk("text", z.enum(values)),
+    new PgEnumField(z.enum(values), { pg: { type: "text" } }),
   literal: <const V extends string | number | boolean>(value: V) =>
     mk(
       typeof value === "number"
@@ -249,20 +658,133 @@ export const s = {
       z.literal(value),
     ),
   // object -> jsonb (opaque on disk). Accepts field OR raw-Zod values (a Zod drop-in superset).
-  object: (shape: Record<string, AnyField | z.ZodType>) =>
-    mk(
-      "jsonb",
+  // Generic over the shape so the App type is the precise object AND the returned PgObjectField's
+  // composition methods (.extend/.pick/…) stay precisely typed.
+  object: <Sh extends Record<string, AnyField | z.ZodType>>(
+    shape: Sh,
+  ): PgObjectField<{ [K in keyof Sh]: SchemaOf<Sh[K]> }> =>
+    new PgObjectField(
       z.object(
         Object.fromEntries(
           Object.entries(shape).map(([k, v]) => [k, toZod(v)]),
         ),
-      ),
+      ) as z.ZodObject<{ [K in keyof Sh]: SchemaOf<Sh[K]> }>,
+      { pg: { type: "jsonb" } },
     ),
+  // z.strictObject / z.looseObject drop-ins — same jsonb column, unknown-key mode preset (still a
+  // composable PgObjectField). strict rejects extra keys; loose passes them through.
+  strictObject: <Sh extends Record<string, AnyField | z.ZodType>>(shape: Sh) =>
+    s.object(shape).strict(),
+  looseObject: <Sh extends Record<string, AnyField | z.ZodType>>(shape: Sh) =>
+    s.object(shape).loose(),
   // array(elem) -> `<elem>[]`; carries the element's pg metadata so it lowers to an array of that type.
   array: (elem: AnyField | z.ZodType): PgField =>
     new PgField(
       z.array(toZod(elem)),
       elem instanceof PgField ? elem.native : {},
+    ),
+  // composite types -> jsonb (the App value is the composite; stored opaquely as one jsonb column,
+  // validated app-side by Zod). Accept fields OR raw Zod (toZod each), mirroring s.object/s.array.
+  record: <K extends z.core.$ZodRecordKey, V extends AnyField | z.ZodType>(
+    key: K,
+    value: V,
+  ): PgField<z.ZodRecord<K, SchemaOf<V>>> =>
+    mk("jsonb", z.record(key, toZod(value) as SchemaOf<V>)),
+  tuple: <
+    const T extends readonly [
+      AnyField | z.ZodType,
+      ...(AnyField | z.ZodType)[],
+    ],
+  >(
+    items: T,
+  ): PgField<z.ZodTuple<ZodsOf<T>>> =>
+    mk("jsonb", z.tuple(items.map(toZod) as ZodsOf<T>)),
+  union: <
+    const T extends readonly [
+      AnyField | z.ZodType,
+      ...(AnyField | z.ZodType)[],
+    ],
+  >(
+    options: T,
+  ): PgField<z.ZodUnion<ZodsOf<T>>> =>
+    mk("jsonb", z.union(options.map(toZod) as ZodsOf<T>)),
+  discriminatedUnion: <
+    Disc extends string,
+    const T extends readonly [
+      AnyField | z.ZodType,
+      ...(AnyField | z.ZodType)[],
+    ],
+  >(
+    discriminator: Disc,
+    options: T,
+  ): PgField<z.ZodDiscriminatedUnion<ZodsOf<T>, Disc>> =>
+    mk(
+      "jsonb",
+      z.discriminatedUnion(
+        discriminator,
+        options.map(toZod) as never,
+      ) as unknown as z.ZodDiscriminatedUnion<ZodsOf<T>, Disc>,
+    ),
+  intersection: <
+    A extends AnyField | z.ZodType,
+    B extends AnyField | z.ZodType,
+  >(
+    a: A,
+    b: B,
+  ): PgField<z.ZodIntersection<SchemaOf<A>, SchemaOf<B>>> =>
+    mk(
+      "jsonb",
+      z.intersection(toZod(a) as SchemaOf<A>, toZod(b) as SchemaOf<B>),
+    ),
+  lazy: <V extends AnyField | z.ZodType>(
+    getter: () => V,
+  ): PgField<z.ZodLazy<SchemaOf<V>>> =>
+    mk(
+      "jsonb",
+      z.lazy(() => toZod(getter()) as SchemaOf<V>),
+    ),
+  // exclusive union (z.xor) -> jsonb, like s.union but matching exactly one option.
+  xor: <
+    const T extends readonly [
+      AnyField | z.ZodType,
+      ...(AnyField | z.ZodType)[],
+    ],
+  >(
+    options: T,
+  ) => mk("jsonb", z.xor(options.map(toZod) as ZodsOf<T>)),
+  // open-keyed record variants -> jsonb (all-optional values / extra keys allowed). Accept field|raw Zod.
+  partialRecord: <
+    K extends z.core.$ZodRecordKey,
+    V extends AnyField | z.ZodType,
+  >(
+    key: K,
+    value: V,
+  ) => mk("jsonb", z.partialRecord(key, toZod(value) as SchemaOf<V>)),
+  looseRecord: <K extends z.core.$ZodRecordKey, V extends AnyField | z.ZodType>(
+    key: K,
+    value: V,
+  ) => mk("jsonb", z.looseRecord(key, toZod(value) as SchemaOf<V>)),
+  // custom string formats / template-literal strings -> text (App-side validated).
+  stringFormat: (...args: Parameters<typeof z.stringFormat>) =>
+    mk("text", z.stringFormat(...args)),
+  templateLiteral: (...args: Parameters<typeof z.templateLiteral>) =>
+    mk("text", z.templateLiteral(...args)),
+  // an enum of an object's keys (z.keyof) -> text. Accepts an s.object() field or a raw z.object.
+  // biome-ignore lint/suspicious/noExplicitAny: accept any PgObjectField shape (subclass is invariant)
+  keyof: (obj: PgObjectField<any> | z.ZodObject) =>
+    mk(
+      "text",
+      z.keyof(obj instanceof PgField ? (obj.schema as z.ZodObject) : obj),
+    ),
+  // preprocess the input before validation (z.preprocess) — App-side only; the column type is the
+  // INNER schema's (inherit its pg metadata when it's an s.* field, else default).
+  preprocess: <V extends AnyField | z.ZodType>(
+    fn: (arg: unknown) => unknown,
+    schema: V,
+  ) =>
+    new PgField(
+      z.preprocess(fn, toZod(schema) as SchemaOf<V>),
+      schema instanceof PgField ? schema.native : {},
     ),
   // foreign key: `text` column + FK to `table(id)`
   references: (
@@ -279,6 +801,16 @@ export const s = {
    */
   $postgres: <C extends z.ZodType>(pgType: string, codec: C): PgField<C> =>
     new PgField<C>(codec, { pg: { type: pgType } }),
+  // z.codec drop-in: a low-level codec whose pg column type is INFERRED from the wire schema A (the
+  // on-disk side). Mirrors z.codec's arg order — (wire/INPUT, app/OUTPUT, {decode, encode}); A/B are raw
+  // Zod (pass `field.schema` for an s.* field). Unlike $postgres (which names the pg type explicitly),
+  // s.codec derives it from a schema-expressible wire. App = output(B), Wire = input(A).
+  codec: <A extends z.ZodType, B extends z.ZodType>(
+    wire: A,
+    app: B,
+    params: Parameters<typeof z.codec<A, B>>[2],
+  ): PgField<z.ZodCodec<A, B>> =>
+    new PgField(z.codec(wire, app, params), { pg: wirePgType(wire) }),
 };
 
 // --- defineTable: a pg table builder producing an `Authored` object -----------------------------
@@ -315,6 +847,14 @@ export interface PgTableConfig {
   foreignKeys?: PgForeignKeyConfig[];
 }
 
+// The element bound for a table's field map. Uses `any` deliberately: `PgField` is invariant in its
+// schema param (it appears in both co- and contra-variant positions), so a SUBCLASS like
+// `PgObjectField` (S = a concrete `ZodObject`) is NOT assignable to a plain `PgField` bound. `any`
+// relaxes that one check — the precise per-field types are still inferred from the literal, so
+// App/Wire typing is unaffected.
+// biome-ignore lint/suspicious/noExplicitAny: variance escape so PgField subclasses satisfy the bound
+type AnyPgField = PgField<any, any>;
+
 /**
  * A Postgres table definition — the `Authored` object the driver's `lower` reads. Structurally a
  * `{ name }` (the neutral `Authored` bound); also carries its `fields` (a `{ col: PgField }` map) and
@@ -322,7 +862,7 @@ export interface PgTableConfig {
  */
 export class PgTableDef<
   Name extends string = string,
-  F extends Record<string, PgField> = Record<string, PgField>,
+  F extends Record<string, AnyPgField> = Record<string, PgField>,
 > {
   /**
    * A Zod object over the columns' schemas — the single source for row validation + encode/decode +
@@ -417,7 +957,7 @@ export class PgTableDef<
 /** Declare a Postgres table: `export const user = defineTable("user", { name: s.text(), age: s.integer().optional() })`. */
 export function defineTable<
   Name extends string,
-  F extends Record<string, PgField>,
+  F extends Record<string, AnyPgField>,
 >(name: Name, fields: F, config?: PgTableConfig): PgTableDef<Name, F> {
   return new PgTableDef(name, fields, config ?? {});
 }

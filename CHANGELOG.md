@@ -12,10 +12,31 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 ## [Unreleased]
 
 ### Added
+- **core:** `DriverCommand` contract — drivers can contribute dialect-specific CLI commands invoked as
+  `sc <kind> <verb> [args]` (e.g. surreal `access rotate <name>`, postgres `matview refresh <name>`).
+  Core owns only the general mechanism: it discovers `driver.commands`, parses argv (variadic positionals
+  + value/boolean flags), resolves the connection, and dispatches to `run` with a `CommandContext`
+  ({conn, config, io with prompt(), secrets}); the driver owns each kind/verb's meaning.
+- **cli:** the dispatch for `DriverCommand`s — the `schemic`/`sc` bin discovers the active driver's
+  `commands` (from the project config) and registers each as `sc <kind> <verb> [args]`, grouped by kind,
+  with `--help`. It parses the invocation (variadic positionals + value/boolean flags), opens the
+  connection, and runs the command with its `CommandContext`. No project / no driver commands -> no-op
+  (built-in commands unaffected).
+- **core:** secret-bearing DDL foundations (Phase-2a of the DEFINE ACCESS secret contract) — `SecretRef`
+  + `env()`/`secret()` author-time helpers + a pluggable `SecretProvider` (default reads `process.env`),
+  and a write-only `bindings` carrier (`$param` -> `SecretRef`) on `Statement` + `Diff`. The secret
+  value never lives in the schema, snapshot, or migration: it is resolved at apply through the provider
+  and passed as a bound parameter. Drivers re-export `env`/`secret`; apply-time resolution + migration
+  persistence land next.
 - **core:** `s.*` fields now expose the [Standard Schema](https://standardschema.dev) `~standard`
   interface (forwarded from the wrapped Zod schema on `SFieldBase`), so a Schemic field drops straight
   into any Standard Schema consumer (tRPC, TanStack Form/Router, …) without unwrapping to `.schema`.
-  Both drivers inherit it free; `validate` runs the decode direction (wire -> app).
+  `validate` runs the decode direction (wire -> app). Postgres inherits it via core's `SFieldBase`;
+  surrealdb mirrors it on its own base (it does not yet share core's `SFieldBase`).
+- **core:** `SFieldBase` (the `s.*` base) gains the remaining Zod 4 shared-base methods for closer
+  drop-in parity — `nonoptional`, `exactOptional`, `isOptional`, `isNullable`, `toJSONSchema`, a
+  `description` getter, `register`, and `spa`. `@schemic/postgres` inherits them immediately (it
+  composes core's `SFieldBase`); `@schemic/surrealdb` mirrors them on its own base.
 
 ### Changed (BREAKING — alpha)
 - **postgres:** `connect()` now **fails loud** on a `postgres://` (any non-`file:` URL scheme)
@@ -23,6 +44,11 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
   data-loss footgun where a user pointing at a real server "succeeded" against a disposable DB).
   `connect` is now async. `file:<dir>` (persistent) and `""`/omitted (in-memory) are unchanged;
   hosted `postgres://` is reserved for a future node-postgres client.
+
+### Fixed
+- **cli:** bare `schemic` / `sc` (no args) now lists the active driver's contributed commands
+  (`sc <kind> <verb>`) in its help, like `sc --help` already did. The no-arg help printed before driver
+  commands had registered; registration now runs first.
 
 ## [0.1.0-alpha.22] - 2026-06-26
 

@@ -3,6 +3,7 @@
 // module is what the CLI shell uses to RENDER any driver's Diff (git-style file groups, word-diff,
 // unified patch, kind summaries). Dialect-free: `kind` is an opaque string, not a Surreal kind union.
 import type { KindRegistry } from "../kind";
+import type { SecretRef } from "../secrets";
 import { colorEnabled, style } from "./style";
 
 /**
@@ -27,6 +28,15 @@ export type DiffItem = {
 export interface Diff {
   up: string[];
   down: string[];
+  /**
+   * Apply-time secret bindings: `$param` name -> a write-only {@link SecretRef} (e.g. `env("X")`).
+   * Populated by a driver whose DDL emits secret placeholders (SurrealDB `DEFINE ACCESS … KEY $param`).
+   * MODEL 1: stored in the migration so it replays without the live schema; the **value never appears
+   * here** — the apply layer resolves each ref through a `SecretProvider` and binds it (`db.query(ddl,
+   * resolved)`), so secrets stay out of the schema, snapshot, and migration files. Diff-excluded +
+   * snapshot-omitted, so a redacted secret never reads as drift.
+   */
+  bindings?: Record<string, SecretRef>;
   /** Structured per-object changes for the human display (word-level diff). */
   items?: DiffItem[];
   /** Every desired statement (the `next` schema), for the `--full` context view. */

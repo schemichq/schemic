@@ -21,6 +21,15 @@ The CLI loader imports `/driver` to register (it **requires** the `/driver` entr
 so importing `s.*` never drags the diff/emit engine into an app bundle. Core mirrors this:
 `@schemic/core/query` is the neutral query toolkit (`Row`/`Project`/`decodeProjection`/`callFunction`).
 
+## Developer experience IS the product — always analyze through a DevEx lens
+
+Schemic is a **developer-focused product**: the authoring surface (`s.*`/`define*`) and the CLI ARE the
+product, so DX *is* the deliverable. **Analyze every API, change, and review (code + coverage) through a
+developer-experience lens** — is it type-safe, autocompletable, refactor-safe, hard to misuse, and obvious
+at the call site? Treat stringly-typed escape hatches, undeclared "magic" variables, and silent-failure
+APIs as **DX debt**: surface them and propose the strongly-typed form *even when the current behavior
+already "works"*. This analysis is mandatory in every review, not optional polish.
+
 ## Agent Code Ownership
 
 This repo is developed by **multiple AI agents in parallel**. Stay within your package(s); a change in
@@ -45,6 +54,20 @@ Rules:
   completed `@schemic/core` changes and **public authoring-API changes** that drivers must track.
   Everyone else: **DM `core-dev` directly** for core/API questions, or discuss in `#general`. **Do not
   post in `#drivers`.**
+
+## Manuel's attention → use Tasks, not inline reminders (CONTRACT)
+
+Anything **pending Manuel's attention** — a decision, an approval (e.g. a BREAKING land), a security/
+secret action, a release-cut call, anything only he can decide — goes into the **session Task list**,
+never an inline "just a reminder that X is pending" in chat prose. The Task list is **persistent**, so
+Manuel can review it any time and ask again; he marks each item done as he attends it.
+
+- **Per-agent, not centralized.** EACH agent keeps its OWN pending-Manuel items in its OWN session Task
+  list (visible in that agent's chat). Do **not** route them to `core-dev` — Manuel reviews each agent's
+  chat for that agent's items.
+- **Don't pester inline.** Surface a pending item once when it arises (as a Task), then stop re-raising
+  it in prose. Act on everything you can decide yourself; only genuinely Manuel-only items become Tasks.
+- **Task naming** follows whatever format Manuel asked for (e.g. tracked secrets: `npm key: <id…> <date>`).
 
 ## Worktrees (don't step on each other)
 

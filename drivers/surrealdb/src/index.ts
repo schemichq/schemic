@@ -26,6 +26,15 @@ export function surql<R extends unknown[] = unknown[]>(
 ): BoundQuery<R> {
   return sdkSurql(strings, ...values) as BoundQuery<R>;
 }
+// Secret references for `DEFINE ACCESS` keys — `.jwt({ key: env("JWT_SECRET") })`. Re-exported from
+// core's SIDE-EFFECT-FREE authoring subpath (so this index stays side-effect-free); the value resolves
+// at apply via a SecretProvider and is never in source or migration files.
+export {
+  env,
+  isSecretRef,
+  type SecretRef,
+  secret,
+} from "@schemic/core/authoring";
 export type { BoundQuery } from "surrealdb";
 export type {
   AnalyzerConfig,

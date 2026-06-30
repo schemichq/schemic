@@ -1,3 +1,4 @@
+import { isSecretRef, type SecretRef } from "@schemic/core";
 import { BoundQuery, escapeIdent, toSurqlString } from "surrealdb";
 import type { z } from "zod";
 import {
@@ -99,6 +100,7 @@ export function inferField(
   const def = zdef(schema);
   switch (def.type) {
     case "string":
+    case "template_literal": // z.templateLiteral — a string-typed literal pattern
       return leaf("string");
     case "number": {
       // z.int/int32/uint32/float64 share def.type "number"; the format discriminates.
@@ -408,6 +410,12 @@ export interface DefineStatement {
    * parsing SurrealQL. Absent on older snapshots (those changes fall back to `OVERWRITE`).
    */
   clauses?: Record<string, string>;
+  /**
+   * Apply-time secret bindings — `$param` name -> a write-only {@link SecretRef} (e.g. `env("X")`). The
+   * DDL carries only the `$param` placeholder; the value is resolved at apply via a `SecretProvider` and
+   * passed as a bound parameter (never stored). Set on `access` statements with an `env()`/`secret()` key.
+   */
+  bindings?: Record<string, SecretRef>;
 }
 
 /** The SurrealQL type of a field schema (e.g. `string`, `option<int>`, `record<user>`). */
@@ -500,6 +508,45 @@ function emitFunction(fn: FunctionDef, opts?: DefineOptions): string {
 }
 
 /** `DEFINE ACCESS <name> ON <DATABASE|NAMESPACE> TYPE <RECORD|JWT|BEARER> … [DURATION …]`. */
+/** Deterministic, SurrealQL-param-safe placeholder for a secret reference: `<kind>_<sanitized name>`.
+ *  Identical refs collapse to one `$param`; distinct refs never collide; stable across re-emits. */
+export function secretParam(ref: SecretRef): string {
+  return `${ref.kind}_${ref.name.replace(/[^A-Za-z0-9_]/g, "_")}`;
+}
+
+/** Render a `DEFINE ACCESS … KEY` value. A `SecretRef` becomes a bound `$param` placeholder (the value
+ *  is resolved at apply, never emitted into the DDL); an inline literal is quoted + linted. */
+function renderAccessKey(
+  access: string,
+  key: string | SecretRef | undefined,
+): string {
+  if (key && isSecretRef(key)) return `$${secretParam(key)}`;
+  if (typeof key === "string" && key.length > 0) warnInlineKey(access);
+  return JSON.stringify(key ?? "");
+}
+
+const warnedInlineKeys = new Set<string>();
+/** Lint (once per access): an inline literal KEY lands a secret in source + migration files. */
+function warnInlineKey(access: string): void {
+  if (warnedInlineKeys.has(access)) return;
+  warnedInlineKeys.add(access);
+  console.warn(
+    `schemic: access "${access}" has an inline literal KEY — prefer env()/secret() so the secret stays out of source + migration files.`,
+  );
+}
+
+/** The `$param -> SecretRef` write-only bindings an access contributes (value resolved at apply, never
+ *  stored). Today the JWT signing key; extends to the Phase-2b issuer/record keys. */
+export function accessBindings(
+  def: AccessDef,
+): Record<string, SecretRef> | undefined {
+  const k = def.config.kind;
+  const out: Record<string, SecretRef> = {};
+  if (k.type === "jwt" && k.key && isSecretRef(k.key))
+    out[secretParam(k.key)] = k.key;
+  return Object.keys(out).length ? out : undefined;
+}
+
 function emitAccess(a: AccessDef, opts?: DefineOptions): string {
   if (!a.config.on) {
     throw new Error(
@@ -521,7 +568,7 @@ function emitAccess(a: AccessDef, opts?: DefineOptions): string {
   } else if (k.type === "jwt") {
     typeClause = k.url
       ? `TYPE JWT URL ${JSON.stringify(k.url)}`
-      : `TYPE JWT ALGORITHM ${k.alg ?? "HS512"} KEY ${JSON.stringify(k.key ?? "")}`;
+      : `TYPE JWT ALGORITHM ${k.alg ?? "HS512"} KEY ${renderAccessKey(a.name, k.key)}`;
   } else {
     typeClause = "TYPE RECORD";
   }
@@ -590,7 +637,12 @@ export function emitDefStatement(
     };
   }
   if (def.kind === "access") {
-    return { kind: "access", name: def.name, ddl: emitAccess(def, opts) };
+    return {
+      kind: "access",
+      name: def.name,
+      ddl: emitAccess(def, opts),
+      bindings: accessBindings(def),
+    };
   }
   if (def.kind === "analyzer") {
     return { kind: "analyzer", name: def.name, ddl: emitAnalyzer(def, opts) };
@@ -767,15 +819,17 @@ function emit(
     const base = `${table}_${sanitize(path)}`;
 
     if (surreal.index.spec && surreal.index.unique) {
-      // Two indexes on the same field — spec keeps `_idx`, UNIQUE gets `_uq`.
-      const specName = `${base}_idx`;
+      // Two indexes on the same field — each independently nameable: the spec index takes the name
+      // from `.$fulltext()/.$hnsw()/.$diskann()` (`_idx` fallback); the UNIQUE index takes the name
+      // from `.$unique()` (`_uq` fallback).
+      const specName = surreal.index.name ?? `${base}_idx`;
       out.push({
         kind: "index",
         name: specName,
         table,
         ddl: `DEFINE INDEX ${existsPrefix(opts)}${escapeIdent(specName)} ON TABLE ${escapeIdent(table)} FIELDS ${path} ${surreal.index.spec};`,
       });
-      const uniqName = `${base}_uq`;
+      const uniqName = surreal.index.uniqueName ?? `${base}_uq`;
       out.push({
         kind: "index",
         name: uniqName,
@@ -783,9 +837,11 @@ function emit(
         ddl: `DEFINE INDEX ${existsPrefix(opts)}${escapeIdent(uniqName)} ON TABLE ${escapeIdent(table)} FIELDS ${path} UNIQUE;`,
       });
     } else {
+      // A lone index: a UNIQUE-only index takes `.$unique()`'s name; a spec/plain index takes its own.
       const idxName =
-        surreal.index.name ??
-        `${base}_idx`;
+        (surreal.index.unique
+          ? (surreal.index.uniqueName ?? surreal.index.name)
+          : surreal.index.name) ?? `${base}_idx`;
       const tail = surreal.index.spec
         ? ` ${surreal.index.spec}`
         : surreal.index.unique

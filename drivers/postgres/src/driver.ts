@@ -43,6 +43,7 @@ import type {
   PgTriggerDef,
   PgViewDef,
 } from "./authoring";
+import { pgCommands } from "./commands";
 import type { PgConn } from "./connection";
 import {
   escId,
@@ -770,6 +771,10 @@ export const postgresDriver: Driver<PgConn> = {
 
   // The kind registry (table/index/constraint) — core runs lower/diff/emit/order generically over it.
   registry,
+
+  // Dialect-specific CLI commands — `sc matview refresh`, `sc sequence set/current`, `sc enum add`,
+  // `sc table count/find/vacuum`, `sc index reindex`. Core discovers + dispatches these (see ./commands.ts).
+  commands: pgCommands,
 
   // Authoring -> kinded Definables. Tables: lower each to the driver's `PgTable` IR (./lower.ts) then
   // split into [table, ...index, ...constraint] (./kinds.ts splitTable). Standalone `defs`: native

@@ -17,6 +17,9 @@ import {
   Uuid,
 } from "surrealdb";
 import { z } from "zod";
+// Type-only (erased at runtime, so the authoring index stays side-effect-free): a `DEFINE ACCESS` key
+// may be an env()/secret() reference instead of an inline literal.
+import type { SecretRef } from "@schemic/core";
 
 /**
  * The "pure" approach: a field is a stock Zod schema + SurrealQL DDL metadata.
@@ -103,10 +106,16 @@ export interface SurrealMeta {
    * excluded from the public app/create/update surface. See `.$internal()` / `.system`. */
   internal?: boolean;
   /** Single-field index: `.$index()` (normal) / `.$unique()` (uniqueness) / `.$fulltext()` /
-   * `.$hnsw()` / `.$diskann()`, with an optional custom `name`. Emits `DEFINE INDEX
-   * <name ?? <table>_<field>_idx> ON TABLE <table> FIELDS <field> <UNIQUE | spec>`. `spec` carries a
-   * FULLTEXT/HNSW/DISKANN clause (built via `buildIndexSpec`); it is mutually exclusive with `unique`. */
-  index?: { unique?: boolean; name?: string; spec?: string };
+   * `.$hnsw()` / `.$diskann()`, each with an optional custom name. `name` names the plain/spec index
+   * (`<table>_<field>_idx` fallback); `uniqueName` names the UNIQUE index (`<table>_<field>_uq` fallback
+   * when paired with a spec). When BOTH a `spec` and `unique` are set, two indexes are emitted — one per
+   * name slot — so each is independently nameable. */
+  index?: {
+    unique?: boolean;
+    name?: string;
+    uniqueName?: string;
+    spec?: string;
+  };
   /** `REFERENCE [ON DELETE …]` on a record-link field. See `.$reference()`. */
   reference?:
     | true
@@ -322,13 +331,6 @@ type ContainsObjectInUnion<O> = O extends readonly [infer H, ...infer R]
     ? true
     : ContainsObjectInUnion<R>
   : false;
-/** The `this`-parameter constraint for the object-mode methods: the field itself when its type
- *  contains an object, else a hint string the real receiver isn't assignable to (a compile error). */
-export type ObjectModeReceiver<S, T> =
-  ContainsObject<S> extends true
-    ? T
-    : "`.flexible()` / `.loose()` / `.strict()` is only valid on object-typed fields (object, array<object>, or a union containing one)";
-
 /**
  * The PORTABLE, dialect-agnostic field base (extraction phase B — see docs/AUTHORING-SPLIT.md).
  * Holds the Zod schema, an opaque per-dialect `native` metadata slot, the field-level codecs, and
@@ -345,6 +347,12 @@ export abstract class SFieldBase<
     readonly schema: S,
     readonly native: N,
   ) {}
+
+  /** Standard Schema (v1) interop — delegates to the underlying Zod schema, so every `s.*` field is a
+   *  valid `StandardSchemaV1` (`field['~standard'].validate(input)`), matching `@schemic/core`'s base. */
+  get ["~standard"](): S["~standard"] {
+    return this.schema["~standard"];
+  }
 
   /** Rebuild a sibling field of the SAME dialect with a new schema/flags. Each dialect overrides it. */
   protected abstract rebuild<S2 extends z.ZodType, F2 extends string>(
@@ -400,6 +408,45 @@ export abstract class SFieldBase<
   /** @deprecated Use {@link SField.safeDecodeAsync | safeDecodeAsync}. */
   safeParseAsync(value: unknown) {
     return this.safeDecodeAsync(value);
+  }
+
+  // --- Mirrored from @schemic/core's SFieldBase. The full unification (extending core's base) is
+  // blocked by surreal's smart-id table covariance (see surrealdb-sfieldbase-unification-blocked), so
+  // shared-base methods are mirrored here instead — each delegates to the inner Zod schema exactly as
+  // core does. `test/unit/sfieldbase-parity.test.ts` reflects core's prototype and fails loudly if core
+  // adds a base method this copy hasn't mirrored. ---
+  /** Zod `.nonoptional()` — require a value (strips an `.optional()`). */
+  nonoptional(): SFieldBase<z.ZodNonOptional<S>, Flags, N> {
+    return this.rebuild(this.schema.nonoptional(), this.native);
+  }
+  /** Zod `.exactOptional()` — exact-optional semantics (absent vs explicit `undefined`). */
+  exactOptional(): SFieldBase<z.ZodExactOptional<S>, Flags, N> {
+    return this.rebuild(this.schema.exactOptional(), this.native);
+  }
+  /** Does this field accept `undefined`? (Zod reflection.) */
+  isOptional(): boolean {
+    return this.schema.isOptional();
+  }
+  /** Does this field accept `null`? (Zod reflection.) */
+  isNullable(): boolean {
+    return this.schema.isNullable();
+  }
+  /** Read back the description set via {@link describe} / {@link meta}. */
+  get description(): string | undefined {
+    return this.schema.description;
+  }
+  /** JSON Schema for this field's wire shape (delegates to `z.toJSONSchema`). */
+  toJSONSchema() {
+    return z.toJSONSchema(this.schema);
+  }
+  /** Register the wrapped schema in a Zod registry for metadata interop; returns the field. */
+  register(...args: Parameters<S["register"]>): this {
+    Reflect.apply(this.schema.register, this.schema, args);
+    return this;
+  }
+  /** Zod's `.spa` alias for {@link safeParseAsync} (drop-in). */
+  spa(value: unknown) {
+    return this.safeParseAsync(value);
   }
 
   // Zod wrappers — delegate to the inner schema, carry native metadata + flags forward.
@@ -542,19 +589,23 @@ export abstract class SFieldBase<
     >;
   }
 
+  // Unguarded (no `this:`-receiver type-guard) so an object-field SUBCLASS like SObjectField stays
+  // assignable to `AnyField` — a `this`-param guard makes object fields' `this` type diverge from
+  // `AnyField`'s and breaks structural assignability (it's why postgres ships these unguarded too).
+  // On a non-object field `applyObjectMode` is a pass-through, so the call is a harmless no-op.
   /** Allow arbitrary extra keys on the field's object(s) — `FLEXIBLE` in DDL. Mirrors Zod's `.loose()`,
-   *  but descends through `array`/`set`/union/wrapper layers so `s.array(s.object({…})).flexible()`
-   *  emits `array<object> FLEXIBLE`. Only valid on object-typed fields (a compile error otherwise). */
-  loose(this: ObjectModeReceiver<S, this>): this {
+   *  and descends through `array`/`set`/union/wrapper layers so `s.array(s.object({…})).flexible()`
+   *  emits `array<object> FLEXIBLE`. A no-op on non-object fields. */
+  loose(): this {
     return (this as SFieldBase<S, Flags, N>).objectMode("loose") as this;
   }
   /** Reject unknown keys on the field's object(s) — non-`FLEXIBLE` (the default). Mirrors Zod's
-   *  `.strict()`; descends like {@link loose}. Only valid on object-typed fields. */
-  strict(this: ObjectModeReceiver<S, this>): this {
+   *  `.strict()`; descends like {@link loose}. A no-op on non-object fields. */
+  strict(): this {
     return (this as SFieldBase<S, Flags, N>).objectMode("strict") as this;
   }
   /** Alias for {@link loose} — a `FLEXIBLE` object accepting arbitrary keys. */
-  flexible(this: ObjectModeReceiver<S, this>): this {
+  flexible(): this {
     return (this as SFieldBase<S, Flags, N>).objectMode("loose") as this;
   }
   private objectMode(mode: "loose" | "strict"): this {
@@ -651,6 +702,12 @@ export class SField<
   // Each just delegates to the SFieldBase body (which rebuilds a SField via the `rebuild` hook).
   override optional(): SField<z.ZodOptional<S>, Flags> {
     return super.optional() as SField<z.ZodOptional<S>, Flags>;
+  }
+  override nonoptional(): SField<z.ZodNonOptional<S>, Flags> {
+    return super.nonoptional() as SField<z.ZodNonOptional<S>, Flags>;
+  }
+  override exactOptional(): SField<z.ZodExactOptional<S>, Flags> {
+    return super.exactOptional() as SField<z.ZodExactOptional<S>, Flags>;
   }
   override nullable(): SField<z.ZodNullable<S>, Flags> {
     return super.nullable() as SField<z.ZodNullable<S>, Flags>;
@@ -810,6 +867,156 @@ export class SField<
     return this;
   }
 
+  // --- Native Zod chain methods (APP-SIDE ONLY — the DDL is UNCHANGED). These forward to the inner Zod
+  // schema's same-named method so `s.string().email().min(3).trim()` is a true Zod drop-in (copy Zod
+  // code, identical behaviour on every driver). They do NOT emit a DB ASSERT: the $-prefixed forms
+  // ($min/$assert/…) are the explicit DDL channel. This is the deliberate two-channel split — non-$ =
+  // app validation, $ = DB constraint — Schemic's core mental model, identical across drivers. ---
+  // Runtime-dispatched: the method just calls the inner schema's same-named method, throwing the way
+  // Zod would if it doesn't apply to this field's base type (e.g. `.regex()` on a number).
+  private chain(method: string, ...args: unknown[]): SField<S, Flags> {
+    const inner = this.schema as unknown as Record<
+      string,
+      ((...a: unknown[]) => z.ZodType) | undefined
+    >;
+    const fn = inner[method];
+    if (typeof fn !== "function")
+      throw new Error(
+        `surrealdb: .${method}() is not available on this field's base type.`,
+      );
+    return this.rebuild(fn.apply(this.schema, args) as S, this.native);
+  }
+  // string/number length+bounds AND datetime bounds (app-side; use $min/$max/$length for the DB ASSERT).
+  // A `Date` value is CODEC-AWARE: a surreal datetime is a `z.codec(DateTime, z.date())`, so a naive
+  // `schema.min()` fails (the codec has no `.min`); instead the bound is piped onto the codec's decoded
+  // `Date` output (`codec -> z.date().min(d)`), validating decode + encode while the column stays
+  // `datetime`. A `number` forwards to the inner schema (string length / number value / array length).
+  min(value: number | Date, params?: unknown): SField<S, Flags> {
+    return value instanceof Date
+      ? this.dateBound("min", value, params)
+      : this.chain("min", value, params);
+  }
+  max(value: number | Date, params?: unknown): SField<S, Flags> {
+    return value instanceof Date
+      ? this.dateBound("max", value, params)
+      : this.chain("max", value, params);
+  }
+  private dateBound(
+    op: "min" | "max",
+    value: Date,
+    params?: unknown,
+  ): SField<S, Flags> {
+    const bound = z.date()[op](value, params as never);
+    return this.rebuild(
+      this.schema.pipe(bound as never) as unknown as S,
+      this.native,
+    );
+  }
+  length(value: number, params?: unknown): SField<S, Flags> {
+    return this.chain("length", value, params);
+  }
+  // string patterns / transforms
+  regex(re: RegExp, params?: unknown): SField<S, Flags> {
+    return this.chain("regex", re, params);
+  }
+  startsWith(value: string, params?: unknown): SField<S, Flags> {
+    return this.chain("startsWith", value, params);
+  }
+  endsWith(value: string, params?: unknown): SField<S, Flags> {
+    return this.chain("endsWith", value, params);
+  }
+  includes(value: string, params?: unknown): SField<S, Flags> {
+    return this.chain("includes", value, params);
+  }
+  nonempty(params?: unknown): SField<S, Flags> {
+    return this.chain("nonempty", params);
+  }
+  trim(): SField<S, Flags> {
+    return this.chain("trim");
+  }
+  toLowerCase(): SField<S, Flags> {
+    return this.chain("toLowerCase");
+  }
+  toUpperCase(): SField<S, Flags> {
+    return this.chain("toUpperCase");
+  }
+  lowercase(params?: unknown): SField<S, Flags> {
+    return this.chain("lowercase", params);
+  }
+  uppercase(params?: unknown): SField<S, Flags> {
+    return this.chain("uppercase", params);
+  }
+  normalize(form?: unknown): SField<S, Flags> {
+    return this.chain("normalize", form);
+  }
+  // number bounds + checks (app-side; use $gt/$gte/$lt/$lte for the DB ASSERT)
+  gt(value: number, params?: unknown): SField<S, Flags> {
+    return this.chain("gt", value, params);
+  }
+  gte(value: number, params?: unknown): SField<S, Flags> {
+    return this.chain("gte", value, params);
+  }
+  lt(value: number, params?: unknown): SField<S, Flags> {
+    return this.chain("lt", value, params);
+  }
+  lte(value: number, params?: unknown): SField<S, Flags> {
+    return this.chain("lte", value, params);
+  }
+  positive(params?: unknown): SField<S, Flags> {
+    return this.chain("positive", params);
+  }
+  negative(params?: unknown): SField<S, Flags> {
+    return this.chain("negative", params);
+  }
+  nonnegative(params?: unknown): SField<S, Flags> {
+    return this.chain("nonnegative", params);
+  }
+  nonpositive(params?: unknown): SField<S, Flags> {
+    return this.chain("nonpositive", params);
+  }
+  multipleOf(value: number, params?: unknown): SField<S, Flags> {
+    return this.chain("multipleOf", value, params);
+  }
+  // string FORMAT chain methods — `s.string().email()` is a Zod drop-in (validates app-side; the
+  // column type is unchanged). The prefer-native equivalents are the `s.email()` etc. FACTORIES, which
+  // additionally push a TYPE-level DB ASSERT (per-driver type capability, separate from these methods).
+  email(params?: unknown): SField<S, Flags> {
+    return this.chain("email", params);
+  }
+  url(params?: unknown): SField<S, Flags> {
+    return this.chain("url", params);
+  }
+  emoji(params?: unknown): SField<S, Flags> {
+    return this.chain("emoji", params);
+  }
+  uuid(params?: unknown): SField<S, Flags> {
+    return this.chain("uuid", params);
+  }
+  guid(params?: unknown): SField<S, Flags> {
+    return this.chain("guid", params);
+  }
+  nanoid(params?: unknown): SField<S, Flags> {
+    return this.chain("nanoid", params);
+  }
+  cuid(params?: unknown): SField<S, Flags> {
+    return this.chain("cuid", params);
+  }
+  cuid2(params?: unknown): SField<S, Flags> {
+    return this.chain("cuid2", params);
+  }
+  ulid(params?: unknown): SField<S, Flags> {
+    return this.chain("ulid", params);
+  }
+  xid(params?: unknown): SField<S, Flags> {
+    return this.chain("xid", params);
+  }
+  ksuid(params?: unknown): SField<S, Flags> {
+    return this.chain("ksuid", params);
+  }
+  jwt(params?: unknown): SField<S, Flags> {
+    return this.chain("jwt", params);
+  }
+
   /** The underlying Zod schema's `def.type` ("string" / "number" / …). */
   private get schemaType(): string {
     return (this.schema._zod.def as { type: string }).type;
@@ -861,15 +1068,17 @@ export class SField<
     });
   }
   /** Index this field with a uniqueness constraint (`… UNIQUE`). `name` overrides the derived name.
-   *  Chaining `.$fulltext()`/`.$hnsw()`/`.$diskann()` after this emits TWO indexes on the same field
-   *  (a UNIQUE index and a FULLTEXT/vector index) with auto-derived names. */
+   * Chaining `.$fulltext()`/`.$hnsw()`/`.$diskann()` after this emits TWO indexes on the same
+   *  field (UNIQUE + spec), each independently nameable — `name` here names the UNIQUE index. */
   $unique(name?: string): SField<S, Flags> {
     return new SField(this.schema, {
       ...this.surreal,
       index: {
         ...this.surreal.index,
         unique: true,
-        ...(name !== undefined ? { name } : {}),
+        // The name lands on the UNIQUE index specifically, so it survives when a spec index
+        // (.$fulltext()/.$hnsw()/.$diskann()) is also chained on the same field.
+        ...(name !== undefined ? { uniqueName: name } : {}),
       },
     });
   }
@@ -881,7 +1090,7 @@ export class SField<
    * `bm25: [k1, b]` tunes the (always-on) scoring; `highlights` enables `search::highlight`.
    * The DEFAULT analyzer/bm25 are omitted from emitted DDL (SurrealDB always applies them) — see
    * {@link FulltextOptions}. Chaining `.$unique()` emits TWO indexes (FULLTEXT + UNIQUE) on the same
-   * field with auto-derived names.
+   * field, each independently nameable (this `name` names the FULLTEXT/vector index).
    */
   $fulltext(analyzer?: string | AnalyzerDef): SField<S, Flags>;
   $fulltext(opts: FulltextFieldOptions): SField<S, Flags>;
@@ -910,7 +1119,8 @@ export class SField<
     return this.withIndexSpec(buildIndexSpec({ diskann: opts }), opts.name);
   }
   /** Set a FULLTEXT/HNSW/DISKANN index `spec` (+ optional custom `name`) on this field. When `.$unique()`
-   *  is also set, the DDL layer emits TWO indexes (UNIQUE + spec) with auto-derived names. */
+   *  is also set, the DDL layer emits TWO indexes (UNIQUE + spec) — this `name` names the spec index,
+   *  `.$unique(name)` names the UNIQUE one. */
   private withIndexSpec(
     spec: string | undefined,
     name?: string,
@@ -1021,6 +1231,20 @@ function uuidCodec() {
     encode: (s) => new Uuid(s),
   });
   surrealTypeRegistry.set(codec, "uuid");
+  return codec;
+}
+
+/** Surreal `int` (i64) <-> JS `bigint`. The SurrealDB SDK returns an `int` as a JS `number` when it fits
+ *  a safe integer and as a `bigint` when larger, so a `bigint`-app field must accept BOTH on decode and
+ *  normalize to `bigint` — else a normal-sized value (e.g. `42`) fails to decode. Wire is `int | bigint`
+ *  so a non-integer is rejected before `BigInt()` (which throws on floats). DDL stays `int`. */
+function bigintCodec(inner: z.ZodType<bigint, bigint>) {
+  const codec = z.codec(z.union([z.int(), z.bigint()]), inner, {
+    decode: (v: number | bigint): bigint =>
+      typeof v === "bigint" ? v : BigInt(v),
+    encode: (v: bigint) => v,
+  });
+  surrealTypeRegistry.set(codec, "int");
   return codec;
 }
 
@@ -1159,6 +1383,169 @@ type ZodsOf<T extends readonly (AnyField | z.ZodType)[]> = {
   -readonly [K in keyof T]: SchemaOf<T[K]>;
 };
 
+/** Lift a `Shape` to its `{ zshape, fields }` — raw Zod values get a bare `SField`. Shared by
+ *  `s.object` and {@link SObjectField}'s composition methods so both register the same per-field map. */
+function liftShape(shape: Shape): {
+  zshape: Record<string, z.ZodType>;
+  fields: Record<string, AnyField>;
+} {
+  const zshape: Record<string, z.ZodType> = {};
+  const fields: Record<string, AnyField> = {};
+  for (const [k, v] of Object.entries(shape)) {
+    const f = v instanceof SField ? v : new SField(v);
+    fields[k] = f;
+    zshape[k] = f.schema;
+  }
+  return { zshape, fields };
+}
+
+/**
+ * The composable object field returned by {@link s.object}. Mirrors Zod's `ZodObject` (and
+ * `@schemic/postgres`'s `PgObjectField`): the composition methods (`.extend`/`.pick`/`.omit`/…) live on
+ * THIS subclass, not the base `SField`, so the base + `AnyField` stay free of the generic-return methods
+ * that would break structural assignability (see the SFieldBase-unification catch-22). Each method
+ * forwards to the inner `z.object`, re-registers the `objectFieldsRegistry` entry (so nested DDL keeps
+ * each field's `$default`/`$assert`/… clauses), and re-wraps as an `SObjectField` so the chain stays
+ * composable + precisely typed.
+ */
+export class SObjectField<
+  S extends Shape = Shape,
+  Flags extends string = never,
+> extends SField<SZObject<S>, Flags> {
+  // Object-producing ops (incl. the inherited .loose()/.strict()/.flexible()) stay an SObjectField;
+  // anything else (.optional()/.array()/…) degrades to a base SField, matching the wrapper's type.
+  protected rebuild<S2 extends z.ZodType, F2 extends string>(
+    schema: S2,
+    native: SurrealMeta,
+  ): SField<S2, F2> {
+    if (schema instanceof z.ZodObject) {
+      const fields = objectFieldsRegistry.get(this.schema);
+      if (fields) objectFieldsRegistry.set(schema, fields);
+      return new SObjectField(
+        schema as unknown as SZObject<Shape>,
+        native,
+      ) as unknown as SField<S2, F2>;
+    }
+    return new SField<S2, F2>(schema, native);
+  }
+
+  /** This object's registered per-field SField wrappers (the source of nested-DDL clauses). */
+  private get fields(): Record<string, AnyField> {
+    return objectFieldsRegistry.get(this.schema) ?? {};
+  }
+
+  /** Re-register `fields` for `schema` and wrap it as a new `SObjectField`. */
+  private wrap<S2 extends Shape>(
+    schema: z.ZodObject<z.ZodRawShape>,
+    fields: Record<string, AnyField>,
+  ): SObjectField<S2, Flags> {
+    objectFieldsRegistry.set(schema, fields);
+    return new SObjectField<S2, Flags>(
+      schema as unknown as SZObject<S2>,
+      this.native,
+    );
+  }
+
+  /** Add/override fields. Accepts fields OR raw Zod, exactly like `s.object`. */
+  extend<T extends Shape>(shape: T): SObjectField<Omit<S, keyof T> & T, Flags> {
+    const { zshape, fields } = liftShape(shape);
+    return this.wrap(this.schema.extend(zshape), { ...this.fields, ...fields });
+  }
+
+  /** Merge another object field's shape in (its fields win on conflict). */
+  merge<T extends Shape>(
+    other: SObjectField<T>,
+  ): SObjectField<Omit<S, keyof T> & T, Flags> {
+    return this.wrap(this.schema.extend(other.schema.shape), {
+      ...this.fields,
+      ...other.fields,
+    });
+  }
+
+  /** Keep only the masked keys. */
+  pick<M extends { readonly [K in keyof S]?: true }>(
+    mask: M,
+  ): SObjectField<Pick<S, keyof M & keyof S>, Flags> {
+    const keep = new Set(Object.keys(mask));
+    const fields = Object.fromEntries(
+      Object.entries(this.fields).filter(([k]) => keep.has(k)),
+    );
+    return this.wrap(this.schema.pick(mask as never), fields);
+  }
+
+  /** Drop the masked keys. */
+  omit<M extends { readonly [K in keyof S]?: true }>(
+    mask: M,
+  ): SObjectField<Omit<S, keyof M>, Flags> {
+    const drop = new Set(Object.keys(mask));
+    const fields = Object.fromEntries(
+      Object.entries(this.fields).filter(([k]) => !drop.has(k)),
+    );
+    return this.wrap(this.schema.omit(mask as never), fields);
+  }
+
+  /** Make all fields optional. */
+  partial(): SObjectField<PartialShape<S>, Flags> {
+    return this.wrap(this.schema.partial(), this.fields);
+  }
+
+  /** Make all fields required. */
+  required(): SObjectField<RequiredShape<S>, Flags> {
+    return this.wrap(this.schema.required(), this.fields);
+  }
+
+  /** Type unknown keys with a schema (field OR raw Zod) — an `unknown` catchall emits `FLEXIBLE`. */
+  catchall<C extends AnyField | z.ZodType>(schema: C): SObjectField<S, Flags> {
+    return this.wrap(this.schema.catchall(toZod(schema)), this.fields);
+  }
+
+  /** Allow arbitrary extra keys (`FLEXIBLE`) — alias for the inherited {@link SField.flexible}. */
+  passthrough(): this {
+    return (this as SObjectField<S, Flags>).flexible() as this;
+  }
+
+  /** A `ZodEnum` of this object's keys (degrades to a base `SField`, mirroring Zod's `.keyof()`). */
+  keyof(): SField<ReturnType<z.ZodObject<ZShape<S>>["keyof"]>> {
+    return new SField(this.schema.keyof());
+  }
+
+  /** The object's Zod field shape (mirrors Zod's `.shape`). */
+  get shape(): ZShape<S> {
+    return this.schema.shape as ZShape<S>;
+  }
+}
+
+/**
+ * The enum field returned by {@link s.enum}. Adds Zod's `.exclude`/`.extract` to derive a narrower enum
+ * (the App type narrows; the column stays `string`). Methods live on this subclass (mirrors
+ * {@link SObjectField}), so the base `SField` + `AnyField` are untouched.
+ */
+export class SEnumField<
+  T extends Record<string, string> = Record<string, string>,
+  Flags extends string = never,
+> extends SField<z.ZodEnum<T>, Flags> {
+  /** Derive an enum without the given members. */
+  exclude<const U extends readonly (keyof T)[]>(
+    values: U,
+    params?: unknown,
+  ): SEnumField<Omit<T, U[number]>, Flags> {
+    return new SEnumField(
+      this.schema.exclude(values, params as never) as never,
+      this.native,
+    );
+  }
+  /** Derive an enum keeping only the given members. */
+  extract<const U extends readonly (keyof T)[]>(
+    values: U,
+    params?: unknown,
+  ): SEnumField<Pick<T, U[number]>, Flags> {
+    return new SEnumField(
+      this.schema.extract(values, params as never) as never,
+      this.native,
+    );
+  }
+}
+
 /** Field constructors — the authoring surface. */
 export const s = {
   string: () => new SField(z.string()),
@@ -1204,6 +1591,32 @@ export const s = {
     formatField(z.jwt(params), "jwt"),
   emoji: (params?: Parameters<typeof z.emoji>[0]) =>
     formatField(z.emoji(params), "emoji"),
+  /** A v7 UUID string (app-side format; no `string::is_*` validator for v7, so assert-free). */
+  uuidv7: (params?: Parameters<typeof z.uuidv7>[0]) =>
+    formatField(z.uuidv7(params), "uuidv7"),
+  /** An `http`/`https` URL string (stricter than {@link s.url}; app-side, assert-free). */
+  httpUrl: (params?: Parameters<typeof z.httpUrl>[0]) =>
+    formatField(z.httpUrl(params), "httpUrl"),
+  /** A v4 UUID string (app-side; assert-free). */
+  uuidv4: (params?: Parameters<typeof z.uuidv4>[0]) =>
+    formatField(z.uuidv4(params), "uuidv4"),
+  /** A v6 UUID string (app-side; assert-free). */
+  uuidv6: (params?: Parameters<typeof z.uuidv6>[0]) =>
+    formatField(z.uuidv6(params), "uuidv6"),
+  /** A hostname string (app-side; assert-free). */
+  hostname: (params?: Parameters<typeof z.hostname>[0]) =>
+    formatField(z.hostname(params), "hostname"),
+  /** A hex string (app-side; assert-free). */
+  hex: (params?: Parameters<typeof z.hex>[0]) =>
+    formatField(z.hex(params), "hex"),
+  /** A MAC-address string (app-side; assert-free). */
+  mac: (params?: Parameters<typeof z.mac>[0]) =>
+    formatField(z.mac(params), "mac"),
+  /** A hash string for the given algorithm, e.g. `s.hash("sha256")` (app-side; assert-free). */
+  hash: (
+    alg: Parameters<typeof z.hash>[0],
+    params?: Parameters<typeof z.hash>[1],
+  ) => formatField(z.hash(alg, params), "hash"),
 
   // String fields validated by SurrealDB's `string::is_*` (no Zod format — plain string
   // app-side, the baked ASSERT enforces the format in the DB).
@@ -1227,13 +1640,37 @@ export const s = {
   uint32: (params?: Parameters<typeof z.uint32>[0]) =>
     new SField(z.uint32(params)),
   bigint: (params?: Parameters<typeof z.bigint>[0]) =>
-    new SField(z.bigint(params)),
+    new SField(bigintCodec(z.bigint(params))),
+  /** A 32-bit float (app-side range-checked) — DDL `float`. */
+  float32: (params?: Parameters<typeof z.float32>[0]) =>
+    new SField(z.float32(params)),
+  /** A 64-bit float — DDL `float` (synonym of {@link s.float}). */
+  float64: (params?: Parameters<typeof z.float64>[0]) =>
+    new SField(z.float64(params)),
+  /** A 64-bit signed integer (app `bigint`) — DDL `int`. */
+  int64: (params?: Parameters<typeof z.int64>[0]) =>
+    new SField(bigintCodec(z.int64(params))),
+  /** A 64-bit unsigned integer (app `bigint`, non-negative) — DDL `int`. */
+  uint64: (params?: Parameters<typeof z.uint64>[0]) =>
+    new SField(bigintCodec(z.uint64(params))),
 
   datetime: () => new SField(datetimeCodec()),
   /** Alias of `datetime` (Surreal stores a `datetime`; there is no plain date). */
   date: () => new SField(datetimeCodec()),
   /** Surreal `duration` (a `Duration` instance). */
   duration: () => new SField(native(z.instanceof(Duration), "duration")),
+  /** ISO-8601 STRING formats (Zod `z.iso.*`) — app-side validated, stored as `string`. Distinct from
+   *  the native `s.datetime`/`s.duration` codecs, which use SurrealDB's `datetime`/`duration` types. */
+  iso: {
+    date: (params?: Parameters<typeof z.iso.date>[0]) =>
+      formatField(z.iso.date(params), "isoDate"),
+    time: (params?: Parameters<typeof z.iso.time>[0]) =>
+      formatField(z.iso.time(params), "isoTime"),
+    datetime: (params?: Parameters<typeof z.iso.datetime>[0]) =>
+      formatField(z.iso.datetime(params), "isoDatetime"),
+    duration: (params?: Parameters<typeof z.iso.duration>[0]) =>
+      formatField(z.iso.duration(params), "isoDuration"),
+  },
   /** Surreal `decimal` (a `Decimal` instance — arbitrary precision). */
   decimal: () => new SField(native(z.instanceof(Decimal), "decimal")),
   /** Surreal `bytes` (a `Uint8Array`). */
@@ -1270,18 +1707,37 @@ export const s = {
    * `$`-method and Zod wrapper (`.optional()`/`.array()`/`.$default()`), which all reuse
    * `this.schema`.
    */
-  object: <S extends Shape>(shape: S): SField<SZObject<S>> => {
-    const fields: Record<string, AnyField> = {};
-    const zshape: Record<string, z.ZodType> = {};
-    for (const [k, v] of Object.entries(shape)) {
-      const f = v instanceof SField ? v : new SField(v);
-      fields[k] = f;
-      zshape[k] = f.schema;
-    }
+  object: <S extends Shape>(shape: S): SObjectField<S> => {
+    const { zshape, fields } = liftShape(shape);
     const schema = z.object(zshape) as SZObject<S>;
     objectFieldsRegistry.set(schema, fields);
-    return new SField(schema);
+    return new SObjectField<S>(schema);
   },
+  /** Like {@link s.object} but rejects unknown keys (the default already; Zod-parity factory). */
+  strictObject: <S extends Shape>(shape: S): SObjectField<S> => {
+    const { zshape, fields } = liftShape(shape);
+    const schema = z.object(zshape) as SZObject<S>;
+    objectFieldsRegistry.set(schema, fields);
+    return new SObjectField<S>(schema).strict();
+  },
+  /** Like {@link s.object} but allows arbitrary extra keys — emits `FLEXIBLE` (Zod-parity factory). */
+  looseObject: <S extends Shape>(shape: S): SObjectField<S> => {
+    const { zshape, fields } = liftShape(shape);
+    const schema = z.object(zshape) as SZObject<S>;
+    objectFieldsRegistry.set(schema, fields);
+    return new SObjectField<S>(schema).loose();
+  },
+  /** Any JSON value (recursive: string/number/bool/null/array/object) — the DDL is the JSON union. */
+  json: () => new SField(z.json()),
+  /** A CODEC: app-side `boolean`, wire/DB `string` (Zod `z.stringbool`). DDL is `string` (the DB form). */
+  stringbool: (params?: Parameters<typeof z.stringbool>[0]) =>
+    new SField(z.stringbool(params)),
+  /** The Zod-native general codec: app = `app` output, wire/DB = `wire` input; DDL from the WIRE schema. */
+  codec: <A extends z.ZodType, B extends z.ZodType>(
+    wire: A,
+    app: B,
+    params: Parameters<typeof z.codec<A, B>>[2],
+  ) => new SField(z.codec(wire, app, params)),
   /** An array of `element`. `opts.max` -> sized `array<T, N>` (N is the MAX length). */
   array: <F extends AnyField | z.ZodType>(
     element: F,
@@ -1299,7 +1755,7 @@ export const s = {
     new SField(z.literal(value)),
   /** A string enum. */
   enum: <const T extends readonly [string, ...string[]]>(values: T) =>
-    new SField(z.enum(values)),
+    new SEnumField(z.enum(values)),
   /** A union of fields/schemas. */
   union: <
     const T extends readonly [
@@ -1310,6 +1766,16 @@ export const s = {
     options: T,
   ): SField<z.ZodUnion<ZodsOf<T>>> =>
     new SField(z.union(options.map(toZod) as ZodsOf<T>)),
+  /** An EXCLUSIVE union (Zod `z.xor`) — exactly one option may match. DDL is the union of the options
+   *  (SurrealDB can't express "exactly one" in DDL; the exclusivity is enforced app-side). */
+  xor: <
+    const T extends readonly [
+      AnyField | z.ZodType,
+      ...(AnyField | z.ZodType)[],
+    ],
+  >(
+    options: T,
+  ) => new SField(z.xor(options.map(toZod) as ZodsOf<T>)),
   /** A fixed-length tuple of fields/schemas. */
   tuple: <
     const T extends readonly [
@@ -1333,6 +1799,19 @@ export const s = {
     value: V,
   ): SField<z.ZodMap<SchemaOf<K>, SchemaOf<V>>> =>
     new SField(z.map(toZod(key) as SchemaOf<K>, toZod(value) as SchemaOf<V>)),
+  /** A partial open-keyed record (all values optional; Zod `z.partialRecord`) -> SurrealQL `object`. */
+  partialRecord: <
+    K extends z.core.$ZodRecordKey,
+    V extends AnyField | z.ZodType,
+  >(
+    key: K,
+    value: V,
+  ) => new SField(z.partialRecord(key, toZod(value) as SchemaOf<V>)),
+  /** A loose open-keyed record (extra keys allowed; Zod `z.looseRecord`) -> SurrealQL `object`. */
+  looseRecord: <K extends z.core.$ZodRecordKey, V extends AnyField | z.ZodType>(
+    key: K,
+    value: V,
+  ) => new SField(z.looseRecord(key, toZod(value) as SchemaOf<V>)),
   /** A `Set<element>` -> SurrealQL `set<element>`. `opts.max` -> sized `set<T, N>` (MAX). */
   set: <V extends AnyField | z.ZodType>(
     element: V,
@@ -1359,6 +1838,23 @@ export const s = {
     getter: () => V,
   ): SField<z.ZodLazy<SchemaOf<V>>> =>
     new SField(z.lazy(() => toZod(getter()) as SchemaOf<V>)),
+
+  /** A custom string format (Zod `z.stringFormat`) — app-side validated, DDL `string`. */
+  stringFormat: (...args: Parameters<typeof z.stringFormat>) =>
+    new SField(z.stringFormat(...args)),
+  /** A template-literal string (Zod `z.templateLiteral`) — app-side validated, DDL `string`. */
+  templateLiteral: (...args: Parameters<typeof z.templateLiteral>) =>
+    new SField(z.templateLiteral(...args)),
+  /** An enum of an object's keys (Zod `z.keyof`) — accepts an `s.object()` field or a raw `z.object`. */
+  keyof: (obj: SObjectField | z.ZodObject) =>
+    new SField(
+      z.keyof(obj instanceof SField ? (obj.schema as z.ZodObject) : obj),
+    ),
+  /** Preprocess the input before validation (Zod `z.preprocess`) — app-side only, no DDL constraint. */
+  preprocess: <V extends AnyField | z.ZodType>(
+    fn: (arg: unknown) => unknown,
+    schema: V,
+  ) => new SField(z.preprocess(fn, toZod(schema) as SchemaOf<V>)),
 
   /** A native TS enum — string or numeric (numeric reverse-mappings are filtered out). */
   nativeEnum: <const T extends Record<string, string | number>>(entries: T) =>
@@ -2864,7 +3360,7 @@ export function defineFunction<A extends Shape = Record<string, never>>(
 /** The access type + its type-specific config. `RECORD` (default) / `JWT` / `BEARER`. */
 export type AccessKind =
   | { type: "record" }
-  | { type: "jwt"; alg?: string; key?: string; url?: string }
+  | { type: "jwt"; alg?: string; key?: string | SecretRef; url?: string }
   | { type: "bearer"; subject: "record" | "user" };
 
 /** Token/session/grant lifetimes, e.g. `{ token: "1h", session: "12h", grant: "30d" }`. */
@@ -2913,7 +3409,7 @@ export class AccessDef {
     return this.withConfig({ kind: { type: "record" } });
   }
   /** `TYPE JWT` — validate tokens from an external issuer: `{ alg, key }` (symmetric/PEM) or `{ url }` (JWKS). */
-  jwt(opts: { alg?: string; key?: string; url?: string }): AccessDef {
+  jwt(opts: { alg?: string; key?: string | SecretRef; url?: string }): AccessDef {
     return this.withConfig({ kind: { type: "jwt", ...opts } });
   }
   /** `TYPE BEARER FOR USER|RECORD` — bearer-token / API-key grants. */

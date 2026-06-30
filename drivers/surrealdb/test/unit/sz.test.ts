@@ -22,7 +22,10 @@ describe("primitive builders map to the right Zod def", () => {
     expect(defType(s.null())).toBe("null");
     expect(defType(s.any())).toBe("any");
     expect(defType(s.unknown())).toBe("unknown");
-    expect(defType(s.bigint())).toBe("bigint");
+    // `s.bigint()` is a codec (the SDK returns an `int` as a JS number when safe-sized, bigint when
+    // larger; the codec normalizes both to a bigint app value). DDL stays `int`.
+    expect(defType(s.bigint())).toBe("pipe");
+    expect(s.bigint().safeDecode(7).data).toBe(7n);
   });
 
   test("number formats", () => {

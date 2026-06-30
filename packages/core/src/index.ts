@@ -92,14 +92,19 @@ export {
   type Authored,
   type AuthoredDef,
   type CallableFunctions,
+  type CommandArgs,
+  type CommandContext,
+  type CommandIo,
   type ConnectionOverrides,
   type Driver,
+  type DriverCommand,
   driverNames,
   type EmitOptions,
   getDriver,
   type MigrationDirection,
   type MigrationRecord,
   type MigrationStore,
+  type ParsedCommandArgs,
   registerDriver,
   type ShadowCapability,
   type Statement,
@@ -146,3 +151,12 @@ export {
 } from "./kind";
 // --- seed context (the `(db, ctx)` helper passed to each seed) ---------------------------------
 export type { SeedContext } from "./seed";
+// --- secret refs (apply-time-resolved placeholders for secret-bearing DDL; drivers re-export) ----
+export {
+  env,
+  envSecretProvider,
+  isSecretRef,
+  type SecretProvider,
+  type SecretRef,
+  secret,
+} from "./secrets";

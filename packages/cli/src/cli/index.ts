@@ -49,6 +49,7 @@ import { Command, Help, Option } from "commander";
 // The CLI's own version — sourced from package.json (inlined at build) so it never drifts from the
 // published package version the way a hardcoded string does.
 import { version as CLI_VERSION } from "../../package.json";
+import { registerDriverCommands } from "./driver-commands";
 import { init } from "./init";
 import {
   baseline,
@@ -1338,8 +1339,15 @@ kindFlags(
   },
 );
 
-if (process.argv.length <= 2) {
-  program.outputHelp();
-  process.exit(0);
+// Driver-contributed commands (`sc <kind> <verb>`) are discovered from the project's driver, so they
+// register asynchronously. This MUST run before help output too — so bare `sc` / `sc --help` list the
+// driver's commands, not just `sc <kind> --help`. A registration failure never blocks built-ins.
+async function bootstrap(): Promise<void> {
+  await registerDriverCommands(program).catch(() => {});
+  if (process.argv.length <= 2) {
+    program.outputHelp();
+    process.exit(0);
+  }
+  await program.parseAsync();
 }
-program.parse();
+bootstrap();
