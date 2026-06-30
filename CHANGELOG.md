@@ -45,6 +45,11 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
   `connect` is now async. `file:<dir>` (persistent) and `""`/omitted (in-memory) are unchanged;
   hosted `postgres://` is reserved for a future node-postgres client.
 
+### Fixed
+- **cli:** bare `schemic` / `sc` (no args) now lists the active driver's contributed commands
+  (`sc <kind> <verb>`) in its help, like `sc --help` already did. The no-arg help printed before driver
+  commands had registered; registration now runs first.
+
 ## [0.1.0-alpha.22] - 2026-06-26
 
 ### Added

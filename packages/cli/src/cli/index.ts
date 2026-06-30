@@ -1339,17 +1339,15 @@ kindFlags(
   },
 );
 
-if (process.argv.length <= 2) {
-  program.outputHelp();
-  process.exit(0);
-}
-
 // Driver-contributed commands (`sc <kind> <verb>`) are discovered from the project's driver, so they
-// register asynchronously before parse. `parseAsync` awaits their async actions.
-registerDriverCommands(program)
-  .catch(() => {
-    // A driver-command registration failure must never block the built-in commands.
-  })
-  .finally(() => {
-    program.parseAsync();
-  });
+// register asynchronously. This MUST run before help output too — so bare `sc` / `sc --help` list the
+// driver's commands, not just `sc <kind> --help`. A registration failure never blocks built-ins.
+async function bootstrap(): Promise<void> {
+  await registerDriverCommands(program).catch(() => {});
+  if (process.argv.length <= 2) {
+    program.outputHelp();
+    process.exit(0);
+  }
+  await program.parseAsync();
+}
+bootstrap();
