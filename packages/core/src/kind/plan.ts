@@ -120,10 +120,18 @@ export interface KindSnapshot {
   kinds: Record<string, PortableObject[]>;
 }
 
-/** Group a flat portable schema into a snapshot (by kind). */
-export function snapshotKinds(schema: PortableObject[]): KindSnapshot {
+/**
+ * Group a flat portable schema into a snapshot (by kind). Pass `registry` to DROP kinds marked
+ * {@link KindEngine.excludeFromMigrations} (e.g. SurrealDB `access`) so unmanaged, secret-bearing
+ * objects never enter a snapshot / migration. Omit it to snapshot every object unchanged.
+ */
+export function snapshotKinds(
+  schema: PortableObject[],
+  registry?: KindRegistry,
+): KindSnapshot {
   const kinds: Record<string, PortableObject[]> = {};
   for (const o of schema) {
+    if (registry?.isExcludedFromMigrations(o.kind)) continue;
     const bucket = kinds[o.kind] ?? [];
     bucket.push(o);
     kinds[o.kind] = bucket;
@@ -190,6 +198,9 @@ function orderedChanges(
     const n = nextByKey.get(k);
     const portable = n ?? p;
     if (!portable) continue;
+    // Migration-unmanaged kinds (e.g. access) never diff — they're reconciled out-of-band by driver
+    // commands, so they must not appear in gen/migrate/diff-live output. Central choke point.
+    if (registry.isExcludedFromMigrations(portable.kind)) continue;
     const engine = registry.engine(portable.kind);
     if (!engine) continue;
     const node = orderNodeOf(engine, portable);
@@ -365,7 +376,11 @@ export function emitKinds(
   registry: KindRegistry,
   schema: PortableObject[],
 ): string[] {
-  return orderedSchema(registry, schema).flatMap(({ engine, portable }) =>
+  // Skip migration-unmanaged kinds (e.g. access) — they're applied out-of-band by driver commands.
+  const managed = schema.filter(
+    (o) => !registry.isExcludedFromMigrations(o.kind),
+  );
+  return orderedSchema(registry, managed).flatMap(({ engine, portable }) =>
     engine.emit(portable),
   );
 }
@@ -384,6 +399,9 @@ export async function introspectKinds(
   const out: PortableObject[] = [];
   for (const [, engine] of registry.entries()) {
     if (!engine.introspect) continue;
+    // Skip migration-unmanaged kinds (e.g. access) so the live side never phantom-diffs against a
+    // schema that (by design) excludes them — they're reconciled out-of-band by driver commands.
+    if (engine.excludeFromMigrations) continue;
     out.push(...(await engine.introspect(conn)));
   }
   return out;
