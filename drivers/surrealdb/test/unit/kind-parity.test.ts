@@ -1,6 +1,7 @@
 // Kind-registry parity (docs/kind-registry-contract.md §3): the generic kind-registry path must reproduce
 // the driver's INTERNAL clause-level engine (`diffSnapshots` over `buildSnapshot`) for the
-// `table`/`index`/`event`/`function`/`access` kinds. We assert the STRONGEST statement — that
+// `table`/`index`/`event`/`function` kinds (access is UNMANAGED — excludeFromMigrations — and asserted
+// separately to emit nothing). We assert the STRONGEST statement — that
 // `planKinds(registry, lowerAll(prev), lowerAll(next)).{up,down}` equals the `diffSnapshots` up/down —
 // across add/change/remove of every kind, so the kind engines stay byte-exact with the engine they
 // delegate to (and the test self-maintains: no hand-written DDL). At the Option-A flip the registry IS
@@ -333,20 +334,28 @@ describe("function kind parity (opaque)", () => {
   });
 });
 
-describe("access kind parity (opaque)", () => {
-  const acct = () => defineAccess("acct").onDatabase().record().signin(surql`SELECT 1`);
+describe("access is EXCLUDED from the migration pipeline (managed out-of-band via sc access …)", () => {
+  // Access carries secrets + SurrealDB redacts keys on read, so it can't round-trip a committed
+  // migration; the access KindEngine sets excludeFromMigrations, so the registry (the production diff
+  // path) emits nothing for it — add/change/remove all produce empty up/down. (`sc access push/diff`
+  // manage it against the live DB instead.)
+  const acct = () =>
+    defineAccess("acct").onDatabase().record().signin(surql`SELECT 1`);
 
-  test("add an access", () => {
-    parity([], [], [], [acct()]);
+  test("adding an access produces no migration statements", () => {
+    expect(registry([], [], [], [acct()])).toEqual({ up: [], down: [] });
   });
 
-  test("change an access (DEFINE ACCESS OVERWRITE)", () => {
-    const changed = defineAccess("acct").onDatabase().record().signin(surql`SELECT 2`);
-    parity([], [], [acct()], [changed]);
+  test("changing an access produces no migration statements", () => {
+    const changed = defineAccess("acct")
+      .onDatabase()
+      .record()
+      .signin(surql`SELECT 2`);
+    expect(registry([], [], [acct()], [changed])).toEqual({ up: [], down: [] });
   });
 
-  test("remove an access", () => {
-    parity([], [], [acct()], []);
+  test("removing an access produces no migration statements", () => {
+    expect(registry([], [], [acct()], [])).toEqual({ up: [], down: [] });
   });
 });
 
@@ -382,18 +391,17 @@ describe("fn:: dependency ordering (function emits before its caller)", () => {
     );
   });
 
-  test("before an access whose SIGNIN calls it", () => {
-    const check = defineFunction("fmt", { v: s.string() })
-      .returns(s.string())
-      .body(surql`RETURN $v`);
-    const access = defineAccess("acct").onDatabase()
+  // NB: no "before an access whose SIGNIN calls it" case — access is excluded from the migration
+  // pipeline (excludeFromMigrations), so there's no DEFINE ACCESS in the emit to order against. The
+  // function it calls still emits (it's a normal migration kind); the ordering is just moot for access.
+  test("a function whose only caller is an (excluded) access still emits, alone", () => {
+    const access = defineAccess("acct")
+      .onDatabase()
       .record()
       .signin(surql`SELECT * FROM user WHERE fn::fmt(email)`);
-    const up = emitKinds(surrealKinds, lowerAll([], [check, access]));
+    const up = emitKinds(surrealKinds, lowerAll([], [fmt(), access]));
     expect(fnIdx(up)).toBeGreaterThanOrEqual(0);
-    expect(fnIdx(up)).toBeLessThan(
-      up.findIndex((l) => /^DEFINE ACCESS acct/.test(l)),
-    );
+    expect(up.some((l) => /DEFINE ACCESS/.test(l))).toBe(false);
   });
 });
 
