@@ -11,6 +11,8 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 
 ## [Unreleased]
 
+## [0.1.0-alpha.24] - 2026-07-01
+
 ### Added
 - **core:** `KindEngine.excludeFromMigrations` — a kind can opt OUT of the migration pipeline entirely.
   Objects of an excluded kind are skipped by snapshot, diff, gen, and the introspect-compare, so they
