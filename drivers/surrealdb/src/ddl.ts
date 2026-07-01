@@ -535,15 +535,45 @@ function warnInlineKey(access: string): void {
   );
 }
 
+/** A JWT verify/issue config as stored on either `TYPE JWT` (the `jwt` kind) or RECORD's `WITH JWT`
+ *  (`config.withJwt`) — a flat, read-friendly view over both. */
+type JwtClauseFields = {
+  alg?: string;
+  key?: string | SecretRef;
+  url?: string;
+  issuer?: { key: string | SecretRef };
+};
+
+/** Render a JWT verify/issue clause body — `ALGORITHM <alg> KEY <key> [WITH ISSUER KEY <ik>]` or
+ *  `URL <url>` — shared by `TYPE JWT` and RECORD's `WITH JWT`. Keys go through {@link renderAccessKey}
+ *  (secret → bound `$param`; inline literal → quoted + linted). `alg` defaults to `HS512`. */
+function renderJwtClause(access: string, cfg: JwtClauseFields): string {
+  if (cfg.url) return `URL ${JSON.stringify(cfg.url)}`;
+  let out = `ALGORITHM ${cfg.alg ?? "HS512"} KEY ${renderAccessKey(access, cfg.key)}`;
+  if (cfg.issuer)
+    out += ` WITH ISSUER KEY ${renderAccessKey(access, cfg.issuer.key)}`;
+  return out;
+}
+
 /** The `$param -> SecretRef` write-only bindings an access contributes (value resolved at apply, never
- *  stored). Today the JWT signing key; extends to the Phase-2b issuer/record keys. */
+ *  stored): the JWT verify key + issuer key on `TYPE JWT`, and the same on RECORD's `WITH JWT`. */
 export function accessBindings(
   def: AccessDef,
 ): Record<string, SecretRef> | undefined {
-  const k = def.config.kind;
   const out: Record<string, SecretRef> = {};
-  if (k.type === "jwt" && k.key && isSecretRef(k.key))
-    out[secretParam(k.key)] = k.key;
+  const add = (key: string | SecretRef | undefined): void => {
+    if (key && isSecretRef(key)) out[secretParam(key)] = key;
+  };
+  const k = def.config.kind;
+  if (k.type === "jwt") {
+    add(k.key);
+    add(k.issuer?.key);
+  }
+  const wj = def.config.withJwt as JwtClauseFields | undefined;
+  if (wj) {
+    add(wj.key);
+    add(wj.issuer?.key);
+  }
   return Object.keys(out).length ? out : undefined;
 }
 
@@ -566,20 +596,20 @@ function emitAccess(a: AccessDef, opts?: DefineOptions): string {
   if (k.type === "bearer") {
     typeClause = `TYPE BEARER FOR ${k.subject === "user" ? "USER" : "RECORD"}`;
   } else if (k.type === "jwt") {
-    typeClause = k.url
-      ? `TYPE JWT URL ${JSON.stringify(k.url)}`
-      : `TYPE JWT ALGORITHM ${k.alg ?? "HS512"} KEY ${renderAccessKey(a.name, k.key)}`;
+    typeClause = `TYPE JWT ${renderJwtClause(a.name, k)}`;
   } else {
     typeClause = "TYPE RECORD";
   }
   const parts = [
     `DEFINE ACCESS ${existsPrefix(opts)}${escapeIdent(a.name)} ON ${on} ${typeClause}`,
   ];
-  // SIGNUP/SIGNIN/WITH REFRESH/AUTHENTICATE only apply to RECORD access (grammar order: SIGNUP, SIGNIN,
-  // WITH REFRESH, [auto WITH JWT — redacted, not authored], AUTHENTICATE).
+  // RECORD clauses, in grammar order: SIGNUP, SIGNIN, WITH JWT (custom session-token key; omit for the
+  // auto-generated one), WITH REFRESH — then AUTHENTICATE (a general post-type clause).
   if (k.type === "record") {
     if (a.config.signup) parts.push(`SIGNUP ${braceBody(a.config.signup)}`);
     if (a.config.signin) parts.push(`SIGNIN ${braceBody(a.config.signin)}`);
+    if (a.config.withJwt)
+      parts.push(`WITH JWT ${renderJwtClause(a.name, a.config.withJwt)}`);
     if (a.config.refresh) parts.push("WITH REFRESH");
     if (a.config.authenticate)
       parts.push(`AUTHENTICATE ${braceBody(a.config.authenticate)}`);

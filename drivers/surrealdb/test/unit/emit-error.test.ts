@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { buildSnapshot } from "../../src/cli/surreal-diff";
 import { emitDefStatement, emitTable } from "../../src/driver";
 import { surql } from "../../src/index";
-import { AccessDef, defineAccess, defineTable, s } from "../../src/pure";
+import { defineAccess, defineTable, RecordAccessDef, s } from "../../src/pure";
 
 test("DEFINE ACCESS scope is a type-enforced first step (.onDatabase()/.onNamespace())", () => {
   // The type/clause methods don't exist until a scope is picked — a COMPILE error, which is the whole
@@ -13,6 +13,20 @@ test("DEFINE ACCESS scope is a type-enforced first step (.onDatabase()/.onNamesp
     defineAccess("a").record();
     // @ts-expect-error — `.bearer()` is not on the pre-scope builder either
     defineAccess("a").bearer({ for: "user" });
+    // The TYPE is an exclusive choice — once you pick one, the other switchers are gone:
+    // @ts-expect-error — can't switch JWT → BEARER (types are mutually exclusive)
+    defineAccess("a").onDatabase().jwt({ url: "u" }).bearer({ for: "user" });
+    // RECORD-only clauses don't leak onto other types:
+    // @ts-expect-error — `.signup()` is not on a BEARER access
+    defineAccess("a").onDatabase().bearer({ for: "user" }).signup(surql`X`);
+    // @ts-expect-error — `.withRefresh()` is not on a JWT access
+    defineAccess("a").onDatabase().jwt({ url: "u" }).withRefresh();
+    // RECORD is database-only — `.record()` isn't offered on the namespace stage:
+    // @ts-expect-error — no `.record()` on ON NAMESPACE
+    defineAccess("a").onNamespace().record();
+    // The TYPE is a required, explicit step — no implicit-record shortcut:
+    // @ts-expect-error — must call `.record()` before a RECORD clause
+    defineAccess("a").onDatabase().signup(surql`X`);
   };
   void _typeGate;
   // Scope first, then the type:
@@ -22,11 +36,11 @@ test("DEFINE ACCESS scope is a type-enforced first step (.onDatabase()/.onNamesp
 });
 
 test("emit defensively throws if an access somehow has no scope", () => {
-  // The type-gate makes this unreachable via the public API; a directly-constructed AccessDef with no
-  // scope still throws a clear error rather than emitting invalid DDL.
-  expect(() => emitDefStatement(new AccessDef("a"))).toThrow(
-    /no scope set — call \.onDatabase\(\) or \.onNamespace\(\)/,
-  );
+  // The type-gate makes this unreachable via the public API; a directly-constructed access builder with
+  // no scope still throws a clear error rather than emitting invalid DDL.
+  expect(() =>
+    emitDefStatement(new RecordAccessDef("a", { kind: { type: "record" } })),
+  ).toThrow(/no scope set — call \.onDatabase\(\) or \.onNamespace\(\)/);
 });
 
 test("a non-Surreal field type error names the field + table", () => {

@@ -131,7 +131,9 @@ const Fn = defineFunction("c_greet", { name: s.string() })
   .body(surql`RETURN "Hi " + $name`);
 // RECORD access exercising WITH REFRESH + COMMENT — round-trips churn-free (the auto session-signing
 // JWT key the DB materializes is redacted and dropped from the canonical, so it doesn't phantom-diff).
-const Acc = defineAccess("c_acc").onDatabase()
+const Acc = defineAccess("c_acc")
+  .onDatabase()
+  .record()
   .signup(surql`CREATE user SET email = $email`)
   .signin(surql`SELECT * FROM user WHERE email = $email`)
   .withRefresh()
