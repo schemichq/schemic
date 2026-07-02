@@ -11,7 +11,14 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 
 ## [Unreleased]
 
+## [0.1.0-alpha.24] - 2026-07-01
+
 ### Added
+- **core:** `KindEngine.excludeFromMigrations` — a kind can opt OUT of the migration pipeline entirely.
+  Objects of an excluded kind are skipped by snapshot, diff, gen, and the introspect-compare, so they
+  never enter a migration file nor phantom-diff; the kind is managed out-of-band by the driver's own
+  `sc <kind> …` commands. For secret-bearing kinds whose lifecycle doesn't fit committed migrations
+  (SurrealDB `DEFINE ACCESS`: the DB redacts keys on introspection, and keys rotate independently).
 - **core:** `DriverCommand` contract — drivers can contribute dialect-specific CLI commands invoked as
   `sc <kind> <verb> [args]` (e.g. surreal `access rotate <name>`, postgres `matview refresh <name>`).
   Core owns only the general mechanism: it discovers `driver.commands`, parses argv (variadic positionals

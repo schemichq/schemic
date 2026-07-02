@@ -5,6 +5,6 @@ export default cover(import.meta.url, {
   title: "OVERWRITE — DEFINE ACCESS OVERWRITE …",
   note: 'Emit flag (DefineOptions.exists = "overwrite").',
   ddl: `DEFINE ACCESS OVERWRITE account ON DATABASE TYPE RECORD;`,
-  def: defineAccess("account").onDatabase(),
+  def: defineAccess("account").onDatabase().record(),
   options: { exists: "overwrite" },
 });

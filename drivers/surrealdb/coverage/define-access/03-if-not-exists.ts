@@ -5,6 +5,6 @@ export default cover(import.meta.url, {
   title: "IF NOT EXISTS — DEFINE ACCESS IF NOT EXISTS …",
   note: 'Emit flag (DefineOptions.exists = "ignore").',
   ddl: `DEFINE ACCESS IF NOT EXISTS account ON DATABASE TYPE RECORD;`,
-  def: defineAccess("account").onDatabase(),
+  def: defineAccess("account").onDatabase().record(),
   options: { exists: "ignore" },
 });

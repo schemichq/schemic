@@ -309,8 +309,9 @@ function lowerFunction(fn: FunctionDef): StructFunction {
   return out;
 }
 
-/** Lower a `defineAccess` to a `StructAccess`. Signing keys are NOT carried (SurrealDB redacts them). */
-function lowerAccess(a: AccessDef): StructAccess {
+/** Lower a `defineAccess` to a `StructAccess`. Signing keys are NOT carried (SurrealDB redacts them, so
+ *  they can't round-trip / be diffed). Used by the migration lowering and by `sc access diff`. */
+export function lowerAccess(a: AccessDef): StructAccess {
   const cfg = a.config;
   const k = cfg.kind;
   let kind: StructAccess["kind"];
@@ -328,6 +329,14 @@ function lowerAccess(a: AccessDef): StructAccess {
     kind = { kind: "RECORD" };
     if (cfg.signup) kind.signup = braceBody(cfg.signup);
     if (cfg.signin) kind.signin = braceBody(cfg.signin);
+    // RECORD `WITH JWT` — carry the verify method (url/alg) for diffing; keys stay redacted.
+    if (cfg.withJwt)
+      kind.jwt = {
+        verify:
+          "url" in cfg.withJwt
+            ? { url: cfg.withJwt.url }
+            : { alg: cfg.withJwt.alg ?? "HS512" },
+      };
     if (cfg.refresh) kind.refresh = true;
     if (cfg.authenticate) kind.authenticate = braceBody(cfg.authenticate);
   }

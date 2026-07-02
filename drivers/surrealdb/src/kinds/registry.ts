@@ -120,6 +120,11 @@ const accessEngine: KindEngine<PAccess, PAccess> = {
   overwrite: (_prev, next) => [overwriteStatement(next.stmt.ddl)],
   // Any `fn::` the SIGNUP/SIGNIN/AUTHENTICATE call (db-level, no owner cluster).
   deps: (a) => a.deps,
+  // Access is UNMANAGED by the migration pipeline: it carries secrets, SurrealDB redacts keys on
+  // introspection (so it can't round-trip a committed migration), and keys rotate on their own cadence.
+  // Excluded from snapshot/diff/gen/introspect-compare — never in a migration, never phantom-diffs.
+  // Managed out-of-band via the `sc access push/diff/rotate/check` driver commands instead.
+  excludeFromMigrations: true,
 };
 
 // --- analyzer: db-level OPAQUE kind (a FULLTEXT index depends on it) -----------------------------

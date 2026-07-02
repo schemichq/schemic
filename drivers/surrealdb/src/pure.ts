@@ -1,3 +1,6 @@
+// Type-only (erased at runtime, so the authoring index stays side-effect-free): a `DEFINE ACCESS` key
+// may be an env()/secret() reference instead of an inline literal.
+import type { SecretRef } from "@schemic/core";
 import {
   type Bound,
   BoundExcluded,
@@ -17,9 +20,6 @@ import {
   Uuid,
 } from "surrealdb";
 import { z } from "zod";
-// Type-only (erased at runtime, so the authoring index stays side-effect-free): a `DEFINE ACCESS` key
-// may be an env()/secret() reference instead of an inline literal.
-import type { SecretRef } from "@schemic/core";
 
 /**
  * The "pure" approach: a field is a stock Zod schema + SurrealQL DDL metadata.
@@ -3357,10 +3357,62 @@ export function defineFunction<A extends Shape = Record<string, never>>(
   );
 }
 
-/** The access type + its type-specific config. `RECORD` (default) / `JWT` / `BEARER`. */
+/** Symmetric JWT algorithms (HMAC) — one shared secret both signs and verifies. SurrealDB **rejects** a
+ *  distinct `WITH ISSUER KEY` for these ("requires the same key for signing and verification"), so the
+ *  typed config forbids an `issuer` here. Canonical DDL casing is uppercase. */
+export type SymmetricJwtAlgorithm = "HS256" | "HS384" | "HS512";
+
+/** Asymmetric JWT algorithms (RSA / ECDSA / EdDSA / RSA-PSS) — a **public** key verifies and a separate
+ *  **private** key signs, so `KEY` = public (not redacted by SurrealDB) and an optional `WITH ISSUER KEY`
+ *  = private (redacted). Canonical DDL casing is uppercase (`RS256`, `ES512`, `EDDSA`, …). */
+export type AsymmetricJwtAlgorithm =
+  | "RS256"
+  | "RS384"
+  | "RS512"
+  | "ES256"
+  | "ES384"
+  | "ES512"
+  | "PS256"
+  | "PS384"
+  | "PS512"
+  | "EDDSA";
+
+/** Every JWT signing algorithm SurrealDB accepts in `ALGORITHM @alg` (symmetric + asymmetric). Closed on
+ *  purpose: the split drives whether a `WITH ISSUER KEY` is valid, so it can't carry the `string & {}`
+ *  escape. */
+export type JwtAlgorithm = SymmetricJwtAlgorithm | AsymmetricJwtAlgorithm;
+
+/**
+ * A JWT verify/issue config — shared by `TYPE JWT` ({@link DatabaseAccessDef.jwt}) and RECORD's
+ * `WITH JWT` ({@link RecordAccessDef.withJwt}), mirroring the grammar's
+ * `[ ALGORITHM @alg KEY @key | URL @url ] [ WITH ISSUER KEY @key ]`. The variants encode the rules
+ * SurrealDB enforces at define-time:
+ * - `{ url }` — JWKS endpoint; verify-only (the issuer is external), so no local key/issuer.
+ * - `{ key, alg? }` **symmetric** (`alg` defaults `HS512`) — one shared secret; **no** `issuer` (the
+ *   engine forbids a different signing key for HMAC).
+ * - `{ key, alg, issuer? }` **asymmetric** — `key` is the public verify key; `issuer.key` is the
+ *   optional private signing key.
+ */
+export type JwtConfig =
+  | { url: string }
+  | { key: string | SecretRef; alg?: SymmetricJwtAlgorithm }
+  | {
+      key: string | SecretRef;
+      alg: AsymmetricJwtAlgorithm;
+      issuer?: { key: string | SecretRef };
+    };
+
+/** The access type + its type-specific config. `RECORD` (default) / `JWT` / `BEARER`. `jwt` carries the
+ *  resolved {@link JwtConfig} fields (verify `alg`/`key`/`url` + optional `issuer` signing key). */
 export type AccessKind =
   | { type: "record" }
-  | { type: "jwt"; alg?: string; key?: string | SecretRef; url?: string }
+  | {
+      type: "jwt";
+      alg?: string;
+      key?: string | SecretRef;
+      url?: string;
+      issuer?: { key: string | SecretRef };
+    }
   | { type: "bearer"; subject: "record" | "user" };
 
 /** Token/session/grant lifetimes, e.g. `{ token: "1h", session: "12h", grant: "30d" }`. */
@@ -3379,6 +3431,9 @@ interface AccessConfig {
   signup?: Expr;
   signin?: Expr;
   authenticate?: Expr;
+  /** RECORD-only: `WITH JWT [ ALGORITHM KEY | URL ] [ WITH ISSUER KEY ]` — customize the session token's
+   *  JWT (omit for SurrealDB's auto-generated key). Grammar order: after SIGNIN, before `WITH REFRESH`. */
+  withJwt?: JwtConfig;
   /** RECORD-only: `WITH REFRESH` — issue refresh tokens alongside the session token. */
   refresh?: boolean;
   duration?: AccessDuration;
@@ -3387,58 +3442,141 @@ interface AccessConfig {
 }
 
 /**
- * An access definition — `DEFINE ACCESS <name> ON DATABASE TYPE …`. Chainable like {@link TableDef}.
- * Pick a type with `.record()` (default; SIGNUP/SIGNIN), `.jwt({ alg, key } | { url })` (validate
- * external tokens), or `.bearer({ for })` (API-key grants). The RECORD bodies are `surql\`…\`` blocks
- * (braces optional). NOTE: SurrealDB redacts signing keys in introspection, so `pull` can't recover
- * them — see the CLI (`--access` is opt-in for that reason).
+ * An access definition — `DEFINE ACCESS <name> ON DATABASE TYPE …`. This is the shared **base** of the
+ * staged builders: `defineAccess(name)` → {@link UnscopedAccessDef} (pick a scope) →
+ * {@link DatabaseAccessDef}/{@link NamespaceAccessDef} (pick a type) → the type's own builder
+ * ({@link RecordAccessDef}/{@link JwtAccessDef}/{@link BearerAccessDef}). Each stage exposes only the
+ * clauses that are valid there, so mutually-exclusive types can't be mixed and a type's clauses can't
+ * leak onto another type — the whole shape is enforced at compile time. The `DURATION`/`COMMENT`
+ * clauses are shared by every type and live here. NOTE: SurrealDB redacts signing keys in
+ * introspection, so `pull` can't recover them (`--access` is opt-in for that reason).
  */
-export class AccessDef {
+export abstract class AccessDef {
   readonly kind = "access" as const;
   constructor(
     readonly name: string,
-    // `on` is intentionally unset — the scope is a required, deliberate choice (`.onDatabase()` /
-    // `.onNamespace()`); emitting without one throws.
-    readonly config: AccessConfig = { kind: { type: "record" } },
+    readonly config: AccessConfig,
   ) {}
-  private withConfig(c: Partial<AccessConfig>): AccessDef {
-    return new AccessDef(this.name, { ...this.config, ...c });
-  }
-  /** `TYPE RECORD` (the default) — end users sign up / sign in directly. */
-  record(): AccessDef {
-    return this.withConfig({ kind: { type: "record" } });
-  }
-  /** `TYPE JWT` — validate tokens from an external issuer: `{ alg, key }` (symmetric/PEM) or `{ url }` (JWKS). */
-  jwt(opts: { alg?: string; key?: string | SecretRef; url?: string }): AccessDef {
-    return this.withConfig({ kind: { type: "jwt", ...opts } });
-  }
-  /** `TYPE BEARER FOR USER|RECORD` — bearer-token / API-key grants. */
-  bearer(opts: { for: "record" | "user" }): AccessDef {
-    return this.withConfig({ kind: { type: "bearer", subject: opts.for } });
-  }
-  /** `SIGNUP { … }` (RECORD) — a `surql\`…\`` block (braces optional) run on sign-up. */
-  signup(body: Expr): AccessDef {
-    return this.withConfig({ signup: body });
-  }
-  /** `SIGNIN { … }` (RECORD) — a `surql\`…\`` block run on sign-in. */
-  signin(body: Expr): AccessDef {
-    return this.withConfig({ signin: body });
-  }
-  /** `AUTHENTICATE { … }` — a `surql\`…\`` block run on each authenticated request. */
-  authenticate(body: Expr): AccessDef {
-    return this.withConfig({ authenticate: body });
-  }
-  /** `WITH REFRESH` (RECORD) — also issue a refresh token, so sessions can be renewed without re-auth. */
-  withRefresh(): AccessDef {
-    return this.withConfig({ refresh: true });
-  }
+  /** Rebuild the same concrete builder with merged config — preserves the chain's narrowed type. */
+  protected abstract clone(config: Partial<AccessConfig>): this;
   /** Token/session/grant lifetimes (`DURATION FOR TOKEN …, FOR SESSION …, FOR GRANT …`). */
-  duration(d: AccessDuration): AccessDef {
-    return this.withConfig({ duration: d });
+  duration(d: AccessDuration): this {
+    return this.clone({ duration: d });
   }
   /** `COMMENT "…"` — a human description stored with the access. */
-  comment(comment: string): AccessDef {
-    return this.withConfig({ comment });
+  comment(comment: string): this {
+    return this.clone({ comment });
+  }
+}
+
+/**
+ * `TYPE RECORD` builder — end users sign up / sign in directly. Exposes the RECORD-only clauses
+ * (`.signup()` / `.signin()` / `.withRefresh()` / `.authenticate()`) plus the shared `.duration()` /
+ * `.comment()`. The type is fixed here, so the other-type switchers (`.jwt()` / `.bearer()`) are
+ * intentionally absent — you've committed to RECORD.
+ */
+export class RecordAccessDef extends AccessDef {
+  protected clone(c: Partial<AccessConfig>): this {
+    return new RecordAccessDef(this.name, { ...this.config, ...c }) as this;
+  }
+  /** `SIGNUP { … }` — a `surql\`…\`` block (braces optional) run on sign-up. */
+  signup(body: Expr): this {
+    return this.clone({ signup: body });
+  }
+  /** `SIGNIN { … }` — a `surql\`…\`` block run on sign-in. */
+  signin(body: Expr): this {
+    return this.clone({ signin: body });
+  }
+  /** `AUTHENTICATE { … }` — a `surql\`…\`` block run on each authenticated request. */
+  authenticate(body: Expr): this {
+    return this.clone({ authenticate: body });
+  }
+  /** `WITH JWT [ ALGORITHM KEY | URL ] [ WITH ISSUER KEY ]` — customize the session token's JWT instead
+   *  of SurrealDB's auto-generated key. Same {@link JwtConfig} as `TYPE JWT`; `env()`/`secret()` keys
+   *  lower to a bound `KEY $param`. */
+  withJwt(config: JwtConfig): this {
+    return this.clone({ withJwt: config });
+  }
+  /** `WITH REFRESH` — also issue a refresh token, so sessions can be renewed without re-auth. */
+  withRefresh(): this {
+    return this.clone({ refresh: true });
+  }
+}
+
+/**
+ * `TYPE JWT` builder — validate externally-issued tokens. The verify method was fixed at `.jwt(…)`
+ * (`{ key, alg? }` XOR `{ url }`), so only the shared `.duration()` / `.comment()` remain here.
+ */
+export class JwtAccessDef extends AccessDef {
+  protected clone(c: Partial<AccessConfig>): this {
+    return new JwtAccessDef(this.name, { ...this.config, ...c }) as this;
+  }
+}
+
+/**
+ * `TYPE BEARER` builder — bearer-token / API-key grants. The subject was fixed at `.bearer(…)`, so only
+ * the shared `.duration()` / `.comment()` remain here.
+ */
+export class BearerAccessDef extends AccessDef {
+  protected clone(c: Partial<AccessConfig>): this {
+    return new BearerAccessDef(this.name, { ...this.config, ...c }) as this;
+  }
+}
+
+/**
+ * The `ON DATABASE` stage — a type picker. The TYPE is a deliberate, required choice (no implicit
+ * default, mirroring how the scope is required): pick `.record()` (database-only end-user auth),
+ * `.jwt(…)` (validate external tokens), or `.bearer(…)` (API-key grants). Each returns that type's own
+ * builder, so the choice is exclusive and only that type's clauses are reachable afterward. A bare
+ * `.onDatabase()` is a non-terminal (like a bare `defineAccess("x")`) — you must pick a type.
+ */
+export class DatabaseAccessDef {
+  constructor(readonly name: string) {}
+  /** `TYPE RECORD` — end users sign up / sign in directly (database-only). */
+  record(): RecordAccessDef {
+    return new RecordAccessDef(this.name, {
+      on: "database",
+      kind: { type: "record" },
+    });
+  }
+  /** `TYPE JWT` — validate external tokens ({@link JwtConfig}): `{ url }` (JWKS) XOR `{ key, alg? }`
+   *  (symmetric) XOR `{ key, alg, issuer? }` (asymmetric — public verify + optional private issuer). */
+  jwt(opts: JwtConfig): JwtAccessDef {
+    return new JwtAccessDef(this.name, {
+      on: "database",
+      kind: { type: "jwt", ...opts },
+    });
+  }
+  /** `TYPE BEARER FOR USER|RECORD` — bearer-token / API-key grants. */
+  bearer(opts: { for: "record" | "user" }): BearerAccessDef {
+    return new BearerAccessDef(this.name, {
+      on: "database",
+      kind: { type: "bearer", subject: opts.for },
+    });
+  }
+}
+
+/**
+ * The `ON NAMESPACE` stage — a type picker. `TYPE RECORD` is database-only, so namespace access is JWT
+ * or BEARER; those are the only choices here, which turns "record on namespace" from a runtime throw
+ * into a compile error. A bare `.onNamespace()` is a non-terminal — you must pick `.jwt()` / `.bearer()`.
+ */
+export class NamespaceAccessDef {
+  constructor(readonly name: string) {}
+  /** `TYPE JWT` — validate external tokens ({@link JwtConfig}): `{ url }` (JWKS) XOR `{ key, alg? }`
+   *  (symmetric) XOR `{ key, alg, issuer? }` (asymmetric — public verify + optional private issuer). */
+  jwt(opts: JwtConfig): JwtAccessDef {
+    return new JwtAccessDef(this.name, {
+      on: "namespace",
+      kind: { type: "jwt", ...opts },
+    });
+  }
+  /** `TYPE BEARER FOR USER|RECORD` — bearer-token / API-key grants. */
+  bearer(opts: { for: "record" | "user" }): BearerAccessDef {
+    return new BearerAccessDef(this.name, {
+      on: "namespace",
+      kind: { type: "bearer", subject: opts.for },
+    });
   }
 }
 
@@ -3451,18 +3589,12 @@ export class AccessDef {
 export class UnscopedAccessDef {
   constructor(readonly name: string) {}
   /** `ON DATABASE` — database-scoped access (the only scope that supports `TYPE RECORD`). */
-  onDatabase(): AccessDef {
-    return new AccessDef(this.name, {
-      on: "database",
-      kind: { type: "record" },
-    });
+  onDatabase(): DatabaseAccessDef {
+    return new DatabaseAccessDef(this.name);
   }
   /** `ON NAMESPACE` — namespace-scoped access (`TYPE JWT` / `TYPE BEARER`; not RECORD). */
-  onNamespace(): AccessDef {
-    return new AccessDef(this.name, {
-      on: "namespace",
-      kind: { type: "record" },
-    });
+  onNamespace(): NamespaceAccessDef {
+    return new NamespaceAccessDef(this.name);
   }
 }
 

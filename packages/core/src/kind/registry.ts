@@ -115,6 +115,16 @@ export interface KindEngine<
    * what the defaults get wrong (e.g. `plural: "Indexes"`, or `folder: "access"`). DISPLAY ONLY.
    */
   display?: KindDisplay;
+  /**
+   * UNMANAGED by the migration pipeline: when `true`, objects of this kind are EXCLUDED from
+   * snapshot / diff / gen AND from the introspect-compare — so they never enter a migration file nor
+   * phantom-diff. For a kind whose lifecycle doesn't fit committed migrations: e.g. SurrealDB
+   * `DEFINE ACCESS`, which carries a secret the DB redacts on introspection (can't round-trip) and
+   * rotates on its own cadence. Such a kind is managed OUT-OF-BAND via the driver's own commands
+   * (`sc <kind> …`). `emit`/`lower` still work (a driver command may use them); only the automatic
+   * migration lifecycle skips it. Omitted/false = a normal, migration-managed kind.
+   */
+  excludeFromMigrations?: boolean;
 }
 
 /** Per-kind presentation metadata (labels + output folder). All optional; core fills defaults. */
@@ -188,6 +198,15 @@ export class KindRegistry {
   // biome-ignore lint/suspicious/noExplicitAny: the engine erases at this seam (see `kinds`).
   engine(kind: string): KindEngine<any, any> | undefined {
     return this.kinds.get(kind);
+  }
+
+  /**
+   * Is `kind` UNMANAGED by the migration pipeline (its engine set {@link KindEngine.excludeFromMigrations})?
+   * The snapshot/diff/emit/introspect spine skips such kinds — see the flag's docs. An unregistered kind
+   * is treated as managed (false), so a stray object never gets silently dropped by a typo.
+   */
+  isExcludedFromMigrations(kind: string): boolean {
+    return this.kinds.get(kind)?.excludeFromMigrations === true;
   }
 
   /**

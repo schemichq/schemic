@@ -103,4 +103,80 @@ describe.skipIf(!URL)("surreal driver commands", () => {
     ).rejects.toThrow(/no env\(\)\/secret\(\)/);
     await conn.close();
   });
+
+  test("access push applies all authored accesses (idempotent OVERWRITE)", async () => {
+    const schema = join(tmpdir(), "cmdtest_push.ts");
+    await Bun.write(
+      schema,
+      `import { defineAccess, surql } from "${indexPath}";\n` +
+        `export const acct = defineAccess("acct").onDatabase().record().signin(surql\`SELECT * FROM user WHERE email = $email\`);\n` +
+        `export const ext = defineAccess("ext").onDatabase().jwt({ url: "https://x/jwks.json" });\n`,
+    );
+    const { conn, out, ctx } = await ctxWith("cmd_push", schema);
+    await conn.query(
+      "REMOVE ACCESS IF EXISTS acct ON DATABASE; REMOVE ACCESS IF EXISTS ext ON DATABASE;",
+    );
+    // dry-run: prints, applies nothing
+    await cmd("access", "push")!.run(ctx, {
+      positionals: [],
+      flags: { "dry-run": true },
+    });
+    const [before]: [{ accesses?: Record<string, unknown> }] =
+      await conn.query("INFO FOR DB");
+    expect(before.accesses?.acct).toBeUndefined();
+    // real push (all): both applied, idempotent (run twice)
+    out.length = 0;
+    await cmd("access", "push")!.run(ctx, { positionals: [], flags: {} });
+    await cmd("access", "push")!.run(ctx, { positionals: [], flags: {} });
+    const [after]: [{ accesses?: Record<string, unknown> }] =
+      await conn.query("INFO FOR DB");
+    expect(after.accesses?.acct).toBeDefined();
+    expect(after.accesses?.ext).toBeDefined();
+    await conn.close();
+  });
+
+  test("access diff: in-sync after push (no phantom diff), plus new + orphan", async () => {
+    const schema = join(tmpdir(), "cmdtest_diff.ts");
+    await Bun.write(
+      schema,
+      `import { defineAccess, surql } from "${indexPath}";\n` +
+        `export const acct = defineAccess("acct").onDatabase().record().signin(surql\`SELECT * FROM user WHERE email = $email\`).withRefresh();\n` +
+        `export const ext = defineAccess("ext").onDatabase().jwt({ url: "https://x/jwks.json" });\n`,
+    );
+    const seed = await ctxWith("cmd_diff", schema);
+    await seed.conn.query(
+      "REMOVE ACCESS IF EXISTS acct ON DATABASE; REMOVE ACCESS IF EXISTS ext ON DATABASE; REMOVE ACCESS IF EXISTS stray ON DATABASE;",
+    );
+    await cmd("access", "push")!.run(seed.ctx, { positionals: [], flags: {} });
+    // diff the SAME schema -> everything in sync (the phantom-diff guard)
+    seed.out.length = 0;
+    await cmd("access", "diff")!.run(seed.ctx, { positionals: [], flags: {} });
+    expect(seed.out.some((l) => l.includes("OK all accesses in sync"))).toBe(
+      true,
+    );
+    expect(seed.out.some((l) => l.includes("~ "))).toBe(false);
+    // introduce a live-only orphan, and diff a slimmer schema (drops acct, adds a new bearer)
+    await seed.conn.query(
+      'DEFINE ACCESS stray ON DATABASE TYPE JWT URL "https://y/jwks.json";',
+    );
+    await seed.conn.close();
+    const slim = join(tmpdir(), "cmdtest_diff_slim.ts");
+    await Bun.write(
+      slim,
+      `import { defineAccess } from "${indexPath}";\n` +
+        `export const ext = defineAccess("ext").onDatabase().jwt({ url: "https://x/jwks.json" });\n` +
+        `export const fresh = defineAccess("fresh").onDatabase().bearer({ for: "user" });\n`,
+    );
+    const { conn, out, ctx } = await ctxWith("cmd_diff", slim);
+    await cmd("access", "diff")!.run(ctx, { positionals: [], flags: {} });
+    expect(out.some((l) => l.startsWith("INFO + fresh"))).toBe(true); // new
+    expect(out.some((l) => l.startsWith("INFO = ext"))).toBe(true); // in sync
+    expect(out.some((l) => l.includes("acct") && l.includes("orphan"))).toBe(
+      true,
+    ); // dropped from schema
+    expect(out.some((l) => l.includes("stray") && l.includes("orphan"))).toBe(
+      true,
+    ); // live-only
+    await conn.close();
+  });
 });

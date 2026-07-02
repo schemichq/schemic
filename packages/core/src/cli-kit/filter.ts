@@ -136,7 +136,7 @@ export function mergeStored(
   return {
     version: 3,
     driver: next.driver,
-    schema: snapshotKinds([...merged.values()]),
+    schema: snapshotKinds([...merged.values()], registry),
     files: { ...(prev.files ?? {}), ...(next.files ?? {}) },
   };
 }

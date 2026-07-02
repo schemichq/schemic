@@ -68,7 +68,7 @@ function buildStored(
   return {
     version: 3,
     driver: driver.name,
-    schema: snapshotKinds(objects),
+    schema: snapshotKinds(objects, driver.registry),
     files,
   };
 }
@@ -286,7 +286,7 @@ export async function baseline(
   const pulled: StoredSnapshot = {
     version: 3,
     driver: driver.name,
-    schema: snapshotKinds(pulledObjects),
+    schema: snapshotKinds(pulledObjects, driver.registry),
     files: disk.files,
   };
 
