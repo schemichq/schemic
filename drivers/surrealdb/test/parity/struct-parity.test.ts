@@ -83,7 +83,7 @@ const Big = defineTable("sp_big", {
   ro: s.string().$readonly(),
   cmt: s.string().$comment("a field"),
   perm: s.string().$permissions({ select: true, update: false }),
-  uniq: s.string().unique(),
+  uniq: s.string().$unique(),
 }).permissions({ select: true, create: surql`$auth.id != NONE` });
 const Less = defineTable("sp_less", { id: z.string() })
   .schemaless()

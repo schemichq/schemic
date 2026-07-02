@@ -470,16 +470,16 @@ describe("field clauses", () => {
 // SECTION: INDEXES — https://surrealdb.com/docs/surrealql/statements/define/indexes
 // ===========================================================================
 describe("indexes", () => {
-  test("single-field plain index via .index()", () => {
+  test("single-field plain index via .$index()", () => {
     const ddl = emitTable(
-      defineTable("t", { id: z.string(), email: s.string().index() }),
+      defineTable("t", { id: z.string(), email: s.string().$index() }),
     );
     expect(ddl).toContain("DEFINE INDEX t_email_idx ON TABLE t FIELDS email;");
   });
 
-  test("single-field UNIQUE via .unique()", () => {
+  test("single-field UNIQUE via .$unique()", () => {
     const ddl = emitTable(
-      defineTable("t", { id: z.string(), email: s.string().unique() }),
+      defineTable("t", { id: z.string(), email: s.string().$unique() }),
     );
     expect(ddl).toContain(
       "DEFINE INDEX t_email_idx ON TABLE t FIELDS email UNIQUE;",

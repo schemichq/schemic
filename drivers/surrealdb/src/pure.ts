@@ -1134,14 +1134,6 @@ export class SField<
       },
     });
   }
-  /** @deprecated Renamed to {@link SField.$index} — field DDL clauses are `$`-prefixed. */
-  index(name?: string): SField<S, Flags> {
-    return this.$index(name);
-  }
-  /** @deprecated Renamed to {@link SField.$unique} — field DDL clauses are `$`-prefixed. */
-  unique(name?: string): SField<S, Flags> {
-    return this.$unique(name);
-  }
   /**
    * Mark a record-link field as a `REFERENCE` so the DB tracks back-links (`$`-prefixed like the other
    * DDL clauses). `onDelete` sets the `ON DELETE` action — `"reject" | "cascade" | "ignore" | "unset"`,

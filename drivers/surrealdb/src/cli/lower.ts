@@ -134,7 +134,7 @@ function lowerReference(ref: NonNullable<SurrealMeta["reference"]>): {
  * Walk an `inferField` node into flattened dotted `StructField`s — exactly the paths the emitter
  * produces (`address`, `address.city`, `tags.*`). Unlike the emitter this keeps `option<>` (it does
  * NOT strip it for defaulted/valued/computed fields), and it EMITS the `x.*` element node (rather
- * than folding it) — `normalizeTable` does both folds. Single-field indexes (`.index()`/`.unique()`)
+ * than folding it) — `normalizeTable` does both folds. Single-field indexes (`.$index()`/`.$unique()`)
  * are collected into `indexes`.
  */
 function lowerField(

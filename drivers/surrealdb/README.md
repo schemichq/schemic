@@ -35,7 +35,7 @@ import { defineTable, s, surql } from "@schemic/surrealdb";
 
 export const User = defineTable("user", {
   name: s.string().$assert(surql`string::len($value) > 0`),
-  email: s.email().unique(),
+  email: s.email().$unique(),
   createdAt: s.datetime().$default(surql`time::now()`).$readonly(),
 }).schemafull();
 ```

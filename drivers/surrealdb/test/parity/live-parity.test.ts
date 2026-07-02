@@ -134,8 +134,8 @@ const Big = defineTable("pl_big", {
   cmt: s.string().$comment("a field"),
   perm: s.string().$permissions({ select: true, update: false }),
   intl: s.string().$internal(),
-  idx: s.string().index(),
-  uniq: s.string().unique(),
+  idx: s.string().$index(),
+  uniq: s.string().$unique(),
 });
 
 live("DB accepts @schemic/core's generated DDL", () => {

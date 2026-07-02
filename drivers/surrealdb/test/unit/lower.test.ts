@@ -116,7 +116,7 @@ describe("fromTableDef", () => {
 
   test("single-field index + table comment/changefeed", () => {
     const t = defineTable("user", {
-      email: s.string().unique(),
+      email: s.string().$unique(),
     })
       .comment("users")
       .changefeed("1h", { includeOriginal: true });

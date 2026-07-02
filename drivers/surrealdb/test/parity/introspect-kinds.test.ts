@@ -68,7 +68,7 @@ async function apply(conn: Surreal, ddl: string): Promise<void> {
 // avoid the allowlisted canonical divergences (no unions, no quoted DEFAULTs, numeric function body).
 const User = defineTable("ik_user", {
   id: s.string(),
-  name: s.string().unique(),
+  name: s.string().$unique(),
   age: s.int(),
   active: s.boolean(),
 }).event("touch", {

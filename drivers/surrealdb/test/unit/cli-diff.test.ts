@@ -118,10 +118,10 @@ describe("diff engine", () => {
 
   test("changed index -> REMOVE + DEFINE (ALTER INDEX can't change fields)", () => {
     const prev = buildSnapshot([
-      defineTable("t", { id: s.string(), a: s.string().index() }),
+      defineTable("t", { id: s.string(), a: s.string().$index() }),
     ]);
     const next = buildSnapshot([
-      defineTable("t", { id: s.string(), a: s.string().unique() }),
+      defineTable("t", { id: s.string(), a: s.string().$unique() }),
     ]);
     const up = diffSnapshots(prev, next).up;
     expect(up.some((s) => s.startsWith("REMOVE INDEX"))).toBe(true);
@@ -269,13 +269,13 @@ describe("formatPatch (unified diff)", () => {
 describe("indexes", () => {
   const Indexed = defineTable("member", {
     id: s.string(),
-    email: s.email().unique(),
-    handle: s.string().index(),
+    email: s.email().$unique(),
+    handle: s.string().$index(),
     first: s.string(),
     last: s.string(),
   }).index("member_full_name", ["first", "last"]);
 
-  test("field .unique()/.index() and table .index() emit DEFINE INDEX", () => {
+  test("field .$unique()/.$index() and table .index() emit DEFINE INDEX", () => {
     const ddl = emitTable(Indexed);
     expect(ddl).toContain(
       "DEFINE INDEX member_email_idx ON TABLE member FIELDS email UNIQUE;",
@@ -306,7 +306,7 @@ describe("indexes", () => {
     const before = defineTable("t", { id: s.string(), code: s.string() });
     const after = defineTable("t", {
       id: s.string(),
-      code: s.string().unique(),
+      code: s.string().$unique(),
     });
     const diff = diffSnapshots(buildSnapshot([before]), buildSnapshot([after]));
     expect(diff.up).toEqual([

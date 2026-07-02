@@ -80,13 +80,13 @@ live("clause-level ALTER migrations apply + round-trip", () => {
       id: z.string(),
       name: s.string(),
       email: s.string(),
-      age: s.int().index(),
+      age: s.int().$index(),
     });
     const v2 = defineTable("ml_user", {
       id: z.string(),
       name: s.string().optional(), // TYPE string -> option<string>
       email: s.string().$comment("addr"), // + COMMENT
-      age: s.int().unique(), // index -> unique (REMOVE + DEFINE)
+      age: s.int().$unique(), // index -> unique (REMOVE + DEFINE)
     });
 
     // Apply v1.

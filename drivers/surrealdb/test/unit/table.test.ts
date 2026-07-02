@@ -531,23 +531,6 @@ describe("field $unique / $index (DDL clauses are $-prefixed)", () => {
     expect(ix).not.toContain("UNIQUE");
   });
 
-  test("the deprecated .unique()/.index() aliases emit identically", () => {
-    const canonical = emitTable(
-      defineTable("a", { id: s.string(), x: s.string().$unique() }),
-    );
-    const alias = emitTable(
-      defineTable("a", { id: s.string(), x: s.string().unique() }),
-    );
-    expect(alias).toBe(canonical);
-    const ci = emitTable(
-      defineTable("b", { id: s.string(), x: s.string().$index() }),
-    );
-    const ai = emitTable(
-      defineTable("b", { id: s.string(), x: s.string().index() }),
-    );
-    expect(ai).toBe(ci);
-  });
-
   test("a custom index name overrides the derived `<table>_<field>_idx`", () => {
     const ddl = emitTable(
       defineTable("u", {

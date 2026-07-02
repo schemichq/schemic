@@ -189,17 +189,17 @@ describe("table/field kind parity with surrealDriver.diff", () => {
 });
 
 describe("index kind parity", () => {
-  test("add an index (field .unique())", () => {
+  test("add an index (field .$unique())", () => {
     parity(
       [defineTable("t", { id: s.string(), code: s.string() })],
-      [defineTable("t", { id: s.string(), code: s.string().unique() })],
+      [defineTable("t", { id: s.string(), code: s.string().$unique() })],
     );
   });
 
-  test("change an index (.index() -> .unique()) recreates", () => {
+  test("change an index (.$index() -> .$unique()) recreates", () => {
     parity(
-      [defineTable("t", { id: s.string(), a: s.string().index() })],
-      [defineTable("t", { id: s.string(), a: s.string().unique() })],
+      [defineTable("t", { id: s.string(), a: s.string().$index() })],
+      [defineTable("t", { id: s.string(), a: s.string().$unique() })],
     );
   });
 
@@ -245,7 +245,7 @@ describe("cross-kind dependency ordering (emitKinds)", () => {
   test("an index + event cluster AFTER their table", () => {
     const t = defineTable("user", {
       id: s.string(),
-      email: s.email().unique(),
+      email: s.email().$unique(),
     }).event(
       "ev",
       // biome-ignore lint/suspicious/noThenProperty: event DSL "then" clause, not a thenable.
@@ -296,7 +296,7 @@ describe("buildKindDiff + snapshot round-trip", () => {
 
   test("snapshotKinds -> JSON -> snapshotObjects round-trips to a zero diff", () => {
     const portable = lowerAll([
-      defineTable("user", { id: s.string(), email: s.email().unique() }).event(
+      defineTable("user", { id: s.string(), email: s.email().$unique() }).event(
         "ev",
         // biome-ignore lint/suspicious/noThenProperty: event DSL "then" clause, not a thenable.
         { then: surql`UPDATE $after.id SET seen = true` },
@@ -447,7 +447,7 @@ describe("flipped surrealDriver shape", () => {
       [
         defineTable("user", {
           id: s.string(),
-          name: s.string().unique(),
+          name: s.string().$unique(),
         }),
       ] as never,
       [] as never,

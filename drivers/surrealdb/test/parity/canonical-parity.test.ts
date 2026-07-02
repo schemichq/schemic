@@ -91,8 +91,8 @@ const Big = defineTable("c_big", {
   ro: s.string().$readonly(),
   cmt: s.string().$comment("a field"),
   perm: s.string().$permissions({ select: true, update: false }),
-  idx: s.string().index(),
-  uniq: s.string().unique(),
+  idx: s.string().$index(),
+  uniq: s.string().$unique(),
 });
 const Schemaless = defineTable("c_less", { id: z.string() }).schemaless();
 const Commented = defineTable("c_cmt", { id: z.string() }).comment("hello");
