@@ -15,6 +15,7 @@ import {
   eventClause,
   type FieldInfo,
   fieldType,
+  implicitFieldSet,
   inferField,
   inline,
   inlineAnalyzerFunctions,
@@ -26,6 +27,7 @@ import type {
   FieldPermissions,
   FunctionDef,
   PermOp,
+  RecordIdField,
   SField,
   Shape,
   StandaloneDef,
@@ -223,18 +225,40 @@ function lowerEvent(table: string, ev: TableEvent): StructEvent {
 /**
  * Lower an in-memory `TableDef`/`RelationDef` to the `Struct` IR. The result is raw — feed it
  * through `normalizeTable` before comparing. Skips the implicit `id` field (and `in`/`out` on a
- * relation); they are managed by SurrealDB and never emitted.
+ * relation) — UNLESS `id` carries a generation strategy (`s.ulid()`/`s.uuid()`/`s.randId()`), in
+ * which case it's lowered as a real `DEFINE FIELD id` (SurrealDB v3.2.0+) with the VALUE type
+ * (string/uuid, not `record<t>`) and the strategy's DEFAULT + ASSERT.
  */
 export function fromTableDef(t: TableDef<string, Shape>): StructTable {
   const cfg = t.config;
   const rel = cfg.relation;
-  const implicit = rel ? new Set(["id", "in", "out"]) : new Set(["id"]);
+  const idField = (t.fields as unknown as Record<string, SField>).id;
+  const hasIdStrategy = !!idField?.surreal?.idStrategy;
+  const implicit = implicitFieldSet(!!rel, hasIdStrategy);
 
   const fields: StructField[] = [];
   const indexes: StructIndex[] = [];
   for (const [name, field] of Object.entries(t.fields)) {
     if (implicit.has(name)) continue;
     const f = field as SField;
+    // An id field with a strategy uses the VALUE type (string/uuid), not record<t>.
+    if (name === "id" && f.surreal.idStrategy) {
+      const idR = field as unknown as RecordIdField<string>;
+      const info: FieldInfo = {
+        type: idR.valueType ? inferField(idR.valueType).type : "string",
+        flexible: false,
+        children: [],
+      };
+      lowerField(
+        escapeIdent(name),
+        t.name,
+        info,
+        f.surreal,
+        fields,
+        indexes,
+      );
+      continue;
+    }
     lowerField(
       escapeIdent(name),
       t.name,

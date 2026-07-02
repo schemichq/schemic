@@ -9,6 +9,7 @@ import {
   type FunctionDef,
   objectFieldsRegistry,
   type PermOp,
+  type RecordIdField,
   type SField,
   type Shape,
   type StandaloneDef,
@@ -977,14 +978,66 @@ export function emitField(
     .join("\n");
 }
 
+/** Emit `DEFINE FIELD id …` for a table with an id-generation strategy (SurrealDB v3.2.0+).
+ *  Uses the VALUE type (string/uuid), not `record<t>`, and enforces the v3.2.0 id restrictions:
+ *  no VALUE/COMPUTED/REFERENCE/READONLY/FLEXIBLE, no DEFAULT ALWAYS. ASSERT fragments use
+ *  `id.id()` (not `$value`) — they're already baked by `idStrategyMeta` in pure.ts. */
+function emitIdFieldStatement(
+  table: string,
+  idField: RecordIdField<string>,
+  opts?: DefineOptions,
+): DefineStatement {
+  const surreal = idField.surreal;
+  // The TYPE is the value type (string/uuid), NOT record<t> — infer from valueType.
+  const valueType = idField.valueType ? inferField(idField.valueType).type : "string";
+  const clauses: Record<string, string> = { TYPE: `TYPE ${valueType}` };
+  if (surreal.default) {
+    // No DEFAULT ALWAYS on id (v3.2.0 restriction) — always a bare DEFAULT.
+    clauses.DEFAULT = `DEFAULT ${inline(surreal.default)}`;
+  }
+  const assertClause = renderAsserts(surreal.asserts);
+  if (assertClause) clauses.ASSERT = assertClause;
+  if (surreal.comment)
+    clauses.COMMENT = `COMMENT ${JSON.stringify(surreal.comment)}`;
+  if (surreal.permissions !== undefined) {
+    const clause = renderPermissions(surreal.permissions, [
+      "select",
+      "create",
+      "update",
+    ]);
+    if (clause) clauses.PERMISSIONS = clause;
+  }
+  const ddl = `DEFINE FIELD ${existsPrefix(opts)}id ON TABLE ${escapeIdent(table)} ${Object.values(clauses).join(" ")};`;
+  return { kind: "field", name: "id", table, ddl, clauses };
+}
+
+/**
+ * Compute the set of implicit field names for a table definition. Implicit fields are managed
+ * by SurrealDB (not authored by the user) — `id` / `in` / `out` — unless the table has a
+ * strategic `id` (a generation strategy via `s.ulid()` / `s.uuid()` / `s.id()`, which emits
+ * `DEFINE FIELD id …`). Shared by the DDL emitter, the Struct-IR lowering, and the snapshot
+ * builder so the rule lives in ONE place.
+ *
+ * @param isRelation  true for relation (edge) tables
+ * @param hasStrategicId  true when the id field carries a v3.2.0+ generation strategy
+ * @returns  the set of field names to treat as implicit
+ */
+export function implicitFieldSet(isRelation: boolean, hasStrategicId: boolean): Set<string> {
+  if (isRelation) {
+    return new Set<string>(hasStrategicId ? ["in", "out"] : ["id", "in", "out"]);
+  }
+  return new Set<string>(hasStrategicId ? [] : ["id"]);
+}
+
 /** Structured statements for a table: its `DEFINE TABLE` head, then one per (nested) field. */
 export function emitStatements(
   t: TableDef<string, Shape>,
   opts?: DefineOptions,
 ): DefineStatement[] {
   const rel = t.config.relation;
-  // Surreal manages id (and in/out for relations) implicitly.
-  const implicit = rel ? new Set(["id", "in", "out"]) : new Set(["id"]);
+  const idField = (t.fields as unknown as Record<string, SField>).id;
+  const hasIdStrategy = !!idField?.surreal?.idStrategy;
+  const implicit = implicitFieldSet(!!rel, hasIdStrategy);
   let type: string;
   if (rel) {
     // Endpoints are optional: omit FROM/TO when unrestricted (`TYPE RELATION`).
@@ -1036,11 +1089,24 @@ export function emitStatements(
   if (!t.config.view)
     for (const [name, field] of Object.entries(t.fields)) {
       if (implicit.has(name)) continue;
+      const sf = field as SField;
+      // An id field with a generation strategy gets a dedicated DEFINE FIELD id (v3.2.0+):
+      // TYPE is the value type (string/uuid), not record<t>; DEFAULT + ASSERT use id.id().
+      if (name === "id" && sf.surreal.idStrategy) {
+        out.push(
+          emitIdFieldStatement(
+            t.name,
+            field as unknown as RecordIdField<string>,
+            opts,
+          ),
+        );
+        continue;
+      }
       out.push(
         ...emitFieldStatements(
           name,
           t.name,
-          field as SField,
+          sf,
           opts,
           !!t.config.schemafull,
         ),

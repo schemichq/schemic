@@ -39,6 +39,32 @@ live parity suites (`test/parity/{struct,live,canonical}-parity.test.ts`) and th
 > The **full `DEFINE TABLE` head round-trips** (push + pull) — every permutation is exercised live in
 > `test/parity/define-table.test.ts` against SurrealDB 3.1.3.
 
+## Record-id generation (SurrealDB v3.2.0+)
+
+SurrealDB's default record-id is `rand::id()` — a 20-char lowercase-alphanumeric string. The
+`DEFINE FIELD id … DEFAULT <gen()> [ASSERT …]` clause (v3.2.0+) lets the schema declare a different
+strategy, so a bare `CREATE <table>` generates the declared id type. Schemic exposes this via the
+`id` field on `defineTable`:
+
+- **`id: s.ulid()`** — `DEFINE FIELD id … TYPE string DEFAULT rand::ulid() ASSERT id.id().is_ulid();`
+- **`id: s.uuid()`** — `DEFINE FIELD id … TYPE uuid DEFAULT rand::uuid();` (native type, no ASSERT)
+- **`id: s.id()`** — `DEFINE FIELD id … TYPE string DEFAULT rand::id() ASSERT string::len(id.id()) == 20 AND id.id() = /^[a-z0-9]+$/;`
+- **omitted / `id: s.string()`** — no `DEFINE FIELD id` (SurrealDB's default `rand::id` applies)
+
+- [~] `DEFINE FIELD id … DEFAULT rand::ulid()` — `id: s.ulid()` (author → emit → lower → diff ✓;
+  live round-trip requires SurrealDB ≥ 3.2.0 — gated in `test/parity/`)
+- [~] `DEFINE FIELD id … DEFAULT rand::uuid()` — `id: s.uuid()` (same)
+- [~] `DEFINE FIELD id … DEFAULT rand::id()` — `id: s.id()` (same; `s.id()` also bakes the
+  20-char `[a-z0-9]` assert for scalar use)
+- [x] pull fidelity — `schemic pull` renders `s.ulid()` / `s.uuid()` / `s.id()` when the
+  introspected id has the matching `DEFAULT`; else `s.string()` (unit-tested)
+
+> **v3.2.0 gate:** `DEFAULT` and `ASSERT` on the `id` field are rejected by SurrealDB ≤ 3.1.x. The
+> DDL is emitted unconditionally (schema-as-code); live parity/e2e tests for this feature skip
+> cleanly when the connected server is < 3.2.0 (version-probed). `VALUE`/`COMPUTED`/`REFERENCE`/
+> `READONLY`/`FLEXIBLE` and `DEFAULT ALWAYS` are forbidden on `id` (v3.2.0 restriction — not
+> enforced at author time; the DB rejects them at apply).
+
 ## Fields & types
 
 ### Scalars

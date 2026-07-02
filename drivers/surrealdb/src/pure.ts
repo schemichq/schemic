@@ -120,6 +120,12 @@ export interface SurrealMeta {
   reference?:
     | true
     | { onDelete?: "reject" | "cascade" | "ignore" | "unset" | BoundQuery };
+  /** Record-id generation strategy declared via `id: s.ulid() | s.uuid() | s.randId()`.
+   *  Carried from the authored field onto the table's `id` RecordIdField by `buildIdField`,
+   *  then read by the DDL emitter to emit `DEFINE FIELD id … DEFAULT <gen()> [ASSERT …]`
+   *  (SurrealDB v3.2.0+). Undefined = no strategy (SurrealDB's default `rand::id`, nothing
+   *  emitted). Inert on scalar (non-id) fields — only `buildIdField` reads it. */
+  idStrategy?: "ulid" | "uuid" | "randId";
 }
 
 /** Render a primitive as a clean SurrealQL literal; non-primitives return "". */
@@ -188,13 +194,18 @@ export function formatForAssert(assert: string): string | undefined {
 }
 
 /** Build an SField for a Zod string-format schema, baking `string::is_<fmt>($value)`
- * when SurrealDB has that validator (else no assert). */
+ *  when SurrealDB has that validator (else no assert). `extra` merges additional SurrealMeta
+ *  (e.g. `idStrategy` on `s.ulid()`). */
 function formatField<S extends z.ZodType>(
   schema: S,
   format: string,
+  extra?: SurrealMeta,
 ): SField<S> {
   const frag = formatAssert(format);
-  return new SField(schema, frag ? { asserts: [frag] } : {});
+  return new SField(schema, {
+    ...(frag ? { asserts: [frag] } : {}),
+    ...extra,
+  });
 }
 
 /** The check methods that live on concrete Zod subtypes (ZodString/ZodNumber) but not
@@ -1558,7 +1569,7 @@ export const s = {
   url: (params?: Parameters<typeof z.url>[0]) =>
     formatField(z.url(params), "url"),
   /** Surreal native `uuid`: a `string` app-side, stored as a `Uuid` (no ASSERT — native type). */
-  uuid: () => new SField(uuidCodec()),
+  uuid: () => new SField(uuidCodec(), { idStrategy: "uuid" }),
   guid: (params?: Parameters<typeof z.guid>[0]) =>
     formatField(z.guid(params), "guid"),
   nanoid: (params?: Parameters<typeof z.nanoid>[0]) =>
@@ -1568,7 +1579,20 @@ export const s = {
   cuid2: (params?: Parameters<typeof z.cuid2>[0]) =>
     formatField(z.cuid2(params), "cuid2"),
   ulid: (params?: Parameters<typeof z.ulid>[0]) =>
-    formatField(z.ulid(params), "ulid"),
+    formatField(z.ulid(params), "ulid", { idStrategy: "ulid" }),
+  /** SurrealDB's default record-id format: a 20-char lowercase-alphanumeric string
+   *  (`rand::id()`, charset `abcdefghijklmnopqrstuvwxyz0123456789`). As a scalar field,
+   *  bakes `ASSERT string::len($value) == 20 AND $value = /^[a-z0-9]+$/`. As an `id`
+   *  field (`id: s.id()`), emits `DEFINE FIELD id … DEFAULT rand::id() ASSERT …`
+   *  (SurrealDB v3.2.0+). This is the explicit, validated form of SurrealDB's default —
+   *  omit it and `rand::id` still applies, but without the schema-level ASSERT. */
+  id: () => {
+    const schema = z.string().length(20).regex(/^[a-z0-9]+$/);
+    return new SField(schema, {
+      idStrategy: "randId",
+      asserts: deriveAsserts(schema),
+    });
+  },
   xid: (params?: Parameters<typeof z.xid>[0]) =>
     formatField(z.xid(params), "xid"),
   ksuid: (params?: Parameters<typeof z.ksuid>[0]) =>
@@ -2945,7 +2969,79 @@ type WithSmartId<Name extends string, S extends Shape> = Omit<S, "id"> & {
   >;
 };
 
-/** Build a table's `id` field: a `record<name>` whose value type comes from `given`. */
+/** The Zod def.type names that wrap a schema (optional/nullable/default/prefault/catch/readonly).
+ *  An id-strategy field wrapped in any of these is rejected — an id is always required and bare. */
+const WRAPPER_TYPES = new Set([
+  "optional",
+  "nullable",
+  "default",
+  "prefault",
+  "catch",
+  "readonly",
+]);
+
+/** Build the SurrealMeta for an id-strategy RecordIdField: the `DEFAULT <gen()>` expression
+ *  and id-specific `ASSERT` fragments (using `id.id()`, not `$value` — per SurrealDB v3.2.0
+ *  `DEFINE FIELD id` semantics). `uuid` has no assert (native type validates the value). */
+function idStrategyMeta(strategy: "ulid" | "uuid" | "randId"): SurrealMeta {
+  const gen = strategy === "randId" ? "id" : strategy;
+  const asserts: string[] =
+    strategy === "ulid"
+      ? ["id.id().is_ulid()"]
+      : strategy === "randId"
+        ? ["string::len(id.id()) == 20", "id.id() = /^[a-z0-9]+$/"]
+        : []; // uuid — native type, no assert needed
+  return {
+    idStrategy: strategy,
+    default: new BoundQuery(`rand::${gen}()`),
+    ...(asserts.length ? { asserts } : {}),
+  };
+}
+
+/** Validate that an id-strategy field doesn't carry clauses SurrealDB v3.2.0 forbids on `id`
+ *  (VALUE/COMPUTED/REFERENCE/READONLY, a user-set DEFAULT/DEFAULT ALWAYS), and isn't wrapped in
+ *  optional/nullable/default/prefault/catch/readonly (an id is always required + bare). Throws a
+ *  DX-friendly error pinning the table + clause so the user fixes it at author time, not apply. */
+function validateIdStrategyField(
+  tableName: string,
+  field: SField,
+): void {
+  const s = field.surreal;
+  const at = `table "${tableName}" id field`;
+  // Wrapper check — the schema itself must be bare (not optional/nullable/...).
+  const defType = (field.schema._zod.def as { type: string }).type;
+  if (WRAPPER_TYPES.has(defType))
+    throw new Error(
+      `${at}: an id-strategy field (${s.idStrategy}) can't be wrapped in ${defType}() — ` +
+        `an id is always required and bare. Use \`id: s.${s.idStrategy === "randId" ? "id" : s.idStrategy}()\` directly.`,
+    );
+  // v3.2.0-forbidden clauses (the strategy sets its own DEFAULT + ASSERT; the rest are rejected by the DB).
+  if (s.value)
+    throw new Error(
+      `${at}: $value can't be combined with an id strategy (${s.idStrategy}) — SurrealDB v3.2.0 forbids VALUE on id.`,
+    );
+  if (s.computed)
+    throw new Error(
+      `${at}: $computed can't be combined with an id strategy (${s.idStrategy}) — SurrealDB v3.2.0 forbids COMPUTED on id.`,
+    );
+  if (s.reference)
+    throw new Error(
+      `${at}: $reference can't be combined with an id strategy (${s.idStrategy}) — SurrealDB v3.2.0 forbids REFERENCE on id.`,
+    );
+  if (s.readonly)
+    throw new Error(
+      `${at}: $readonly can't be combined with an id strategy (${s.idStrategy}) — SurrealDB v3.2.0 forbids READONLY on id.`,
+    );
+  if (s.default)
+    throw new Error(
+      `${at}: $default can't be combined with an id strategy (${s.idStrategy}) — the strategy already sets DEFAULT rand::${s.idStrategy === "randId" ? "id" : s.idStrategy}().`,
+    );
+}
+
+/** Build a table's `id` field: a `record<name>` whose value type comes from `given`.
+ *  When `given` carries an `idStrategy` (`s.ulid()` / `s.uuid()` / `s.id()`), the
+ *  resulting RecordIdField carries the `DEFAULT` + id-specific `ASSERT` metadata so the
+ *  emitter can produce `DEFINE FIELD id … DEFAULT <gen()> [ASSERT …]` (SurrealDB v3.2.0+). */
 function buildIdField(
   name: string,
   given: AnyField | z.ZodType | undefined,
@@ -2953,8 +3049,19 @@ function buildIdField(
   if (given === undefined) return new RecordIdField([name]);
   if (given instanceof RecordIdField)
     return new RecordIdField([name], given.valueType);
-  const valueSchema = given instanceof SField ? given.schema : given;
-  return new RecordIdField([name], valueSchema as z.ZodType<RecordIdValue>);
+  const field = given instanceof SField ? given : new SField(given);
+  const strategy = field.surreal.idStrategy;
+  if (strategy) {
+    validateIdStrategyField(name, field);
+    const meta = idStrategyMeta(strategy);
+    // Carry allowed clauses from the authored field (COMMENT + PERMISSIONS are valid on id per
+    // v3.2.0; the rest are rejected by validateIdStrategyField above).
+    if (field.surreal.comment !== undefined) meta.comment = field.surreal.comment;
+    if (field.surreal.permissions !== undefined)
+      meta.permissions = field.surreal.permissions;
+    return new RecordIdField([name], field.schema, meta);
+  }
+  return new RecordIdField([name], field.schema as z.ZodType<RecordIdValue>);
 }
 
 /** Normalize a shape, replacing/adding the special `id` field via buildIdField. */

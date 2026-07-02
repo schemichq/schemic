@@ -98,6 +98,13 @@ DEFINE FIELD [ OVERWRITE | IF NOT EXISTS ] @name ON [ TABLE ] @table
 - [x] `COMMENT @string`
 - [ ] `GRAPHQL_ALIAS @string` · [ ] `GRAPHQL_DEPRECATED @string` _(engine-confirmed; undocumented on the reference site)_
 
+> **`DEFINE FIELD id` (v3.2.0+):** `DEFAULT` and `ASSERT` are allowed on the `id` field starting
+> v3.2.0 — `DEFINE FIELD id ON TABLE t TYPE string DEFAULT rand::ulid() ASSERT id.id().is_ulid();`.
+> Inside the ASSERT, `$value` is the whole record id; use `id.id()` (or `record::id($value)`) to
+> inspect the key portion. `VALUE`, `REFERENCE`, `COMPUTED`, `READONLY`, `FLEXIBLE`, and
+> `DEFAULT ALWAYS` are forbidden on `id`. Schemic exposes this via `id: s.ulid()` / `s.uuid()` /
+> `s.id()` on `defineTable` — see `docs/COVERAGE.md` "Record-id generation". Rejected by ≤ 3.1.x.
+
 ## DEFINE INDEX
 
 ```
