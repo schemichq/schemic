@@ -1421,8 +1421,17 @@ export class SObjectField<
     return new SField<S2, F2>(schema, native);
   }
 
-  /** This object's registered per-field SField wrappers (the source of nested-DDL clauses). */
-  private get fields(): Record<string, AnyField> {
+  /** This object's native per-field SField map — the real fields (with their SurrealDB DDL metadata),
+   *  the inverse of {@link SObjectField.shape} (which returns the erased Zod shape). Stays in sync
+   *  through `.extend`/`.merge`/`.pick`/`.omit`/`.partial`, and can be fed straight into
+   *  {@link defineTable} (e.g. to compose base/meta columns). */
+  get fields(): S {
+    return this.sourceFields as unknown as S;
+  }
+
+  /** The strict-typed field map (values are `AnyField`) used by the composition methods below —
+   *  `.fields` is the same map, typed as the object's `S` for the public API. */
+  private get sourceFields(): Record<string, AnyField> {
     return objectFieldsRegistry.get(this.schema) ?? {};
   }
 
@@ -1441,7 +1450,10 @@ export class SObjectField<
   /** Add/override fields. Accepts fields OR raw Zod, exactly like `s.object`. */
   extend<T extends Shape>(shape: T): SObjectField<Omit<S, keyof T> & T, Flags> {
     const { zshape, fields } = liftShape(shape);
-    return this.wrap(this.schema.extend(zshape), { ...this.fields, ...fields });
+    return this.wrap(this.schema.extend(zshape), {
+      ...this.sourceFields,
+      ...fields,
+    });
   }
 
   /** Merge another object field's shape in (its fields win on conflict). */
@@ -1449,8 +1461,8 @@ export class SObjectField<
     other: SObjectField<T>,
   ): SObjectField<Omit<S, keyof T> & T, Flags> {
     return this.wrap(this.schema.extend(other.schema.shape), {
-      ...this.fields,
-      ...other.fields,
+      ...this.sourceFields,
+      ...other.sourceFields,
     });
   }
 
@@ -1460,7 +1472,7 @@ export class SObjectField<
   ): SObjectField<Pick<S, keyof M & keyof S>, Flags> {
     const keep = new Set(Object.keys(mask));
     const fields = Object.fromEntries(
-      Object.entries(this.fields).filter(([k]) => keep.has(k)),
+      Object.entries(this.sourceFields).filter(([k]) => keep.has(k)),
     );
     return this.wrap(this.schema.pick(mask as never), fields);
   }
@@ -1471,24 +1483,24 @@ export class SObjectField<
   ): SObjectField<Omit<S, keyof M>, Flags> {
     const drop = new Set(Object.keys(mask));
     const fields = Object.fromEntries(
-      Object.entries(this.fields).filter(([k]) => !drop.has(k)),
+      Object.entries(this.sourceFields).filter(([k]) => !drop.has(k)),
     );
     return this.wrap(this.schema.omit(mask as never), fields);
   }
 
   /** Make all fields optional. */
   partial(): SObjectField<PartialShape<S>, Flags> {
-    return this.wrap(this.schema.partial(), this.fields);
+    return this.wrap(this.schema.partial(), this.sourceFields);
   }
 
   /** Make all fields required. */
   required(): SObjectField<RequiredShape<S>, Flags> {
-    return this.wrap(this.schema.required(), this.fields);
+    return this.wrap(this.schema.required(), this.sourceFields);
   }
 
   /** Type unknown keys with a schema (field OR raw Zod) — an `unknown` catchall emits `FLEXIBLE`. */
   catchall<C extends AnyField | z.ZodType>(schema: C): SObjectField<S, Flags> {
-    return this.wrap(this.schema.catchall(toZod(schema)), this.fields);
+    return this.wrap(this.schema.catchall(toZod(schema)), this.sourceFields);
   }
 
   /** Allow arbitrary extra keys (`FLEXIBLE`) — alias for the inherited {@link SField.flexible}. */
@@ -3009,20 +3021,25 @@ type RejectBadId<S extends Shape> = "id" extends keyof S
 // biome-ignore lint/complexity/noBannedTypes: `{}` is the empty default shape — a bare table (just `id`), like defineRelation.
 export function defineTable<Name extends string, S extends Shape = {}>(
   name: Name,
-  // The object form is rejected at compile time (`RejectNoDdl` + `RejectBadId`); the callback form
-  // keeps its precise `S` inference (a `& RejectNoDdl<S>` in a function-return position collapses it),
-  // so a no-DDL field there is caught by the runtime `inferField` backstop instead. Omitting `shape`
-  // gives a bare table (just the implicit `id`) — same as `defineRelation(name)`.
+  // A no-DDL field / bad id in the raw-map form is rejected at compile time (`RejectNoDdl` +
+  // `RejectBadId`); the callback form keeps its precise `S` inference (a `& RejectNoDdl<S>` in a
+  // function-return position collapses it), so a no-DDL field there is caught by the runtime
+  // `inferField` backstop instead. The `s.object()` form is accepted too (its native `.fields` map is
+  // unwrapped) so a schema can be composed then turned into a table. Omitting `shape` gives a bare
+  // table (just the implicit `id`) — same as `defineRelation(name)`.
   shape?:
     | (S & RejectNoDdl<S> & RejectBadId<S>)
-    | ((self: RecordIdField<Name>) => S),
+    | ((self: RecordIdField<Name>) => S)
+    | SObjectField<S>,
 ): TableDef<Name, WithSmartId<Name, S>> {
   const resolved =
     shape === undefined
       ? ({} as S)
       : typeof shape === "function"
         ? shape(new RecordIdField([name]))
-        : shape;
+        : shape instanceof SObjectField
+          ? (shape.fields as S)
+          : shape;
   return new TableDef(
     name,
     applySmartId(name, resolved) as unknown as Fields<WithSmartId<Name, S>>,
