@@ -213,7 +213,7 @@ Docs root: https://surrealdb.com/docs/reference/query-language/statements/define
 |---|---|---|---|
 | DEFINE TABLE | `defineTable`/`defineRelation` | ✅ | head clauses below; `CHANGEFEED` ✅ batch 1; `ENFORCED` ✅ batch 2; **`AS SELECT` ❌** |
 | DEFINE FIELD | `s.*` + `$`-clauses | ✅ | `COMPUTED` ✅ batch 1; `REFERENCE` ✅ batch 2 |
-| DEFINE INDEX | `.index()/.unique()/.index(name,fields,{unique\|count})` | ✅ (plain/unique/composite/count) | `COUNT` ✅ batch 1; **FULLTEXT/HNSW/DISKANN/CONCURRENTLY/DEFER ❌** |
+| DEFINE INDEX | `.$index()/.$unique()/.index(name,fields,{unique\|count})` | ✅ (plain/unique/composite/count) | `COUNT` ✅ batch 1; **FULLTEXT/HNSW/DISKANN/CONCURRENTLY/DEFER ❌** |
 | DEFINE EVENT | `.event()` / `defineEvent()` | ✅ (WHEN/THEN) | **`ASYNC RETRY/MAXDEPTH` 🆕❌, `COMMENT` ❌** |
 | DEFINE FUNCTION | `defineFunction()` | ✅ | args/returns/body/permissions/comment all supported |
 | DEFINE ACCESS | `defineAccess()` | ✅ (RECORD/JWT/BEARER + DURATION) | **`WITH JWT`/`WITH ISSUER` on RECORD 🆕❌** |
@@ -275,7 +275,7 @@ Full special-clause grammar (verbatim): `UNIQUE | COUNT | FULLTEXT ANALYZER @a [
 
 | Kind | @schemic/core | Status |
 |---|---|---|
-| plain / UNIQUE / composite | `.index()/.unique()/.index(name,[…],{unique})` | ✅ |
+| plain / UNIQUE / composite | `.$index()/.$unique()/.index(name,[…],{unique})` | ✅ |
 | COUNT 🆕 | `.index(name, [], { count: true })` | ✅ batch 1 |
 | **FULLTEXT ANALYZER … BM25 HIGHLIGHTS** | — | ❌ (live ✅; DB expands `BM25`→`BM25(1.2,0.75)`) |
 | **SEARCH ANALYZER … BM25 HIGHLIGHTS DEFER** (legacy form) | — | ❌ |

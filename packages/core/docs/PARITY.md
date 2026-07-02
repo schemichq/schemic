@@ -136,7 +136,7 @@ s.hexadecimal() / s.latitude() / s.longitude() / s.ip() / s.domain()
   exist on 3.1.3); non-bakeable formats (jwt/cuid/nanoid/base64/…) stay assert-free.
 - **Table clauses**: `TYPE NORMAL/ANY/RELATION` (with `FROM`/`TO`, `ENFORCED` — batch 2), `SCHEMAFULL`/`SCHEMALESS`,
   `DROP`, `COMMENT`, table-level `PERMISSIONS`, `CHANGEFEED` (batch 1), `OVERWRITE` / `IF NOT EXISTS`.
-- **Indexes**: single-field `.index()`/`.unique()`, composite `.index(name, fields, {unique})`,
+- **Indexes**: single-field `.$index()`/`.$unique()`, composite `.index(name, fields, {unique})`,
   `COUNT` (`.index(name, [], { count: true })` — batch 1).
 - **DEFINE statements**: `EVENT` (WHEN/THEN, multi-then), `FUNCTION` (args/returns/body/
   permissions/comment), `ACCESS` (RECORD signup/signin/authenticate + DURATION, JWT
@@ -194,7 +194,7 @@ s.hexadecimal() / s.latitude() / s.longitude() / s.ip() / s.domain()
 |---|---|---|---|
 | DEFINE TABLE | `defineTable` / `defineRelation` | ✅ | |
 | DEFINE FIELD | shape fields (`s.*` + `$`-clauses) | ✅ | |
-| DEFINE INDEX | `.index()` / `.unique()` / `.index(name,fields,{unique\|count})` | ✅ (plain/unique/composite/count) | search & vector kinds ❌ |
+| DEFINE INDEX | `.$index()` / `.$unique()` / `.index(name,fields,{unique\|count})` | ✅ (plain/unique/composite/count) | search & vector kinds ❌ |
 | DEFINE EVENT | `.event(...)` / `defineEvent(...)` | ✅ | WHEN/THEN, multi-then |
 | DEFINE FUNCTION | `defineFunction(...)` | ✅ | args/returns/body/permissions/comment |
 | DEFINE ACCESS | `defineAccess(...)` | ✅ | RECORD / JWT / BEARER (+DURATION) |
@@ -246,8 +246,8 @@ s.hexadecimal() / s.latitude() / s.longitude() / s.ip() / s.domain()
 
 | Kind | SurQL | @schemic/core | Status |
 |---|---|---|---|
-| plain (single) | `… FIELDS f` | `.index()` | ✅ |
-| UNIQUE (single) | `… FIELDS f UNIQUE` | `.unique()` | ✅ |
+| plain (single) | `… FIELDS f` | `.$index()` | ✅ |
+| UNIQUE (single) | `… FIELDS f UNIQUE` | `.$unique()` | ✅ |
 | composite | `… FIELDS a, b [UNIQUE]` | `.index(name, [a,b], {unique})` | ✅ |
 | **FULLTEXT / SEARCH** | `… FULLTEXT ANALYZER x BM25 HIGHLIGHTS` | — | ❌ |
 | **HNSW (vector)** | `… HNSW DIMENSION n DIST … TYPE …` | — | ❌ |
