@@ -1969,6 +1969,34 @@ type ZShape<S extends Shape> = {
 };
 /** Every field's zshape, including internal ones — backs the `.system` view. */
 type ZShapeAll<S extends Shape> = { [K in keyof S]: SchemaOf<S[K]> };
+/** The Zod raw shape of the create-input ({@link TableDef.create}): internal fields dropped, and each
+ *  create-optional key (`id`, `$default`/`$defaultAlways`/`$value(optional)`/`$computed`, or already
+ *  Zod-optional) wrapped in `ZodOptional` — mirrors {@link CreateShape}. */
+//   The `string extends FlagsOf<S[K]>` guard (as in {@link IsInternal}) keeps `CreateZShape<Shape>` /
+//   `UpdateZShape<Shape>` shape-agnostic — mapping to a bare `z.ZodType` for the widened `Shape` case —
+//   so `TableDef<"t", concrete>` stays assignable to `TableDef<string, Shape>`.
+type CreateZShape<S extends Shape> = {
+  [K in keyof S as IsInternal<S[K]> extends true
+    ? never
+    : K]: string extends FlagsOf<S[K]>
+    ? z.ZodType
+    : CreateOptional<S, K> extends true
+      ? z.ZodOptional<SchemaOf<S[K]>>
+      : SchemaOf<S[K]>;
+};
+/** The Zod raw shape of the update-input ({@link TableDef.update}): internal + `id` + readonly fields
+ *  dropped, all the rest `ZodOptional` (a partial patch) — mirrors {@link UpdateShape}. */
+type UpdateZShape<S extends Shape> = {
+  [K in keyof S as IsInternal<S[K]> extends true
+    ? never
+    : string extends FlagsOf<S[K]>
+      ? K
+      : UpdateExcluded<S, K> extends true
+        ? never
+        : K]: string extends FlagsOf<S[K]>
+    ? z.ZodType
+    : z.ZodOptional<SchemaOf<S[K]>>;
+};
 /**
  * The schema type returned by `s.object`: a plain `z.ZodObject` carrying its original
  * `Shape` via a type-only `~szShape` brand. The brand is optional, so the runtime cast
@@ -2640,6 +2668,43 @@ export class TableDef<Name extends string, S extends Shape> {
     );
   }
 
+  // --- Derived input schemas (real, composable Standard-Schema Zod objects) ---
+  // `.object` (the full row) is built in the constructor. `.create`/`.update` mirror the
+  // `CreateShape`/`UpdateShape` semantics as runtime schemas so they can be `.partial()/.extend()/
+  // .refine()/.or()`d for client-input validation — instead of hand-rebuilding from the field map.
+
+  /** The **create-input** schema: internal fields dropped; DB-filled fields (`id`, `$default`/
+   *  `$defaultAlways`/`$value`/`$computed`) and Zod-optional fields are optional. Composable. */
+  get create(): z.ZodObject<CreateZShape<S>> {
+    const shape: Record<string, z.ZodType> = {};
+    for (const [k, f] of Object.entries(this.fields)) {
+      const field = f as AnyField;
+      if (field.surreal.internal) continue;
+      const optional =
+        k === "id" ||
+        field.surreal.default !== undefined ||
+        field.surreal.defaultAlways === true ||
+        field.surreal.value !== undefined ||
+        field.surreal.computed !== undefined ||
+        field.isOptional();
+      shape[k] = optional ? field.schema.optional() : field.schema;
+    }
+    return z.object(shape) as unknown as z.ZodObject<CreateZShape<S>>;
+  }
+
+  /** The **update-input** schema: a partial patch — `id` + readonly fields excluded, everything else
+   *  optional. Composable (`.extend()/.refine()/.or()`, e.g. `.update.extend({ id: s.string() })`). */
+  get update(): z.ZodObject<UpdateZShape<S>> {
+    const shape: Record<string, z.ZodType> = {};
+    for (const [k, f] of Object.entries(this.fields)) {
+      const field = f as AnyField;
+      if (field.surreal.internal || k === "id" || field.surreal.readonly)
+        continue;
+      shape[k] = field.schema.optional();
+    }
+    return z.object(shape) as unknown as z.ZodObject<UpdateZShape<S>>;
+  }
+
   // --- DDL config (chainable, immutable) ---
   private withConfig(config: Partial<TableConfig>): TableDef<Name, S> {
     return new TableDef(this.name, this.fields, { ...this.config, ...config });
@@ -2737,10 +2802,16 @@ export class TableDef<Name extends string, S extends Shape> {
   }
 
   // --- Shape ops (mirror Zod's object methods; carry DDL metadata + config) ---
-  extend<E extends Shape>(ext: E): TableDef<Name, Omit<S, keyof E> & E> {
+  /** Add columns — a typed, cast-free column mixin. Accepts a raw field map OR an `s.object()` (its
+   *  native `.fields` are used); added columns win on key conflict, the smart `id` is preserved. Use
+   *  it to compose reusable base/meta columns: `defineTable("customer", fields).extend(auditColumns)`. */
+  extend<E extends Shape>(
+    ext: E | SObjectField<E>,
+  ): TableDef<Name, Omit<S, keyof E> & E> {
+    const added = ext instanceof SObjectField ? ext.fields : ext;
     const f: Record<string, AnyField> = {
       ...(this.fields as unknown as Record<string, AnyField>),
-      ...normalizeFields(ext),
+      ...normalizeFields(added),
     };
     return new TableDef(
       this.name,
