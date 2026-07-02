@@ -319,63 +319,113 @@ export class PgField<
  * to the inner `z.object` and re-wraps as a `PgObjectField`, so the result stays composable and the
  * App type stays precise (mirrors how Zod itself puts `.extend`/`.pick`/… on `ZodObject`, not `ZodType`).
  */
+/** A `{ col: field }` map — the source shape an `s.object()`/table is built from. */
+export type FieldMap = Record<string, AnyField | z.ZodType>;
+/** The Zod object shape a {@link FieldMap} lowers to (each field -> its schema). */
+type ShapeOf<FM extends FieldMap> = { [K in keyof FM]: SchemaOf<FM[K]> };
+
+const liftFields = <FM extends FieldMap>(fm: FM): ShapeOf<FM> =>
+  Object.fromEntries(
+    Object.entries(fm).map(([k, v]) => [k, toZod(v)]),
+  ) as ShapeOf<FM>;
+const pickKeys = <FM extends FieldMap>(
+  fm: FM,
+  mask: Record<string, unknown>,
+): FieldMap =>
+  Object.fromEntries(Object.entries(fm).filter(([k]) => k in mask));
+const omitKeys = <FM extends FieldMap>(
+  fm: FM,
+  mask: Record<string, unknown>,
+): FieldMap =>
+  Object.fromEntries(Object.entries(fm).filter(([k]) => !(k in mask)));
+
+/**
+ * A Postgres OBJECT field — the result of `s.object({...})`. Parametrized by its FIELD MAP `FM` (the
+ * `{ col: field }` shape it was built from), which it RETAINS: `.fields` returns those NATIVE PgFields
+ * (with their `native.pg` column metadata) — the inverse of `.shape` (the Zod-erased schemas). That map
+ * is what lets `defineTable(obj)` / `TableDef.extend(obj)` compose an object into a table WITHOUT losing
+ * column types. The Zod object schema (one `jsonb` column) is derived from `FM`; composition methods
+ * (`.extend`/`.pick`/…) keep the map in sync.
+ */
 export class PgObjectField<
-  Sh extends z.ZodRawShape = z.ZodRawShape,
+  FM extends FieldMap = FieldMap,
   Flags extends string = never,
-> extends PgField<z.ZodObject<Sh>, Flags> {
-  // An object-producing op (incl. the inherited .loose()/.strict()/.flexible()) stays a PgObjectField;
-  // anything else (e.g. .optional()/.array()) degrades to a base PgField, matching the wrapper's type.
+> extends PgField<z.ZodObject<ShapeOf<FM>>, Flags> {
+  constructor(
+    schema: z.ZodObject<ShapeOf<FM>>,
+    native: PgMeta,
+    private readonly _fields: FM = {} as FM,
+  ) {
+    super(schema, native);
+  }
+  /** The source field map — native PgFields WITH column metadata (inverse of the Zod-erased `.shape`). */
+  get fields(): FM {
+    return this._fields;
+  }
+
+  // An object-producing op (incl. the inherited .loose()/.strict()/.flexible()) stays a PgObjectField,
+  // carrying this map forward (those ops don't change the field set); anything else (.optional()/.array())
+  // degrades to a base PgField, matching the wrapper's type.
   protected rebuild<S2 extends z.ZodType, F2 extends string>(
     schema: S2,
     native: PgMeta,
   ): PgField<S2, F2> {
     if (schema instanceof z.ZodObject)
-      return new PgObjectField(schema as never, native) as unknown as PgField<
-        S2,
-        F2
-      >;
+      return new PgObjectField(
+        schema as never,
+        native,
+        this._fields,
+      ) as unknown as PgField<S2, F2>;
     return new PgField<S2, F2>(schema, native);
   }
-  private obj<Sh2 extends z.ZodRawShape>(
-    schema: z.ZodObject<Sh2>,
-  ): PgObjectField<Sh2, Flags> {
-    return new PgObjectField<Sh2, Flags>(schema, this.native);
+  private obj<FM2 extends FieldMap>(
+    schema: z.ZodObject<ShapeOf<FM2>>,
+    fields: FM2,
+  ): PgObjectField<FM2, Flags> {
+    return new PgObjectField<FM2, Flags>(schema, this.native, fields);
   }
   /** Add fields (existing keys are overwritten). Accepts fields OR raw Zod, like `s.object`. */
-  extend<T extends Record<string, AnyField | z.ZodType>>(shape: T) {
-    const lifted = Object.fromEntries(
-      Object.entries(shape).map(([k, v]) => [k, toZod(v)]),
-    ) as { [K in keyof T]: SchemaOf<T[K]> };
-    return this.obj(this.schema.extend(lifted));
+  extend<T extends FieldMap>(shape: T) {
+    const fields = { ...this._fields, ...shape } as Omit<FM, keyof T> & T;
+    return this.obj(this.schema.extend(liftFields(shape)) as never, fields);
   }
-  /** Merge another object's shape in (its fields win on conflict). */
-  merge<T extends z.ZodRawShape>(other: PgObjectField<T> | z.ZodObject<T>) {
-    return this.obj(
-      this.schema.merge(other instanceof PgObjectField ? other.schema : other),
-    );
+  /** Merge another object's field map in (its fields win on conflict). */
+  merge<T extends FieldMap>(other: PgObjectField<T>) {
+    const fields = { ...this._fields, ...other.fields } as Omit<FM, keyof T> &
+      T;
+    return this.obj(this.schema.merge(other.schema) as never, fields);
   }
   /** Keep only the masked keys. */
-  pick<M extends Parameters<z.ZodObject<Sh>["pick"]>[0]>(mask: M) {
-    return this.obj(this.schema.pick(mask));
+  pick<M extends { [K in keyof FM]?: true }>(mask: M) {
+    return this.obj(
+      this.schema.pick(mask as never) as never,
+      pickKeys(this._fields, mask) as Pick<FM, keyof M & keyof FM>,
+    );
   }
   /** Drop the masked keys. */
-  omit<M extends Parameters<z.ZodObject<Sh>["omit"]>[0]>(mask: M) {
-    return this.obj(this.schema.omit(mask));
+  omit<M extends { [K in keyof FM]?: true }>(mask: M) {
+    return this.obj(
+      this.schema.omit(mask as never) as never,
+      omitKeys(this._fields, mask) as Omit<FM, keyof M>,
+    );
   }
-  /** Make all fields optional. */
+  /** Make all fields optional (Zod-side; the field map is unchanged). */
   partial() {
-    return this.obj(this.schema.partial());
+    return this.obj(this.schema.partial() as never, this._fields);
   }
   /** Make all fields required. */
   required() {
-    return this.obj(this.schema.required());
+    return this.obj(this.schema.required() as never, this._fields);
   }
   /** Type unknown keys with a schema (field OR raw Zod). */
   catchall<C extends AnyField | z.ZodType>(schema: C) {
-    return this.obj(this.schema.catchall(toZod(schema) as SchemaOf<C>));
+    return this.obj(
+      this.schema.catchall(toZod(schema) as SchemaOf<C>) as never,
+      this._fields,
+    );
   }
-  /** The object's field shape. */
-  get shape(): Sh {
+  /** The object's Zod field shape (schemas). See `.fields` for the native field map. */
+  get shape(): ShapeOf<FM> {
     return this.schema.shape;
   }
 }
@@ -660,16 +710,13 @@ export const s = {
   // object -> jsonb (opaque on disk). Accepts field OR raw-Zod values (a Zod drop-in superset).
   // Generic over the shape so the App type is the precise object AND the returned PgObjectField's
   // composition methods (.extend/.pick/…) stay precisely typed.
-  object: <Sh extends Record<string, AnyField | z.ZodType>>(
-    shape: Sh,
-  ): PgObjectField<{ [K in keyof Sh]: SchemaOf<Sh[K]> }> =>
-    new PgObjectField(
-      z.object(
-        Object.fromEntries(
-          Object.entries(shape).map(([k, v]) => [k, toZod(v)]),
-        ),
-      ) as z.ZodObject<{ [K in keyof Sh]: SchemaOf<Sh[K]> }>,
+  object: <Sh extends FieldMap>(shape: Sh): PgObjectField<Sh> =>
+    // retain `shape` as the source field map so `.fields` (and defineTable(obj)/extend(obj)) recover the
+    // native PgFields WITH their column metadata — the Zod object is only the derived jsonb-column schema.
+    new PgObjectField<Sh>(
+      z.object(liftFields(shape)) as z.ZodObject<ShapeOf<Sh>>,
       { pg: { type: "jsonb" } },
+      shape,
     ),
   // z.strictObject / z.looseObject drop-ins — same jsonb column, unknown-key mode preset (still a
   // composable PgObjectField). strict rejects extra keys; loose passes them through.
@@ -952,14 +999,40 @@ export class PgTableDef<
   record(opts?: { onDelete?: string; onUpdate?: string }): PgField {
     return s.references(this.name, opts);
   }
+
+  /**
+   * Compose more columns onto this table — a field record OR an `s.object()` — typed and cast-free.
+   * Existing columns are overwritten by same-named ones. This is the base-column *mixin* primitive:
+   * `defineTable("customer", customerCols).extend(tenantMeta)`. (An `s.object()`'s `.fields` are the
+   * native PgFields, so their column types are preserved — the object is NOT collapsed to jsonb here.)
+   */
+  extend<T extends Record<string, AnyPgField>>(
+    shape: T | PgObjectField<T>,
+  ): PgTableDef<Name, Omit<F, keyof T> & T> {
+    const add = shape instanceof PgObjectField ? shape.fields : shape;
+    return new PgTableDef(
+      this.name,
+      { ...this.fields, ...add } as Omit<F, keyof T> & T,
+      this.config,
+    );
+  }
 }
 
-/** Declare a Postgres table: `export const user = defineTable("user", { name: s.text(), age: s.integer().optional() })`. */
+/**
+ * Declare a Postgres table: `defineTable("user", { name: s.text(), age: s.integer().optional() })`.
+ * The column shape may be a field record OR an `s.object({...})` (its `.fields` — the native PgFields
+ * with column metadata — are used, so composing from a reusable object keeps the types).
+ */
 export function defineTable<
   Name extends string,
   F extends Record<string, AnyPgField>,
->(name: Name, fields: F, config?: PgTableConfig): PgTableDef<Name, F> {
-  return new PgTableDef(name, fields, config ?? {});
+>(
+  name: Name,
+  fields: F | PgObjectField<F>,
+  config?: PgTableConfig,
+): PgTableDef<Name, F> {
+  const map = fields instanceof PgObjectField ? fields.fields : fields;
+  return new PgTableDef(name, map, config ?? {});
 }
 
 // --- defineEnum: a native pg ENUM type (CREATE TYPE … AS ENUM) ----------------------------------

@@ -1234,3 +1234,93 @@ describe("cross-driver factories (network formats, width numerics, schema factor
     expect(out).toContain('"pp" integer NOT NULL'); // preprocess inherits the inner field's column
   });
 });
+
+describe("table composition (s.object().fields, defineTable(obj), TableDef.extend)", () => {
+  test("s.object().fields returns the native field map WITH column metadata (not the Zod .shape)", () => {
+    const o = s.object({
+      name: s.varchar(50),
+      age: s.integer(),
+      meta: s.jsonb(),
+    });
+    expect(Object.keys(o.fields)).toEqual(["name", "age", "meta"]);
+    expect(o.fields.name).toBeInstanceOf(PgField);
+    // the retained fields carry native.pg (this is what preserves column types through composition)
+    expect((o.fields.name as PgField).native.pg).toEqual({
+      type: "varchar",
+      params: [50],
+    });
+    expect((o.fields.age as PgField).native.pg).toEqual({ type: "integer" });
+    // composition keeps the map + metadata in sync
+    const ext = o.extend({ active: s.boolean() });
+    expect(Object.keys(ext.fields)).toEqual(["name", "age", "meta", "active"]);
+    expect((ext.fields.active as PgField).native.pg).toEqual({
+      type: "boolean",
+    });
+    expect(Object.keys(o.pick({ name: true }).fields)).toEqual(["name"]);
+    expect(Object.keys(o.omit({ meta: true }).fields)).toEqual(["name", "age"]);
+    // .shape is still the Zod schemas
+    expect(Object.keys(o.shape)).toEqual(["name", "age", "meta"]);
+  });
+
+  test("defineTable(s.object()) preserves column types (NOT collapsed to jsonb) + round-trips", async () => {
+    const cols = s.object({
+      name: s.varchar(50),
+      age: s.integer(),
+      active: s.boolean(),
+    });
+    const t = defineTable("person", cols);
+    const objs = postgresDriver.explode([t], []);
+    const out = emitKinds(registry, objs).join("\n");
+    expect(out).toContain('"name" varchar(50)');
+    expect(out).toContain('"age" integer');
+    expect(out).toContain('"active" boolean');
+    expect(Object.keys(t.fields)).toEqual(["name", "age", "active"]);
+    const conn = (await postgresDriver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
+    try {
+      await postgresDriver.apply(conn, emitKinds(registry, objs));
+      const { up, down } = buildKindDiff(
+        registry,
+        await postgresDriver.introspectAll(conn),
+        objs,
+      );
+      expect({ up, down }).toEqual({ up: [], down: [] });
+    } finally {
+      await conn.close();
+    }
+  });
+
+  test("TableDef.extend composes a field record OR an s.object() (typed, cast-free) + round-trips", async () => {
+    const meta = { tenant_id: s.uuid(), created: s.timestamptz() };
+    const t = defineTable("customer", { email: s.text() })
+      .extend(meta)
+      .extend(s.object({ ref: s.varchar(20) }));
+    const objs = postgresDriver.explode([t], []);
+    const out = emitKinds(registry, objs).join("\n");
+    expect(out).toContain('"email" text');
+    expect(out).toContain('"tenant_id" uuid');
+    expect(out).toContain('"created" timestamp with time zone');
+    expect(out).toContain('"ref" varchar(20)');
+    expect(Object.keys(t.fields)).toEqual([
+      "email",
+      "tenant_id",
+      "created",
+      "ref",
+    ]);
+    const conn = (await postgresDriver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
+    try {
+      await postgresDriver.apply(conn, emitKinds(registry, objs));
+      const { up, down } = buildKindDiff(
+        registry,
+        await postgresDriver.introspectAll(conn),
+        objs,
+      );
+      expect({ up, down }).toEqual({ up: [], down: [] });
+    } finally {
+      await conn.close();
+    }
+  });
+});
