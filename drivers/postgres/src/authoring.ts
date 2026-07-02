@@ -107,29 +107,39 @@ export class PgField<
   }
 
   // --- pg-native `$`-methods (DDL authoring) ---
-  /** `DEFAULT <value>` — a JS literal, or `sqlExpr("now()")` for a raw SQL default. */
-  $default(value: z.input<S> | SqlExpr): PgField<S, Flags> {
-    return this.with({ default: toExpr(value as never) });
+  // Some BRAND the Flags type channel (the second type param) so `TableDef.create`/`.update` can derive
+  // per-field optionality: "create" -> optional on create (the DB can fill it); "readonly" -> excluded
+  // from update; "generated" -> excluded from create (the DB computes it). The brand is TYPE-ONLY — the
+  // runtime source of truth is the `native` metadata; `with()` carries it, we just re-type the return.
+  /** `DEFAULT <value>` — a JS literal, or `sqlExpr("now()")`. Optional on create (`"create"` brand). */
+  $default(value: z.input<S> | SqlExpr): PgField<S, Flags | "create"> {
+    return this.with({ default: toExpr(value as never) }) as never;
   }
   /** Field-level `CHECK (<expr>)`. */
   $check(expr: string | SqlExpr): PgField<S, Flags> {
     return this.with({ check: isSqlExpr(expr) ? expr.__sql : expr });
   }
-  /** `GENERATED ALWAYS AS (<expr>) STORED` — a computed column. */
-  $generated(expr: string | SqlExpr): PgField<S, Flags> {
-    return this.with({ generated: isSqlExpr(expr) ? expr.__sql : expr });
+  /** `GENERATED ALWAYS AS (<expr>) STORED` — computed. Excluded from create + update. */
+  $generated(
+    expr: string | SqlExpr,
+  ): PgField<S, Flags | "generated" | "readonly"> {
+    return this.with({
+      generated: isSqlExpr(expr) ? expr.__sql : expr,
+    }) as never;
   }
-  /** `GENERATED {ALWAYS|BY DEFAULT} AS IDENTITY` (auto-increment). */
-  $identity(mode: "always" | "by-default" = "by-default"): PgField<S, Flags> {
-    return this.with({ identity: mode });
+  /** `GENERATED {ALWAYS|BY DEFAULT} AS IDENTITY` — DB-filled: optional on create, not updatable. */
+  $identity(
+    mode: "always" | "by-default" = "by-default",
+  ): PgField<S, Flags | "create" | "readonly"> {
+    return this.with({ identity: mode }) as never;
   }
   /** Column-level `UNIQUE`. */
   $unique(): PgField<S, Flags> {
     return this.with({ unique: true });
   }
-  /** Mark this column (part of) the PRIMARY KEY. */
-  $primaryKey(): PgField<S, Flags> {
-    return this.with({ primaryKey: true });
+  /** Mark this column (part of) the PRIMARY KEY — not updatable (`"readonly"` brand). */
+  $primaryKey(): PgField<S, Flags | "readonly"> {
+    return this.with({ primaryKey: true }) as never;
   }
   /** Foreign key to `table(id)` with optional `ON DELETE`/`ON UPDATE` actions. */
   $references(
@@ -1016,6 +1026,45 @@ export class PgTableDef<
       this.config,
     );
   }
+
+  /**
+   * The CREATE-input schema (Standard-Schema, composable — `.partial/.extend/.refine/.or`): a `$generated`
+   * column is dropped, a `$default`/`$identity`/`.optional()` column (or the implicit `id`) is optional,
+   * the rest required. Derived from the `$`-method Flag brands. Runtime matches {@link CreateRawShape}.
+   */
+  get create(): z.ZodObject<CreateRawShape<F>> {
+    const shape: Record<string, z.ZodType> = {};
+    for (const [k, f] of Object.entries(this.fields)) {
+      const m = (f as PgField).native;
+      if (m.generated !== undefined) continue; // "generated" -> excluded from create
+      // "create"-branded ($default/$identity) or the implicit id -> optional. A `.optional()` field's
+      // schema is ALREADY ZodOptional, so it stays optional in the object either way (no explicit wrap).
+      const optional =
+        k === "id" || m.default !== undefined || m.identity !== undefined;
+      shape[k] = optional ? (f.schema as z.ZodType).optional() : f.schema;
+    }
+    return z.object(shape) as z.ZodObject<CreateRawShape<F>>;
+  }
+
+  /**
+   * The UPDATE-input schema (a partial patch; Standard-Schema, composable): the `id`, `$identity`,
+   * `$generated`, and `$primaryKey` columns are excluded (read-only); every other column is optional.
+   */
+  get update(): z.ZodObject<UpdateRawShape<F>> {
+    const shape: Record<string, z.ZodType> = {};
+    for (const [k, f] of Object.entries(this.fields)) {
+      const m = (f as PgField).native;
+      if (
+        k === "id" ||
+        m.identity !== undefined || // "readonly"
+        m.generated !== undefined || // "readonly"
+        m.primaryKey === true // "readonly"
+      )
+        continue;
+      shape[k] = (f.schema as z.ZodType).optional();
+    }
+    return z.object(shape) as z.ZodObject<UpdateRawShape<F>>;
+  }
 }
 
 /**
@@ -1414,3 +1463,51 @@ export type App<T extends PgTableDef> = {
 export type Wire<T extends PgTableDef> = {
   [K in keyof T["fields"]]: z.input<T["fields"][K]["schema"]>;
 };
+
+// --- create/update derived-input shapes -------------------------------------------------------
+// These read the Flags brands the `$`-methods set: "create" (optional on create — $default/$identity),
+// "readonly" (excluded from update — $identity/$generated/$primaryKey), "generated" (excluded from
+// create — $generated). The `TableDef.create`/`.update` getters build the matching runtime z.object.
+
+type Prettify<T> = { [K in keyof T]: T[K] } & {};
+type FlagsOf<F> = F extends PgField<z.ZodType, infer Fl> ? Fl : never;
+/**
+ * Whether F's Flags include brand `B`. The `string extends FlagsOf<F>` guard short-circuits the broad
+ * case (when Flags widens to `string`, e.g. a shape-agnostic `PgTableDef<string, Record<string, PgField>>`,
+ * where `B extends string` would wrongly match) — keeping every column present there.
+ */
+type HasFlag<F, B extends string> =
+  string extends FlagsOf<F> ? false : B extends FlagsOf<F> ? true : false;
+/** A column is optional on create: the implicit `id` or a `"create"`-branded field ($default/$identity).
+ * (A `.optional()` field needs no help — its schema is already `ZodOptional`, so `z.object` makes it
+ * optional regardless; folding that in here would wrongly fire for the broad `ZodType` case where
+ * `z.input` is `unknown` and `undefined extends unknown` is true.) */
+type CreateOptional<F, K> = K extends "id"
+  ? true
+  : HasFlag<F, "create"> extends true
+    ? true
+    : false;
+/** The create-input Zod shape: `"generated"` columns dropped; create-optional keys wrapped optional. */
+type CreateRawShape<F extends Record<string, AnyPgField>> = {
+  [K in keyof F as HasFlag<F[K], "generated"> extends true
+    ? never
+    : K]: CreateOptional<F[K], K> extends true
+    ? z.ZodOptional<F[K]["schema"]>
+    : F[K]["schema"];
+};
+/** The update-input Zod shape: `id` + `"readonly"` columns dropped; the rest all optional (partial). */
+type UpdateRawShape<F extends Record<string, AnyPgField>> = {
+  [K in keyof F as K extends "id"
+    ? never
+    : HasFlag<F[K], "readonly"> extends true
+      ? never
+      : K]: z.ZodOptional<F[K]["schema"]>;
+};
+/** The App-land create-input object type (validate a create payload) — inverse-composable via `.create`. */
+export type CreateInput<T extends PgTableDef> = Prettify<
+  z.output<z.ZodObject<CreateRawShape<T["fields"]>>>
+>;
+/** The App-land update-input object type (a partial patch) — via `.update`. */
+export type UpdateInput<T extends PgTableDef> = Prettify<
+  z.output<z.ZodObject<UpdateRawShape<T["fields"]>>>
+>;

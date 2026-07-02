@@ -4,6 +4,7 @@ import * as z from "zod";
 import { postgresDriver } from "../src/driver";
 import {
   type App,
+  type CreateInput,
   defineDomain,
   defineEnum,
   defineExtension,
@@ -18,6 +19,7 @@ import {
   PgField,
   s,
   sqlExpr,
+  type UpdateInput,
   type Wire,
 } from "../src/index";
 import { registry, splitTables } from "../src/kinds";
@@ -1322,5 +1324,68 @@ describe("table composition (s.object().fields, defineTable(obj), TableDef.exten
     } finally {
       await conn.close();
     }
+  });
+});
+
+describe("derived create/update input schemas (TableDef.create / .update)", () => {
+  const post = defineTable("post", {
+    id: s.uuid().$default("gen"), // create-optional (default); present in update
+    seq: s.integer().$identity(), // create-optional + update-excluded (identity)
+    title: s.text(), // required on create
+    slug: s.text().$default("x"), // create-optional (default)
+    views: s.integer().optional(), // optional schema
+    total: s.numeric(12, 2).$generated("1"), // excluded from create AND update
+    key: s.text().$primaryKey(), // update-excluded (readonly); required on create (no default)
+  });
+
+  test(".create: drops $generated, makes $default/$identity/id optional, keeps the rest required", () => {
+    const ck = Object.keys(post.create.shape);
+    expect(ck).toEqual(["id", "seq", "title", "slug", "views", "key"]); // no `total` (generated)
+    const shape = post.create.shape as Record<
+      string,
+      { safeParse: (v: unknown) => { success: boolean } }
+    >;
+    const optional = ck.filter((k) => shape[k].safeParse(undefined).success);
+    expect(optional.sort()).toEqual(["id", "seq", "slug", "views"]);
+    // runtime: create needs the required cols (title + the natural PK `key`), defaults may be omitted
+    expect(post.create.safeParse({ title: "Hi", key: "k1" }).success).toBe(
+      true,
+    );
+    expect(post.create.safeParse({ title: "Hi" }).success).toBe(false); // missing `key`
+    expect(post.create.safeParse({ key: "k1" }).success).toBe(false); // missing `title`
+  });
+
+  test(".update: excludes id + readonly ($identity/$generated/$primaryKey); the rest partial", () => {
+    expect(Object.keys(post.update.shape)).toEqual(["title", "slug", "views"]);
+    expect(post.update.safeParse({}).success).toBe(true); // fully partial
+    expect(post.update.safeParse({ title: "New" }).success).toBe(true);
+  });
+
+  test(".create / .update are Standard-Schema-composable (z.object -> .or / .extend / .partial)", () => {
+    const upsert = post.create.or(post.update.extend({ id: s.text().schema }));
+    expect(upsert.safeParse({ title: "Hi", key: "k1" }).success).toBe(true); // create branch
+    expect(upsert.safeParse({ id: "x", title: "New" }).success).toBe(true); // update+id branch
+    // ~standard present (Standard Schema)
+    expect("~standard" in post.create).toBe(true);
+  });
+
+  test("create/update App types are precise (compile-time)", () => {
+    // title + key required; defaults/identity/id/views optional; total absent
+    const _c: CreateInput<typeof post> = { title: "Hi", key: "k1" };
+    const _c2: CreateInput<typeof post> = {
+      id: "x",
+      seq: 1,
+      title: "Hi",
+      slug: "s",
+      views: 2,
+      key: "k1",
+    };
+    // update: all optional; id/seq/total/key excluded
+    const _u: UpdateInput<typeof post> = {};
+    const _u2: UpdateInput<typeof post> = { title: "New", views: 3 };
+    expect(_c.title).toBe("Hi");
+    expect(_c2.seq).toBe(1);
+    expect(_u2.views).toBe(3);
+    void _u;
   });
 });
