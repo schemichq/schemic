@@ -505,6 +505,20 @@ function indexSpecOpts(spec: string): string | null {
   return null;
 }
 
+/** Detect the id-generation strategy from an introspected id StructField and return the `s.*`
+ *  factory call string for pull, or `s.string()` if no strategy is present. The three built-in
+ *  strategies are identified by their DEFAULT expression (`rand::ulid()` / `rand::uuid()` /
+ *  `rand::id()` — SurrealDB v3.2.0+). A non-strategic id (or an unrecognized DEFAULT) falls back
+ *  to `s.string()` (the pre-existing pull default). */
+function idStrategyFactory(idField: StructField | undefined): string {
+  if (!idField) return "s.string()";
+  const def = idField.default;
+  if (def === "rand::ulid()") return "s.ulid()";
+  if (def === "rand::uuid()") return "s.uuid()";
+  if (def === "rand::id()") return "s.id()";
+  return "s.string()";
+}
+
 /** Render just the `export const … = define…(…);` for one table (no import lines). */
 function renderTableConst(
   t: StructTable,
@@ -552,7 +566,10 @@ function renderTableConst(
   const open = ctx.usesSelf ? "}))" : "})";
 
   const body: string[] = [head];
-  if (!isRelation) body.push(`  id: s.string(),`);
+  if (!isRelation) {
+    const idField = t.fields.find((f) => f.name === "id");
+    body.push(`  id: ${idStrategyFactory(idField)},`);
+  }
   body.push(fieldLines);
 
   let close = open;

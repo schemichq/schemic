@@ -1,5 +1,6 @@
 import { escapeIdent, type Surreal } from "surrealdb";
-import { type DefineStatement, renderAsync } from "../ddl";
+import { type DefineStatement, implicitFieldSet, renderAsync } from "../ddl";
+import { hasStrategicId } from "./struct";
 
 /** A snapshot statement: the emitted DDL plus the source file it came from (for `diff` annotations). */
 export type SnapshotStatement = DefineStatement & {
@@ -620,10 +621,7 @@ export function structuredSnapshot({
     };
     statements[keyOf(tableStmt)] = tableStmt;
 
-    const implicit =
-      t.kind.kind === "RELATION"
-        ? new Set(["id", "in", "out"])
-        : new Set(["id"]);
+    const implicit = implicitFieldSet(t.kind.kind === "RELATION", hasStrategicId(t));
     // A trivial array element (`x.*`) is folded into the parent's `array<…>` type and not emitted
     // (so bare `array` + `x.* object` == typed `array<object>`). A CUSTOMIZED element (FLEXIBLE /
     // permissions / …) is kept so its config isn't lost. Map/record `.*` values are kept too.
