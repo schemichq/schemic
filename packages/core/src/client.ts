@@ -9,7 +9,8 @@ import {
   type ResolvedConfig,
   resolveConnectionConfig,
 } from "./cli-kit/config";
-import type { ResolveContext } from "./connection";
+import type { SchemicConfig } from "./config";
+import type { AnyConnectionEntry, ResolveContext } from "./connection";
 
 /**
  * The neutral bound-client contract. A driver's client extends this and adds its typed query surface.
@@ -76,6 +77,24 @@ export async function resolveConnection(
     config: opts.config,
     cwd: opts.cwd,
   });
+  return (await resolveFromConfig(config, root, opts)).resolved;
+}
+
+/**
+ * The shared single-connection resolution over an IN-MEMORY config: pick the entry (named /
+ * defaultConnection / sole / `"default"`), validate `args` against the entry's schema (when declared),
+ * run the resolver, select the keyed element, and build the {@link ResolvedConfig}. Used by both
+ * {@link resolveConnection} (disk-discovered config) and {@link connectFromConfig} (`config.connect`).
+ */
+export async function resolveFromConfig(
+  config: SchemicConfig,
+  root: string,
+  opts: {
+    name?: string;
+    key?: string;
+    args?: Record<string, unknown>;
+  } = {},
+): Promise<{ entry: AnyConnectionEntry; resolved: ResolvedConfig }> {
   const names = Object.keys(config.connections);
   const name =
     opts.name ??
@@ -88,9 +107,22 @@ export async function resolveConnection(
     );
   }
 
+  // Validate resolver args against the entry's Standard Schema (when the factory declared one) —
+  // BEFORE resolve, since the resolver consumes ctx.args.
+  let args = (opts.args ?? {}) as Record<string, string>;
+  if (entry.args) {
+    const result = await entry.args["~standard"].validate(opts.args ?? {});
+    if ("issues" in result && result.issues) {
+      throw new Error(
+        `invalid args for connection "${name}": ${result.issues.map((i) => i.message).join("; ")}`,
+      );
+    }
+    args = (result as { value: Record<string, string> }).value;
+  }
+
   const ctx: ResolveContext = {
     connections: noCrossConnections,
-    args: opts.args ?? {},
+    args,
     env: process.env,
   };
   const bases = await entry.resolve(ctx);
@@ -104,5 +136,33 @@ export async function resolveConnection(
         : `connection "${name}" resolved to no config`,
     );
   }
-  return resolveConnectionConfig(config, name, base, entry.driver, root);
+  return {
+    entry,
+    resolved: resolveConnectionConfig(config, name, base, entry.driver, root),
+  };
+}
+
+/**
+ * The runtime behind `config.connect(name, opts)` (see `defineConfig`): resolve the entry from the
+ * in-memory config and open its bound ORM client via the factory-embedded
+ * {@link AnyConnectionEntry.client} opener. The static return type is the entry's own client type
+ * (inferred per entry in `SchemicProject`).
+ */
+export async function connectFromConfig(
+  config: SchemicConfig,
+  name?: string,
+  opts?: { key?: string; args?: Record<string, unknown>; cwd?: string },
+): Promise<unknown> {
+  const root = opts?.cwd ?? process.cwd();
+  const { entry, resolved } = await resolveFromConfig(config, root, {
+    name,
+    key: opts?.key,
+    args: opts?.args,
+  });
+  if (!entry.client) {
+    throw new Error(
+      `the "${entry.driver}" connection factory predates config.connect() — update @schemic/${entry.driver} to a version whose ${entry.driver}Connection embeds a client opener`,
+    );
+  }
+  return entry.client(resolved);
 }

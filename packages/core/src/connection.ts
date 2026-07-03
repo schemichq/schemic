@@ -4,7 +4,21 @@
 // CLI reads only these neutral fields; driver-specific connection params ride on the driver's own
 // config type. The resolution engine (lazy DAG, fan-out, addressing) lives in the CLI layer.
 
+// Type-only (erased): the resolved per-connection config a factory-embedded `client` opener receives.
+import type { ResolvedConfig } from "./cli-kit/config";
+
 type MaybePromise<T> = T | Promise<T>;
+
+/** Minimal Standard Schema v1 surface — what a connection's `args` schema must expose. */
+export interface StandardSchemaLike {
+  "~standard": {
+    validate(
+      value: unknown,
+    ): MaybePromise<
+      { value: unknown } | { issues: readonly { message: string }[] }
+    >;
+  };
+}
 
 /** The dialect-neutral fields the orchestration reads off every connection config. */
 export interface ConnectionConfigBase {
@@ -37,32 +51,72 @@ export interface ResolveContext {
  * `connections` map accepts. Never hand-authored. `driver` is the package the CLI dynamically loads;
  * `resolve` always normalizes to an ARRAY (a single connection -> one element, a collection -> many).
  */
-export interface ConnectionEntry {
+export interface ConnectionEntry<
+  Client = unknown,
+  Args extends Record<string, unknown> = Record<string, string>,
+> {
   readonly __schemic: "connection";
   readonly driver: string;
   resolve(ctx: ResolveContext): Promise<ConnectionConfigBase[]>;
+  /**
+   * Lazily open this connection's bound ORM CLIENT for a resolved config — embedded by the driver
+   * factory (with a lazy `import()` of its own client module, so authoring a config never pulls the
+   * engine). This is what powers the typed `config.connect(name)` on `defineConfig`'s return.
+   */
+  client?(config: ResolvedConfig): Promise<Client>;
+  /**
+   * Standard Schema validating the resolver `args` for this connection (e.g. `s.object({ tenant:
+   * s.string() })`). When present, `config.connect(name, { args })` validates before resolving, and the
+   * resolver's `ctx.args` is typed as the schema's output.
+   */
+  args?: StandardSchemaLike;
+  /** PHANTOM (never assigned) — anchors `Client`/`Args` so `config.connect` can infer them per entry. */
+  readonly __types?: { client: Client; args: Args };
 }
 
+/** Cross-driver erasure of the entry generics (like `AnyField`) — the shape neutral maps hold. */
+// biome-ignore lint/suspicious/noExplicitAny: cross-driver erasure of the per-entry client/args types.
+export type AnyConnectionEntry = ConnectionEntry<any, any>;
+
 /** A connection factory's input: a static config, or a resolver yielding one config or a keyed collection. */
-export type ConnectionInput<C extends ConnectionConfigBase> =
+export type ConnectionInput<
+  C extends ConnectionConfigBase,
+  Args extends Record<string, unknown> = Record<string, string>,
+> =
   | C
-  | ((ctx: ResolveContext) => MaybePromise<C | (C & { key: string })[]>);
+  | ((
+      ctx: Omit<ResolveContext, "args"> & { args: Args },
+    ) => MaybePromise<C | (C & { key: string })[]>);
 
 /**
  * Build a {@link ConnectionEntry} from a driver tag + a static config or resolver — the primitive each
  * driver package wraps in its typed `<driver>Connection(...)` factory (which fixes `C` to the driver's
  * own connection shape and overloads the array form to require `key`). Returns a branded entry whose
- * `resolve` always yields an array.
+ * `resolve` always yields an array. `extras` carries the factory-embedded client opener (for
+ * `config.connect`) and the optional args schema.
  */
-export function connectionEntry<C extends ConnectionConfigBase>(
+export function connectionEntry<
+  C extends ConnectionConfigBase,
+  Client = unknown,
+  Args extends Record<string, unknown> = Record<string, string>,
+>(
   driver: string,
-  input: ConnectionInput<C>,
-): ConnectionEntry {
+  input: ConnectionInput<C, Args>,
+  extras?: {
+    client?: (config: ResolvedConfig) => Promise<Client>;
+    args?: StandardSchemaLike;
+  },
+): ConnectionEntry<Client, Args> {
   return {
     __schemic: "connection",
     driver,
+    ...(extras?.client ? { client: extras.client } : {}),
+    ...(extras?.args ? { args: extras.args } : {}),
     async resolve(ctx) {
-      const out = typeof input === "function" ? await input(ctx) : input;
+      const out =
+        typeof input === "function"
+          ? await input(ctx as Omit<ResolveContext, "args"> & { args: Args })
+          : input;
       return Array.isArray(out) ? out : [out];
     },
   };

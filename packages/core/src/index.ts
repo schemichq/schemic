@@ -15,13 +15,6 @@ export {
   type ResolvedConfig,
   resolveConnectionConfig,
 } from "./cli-kit/config";
-// --- ORM client foundation (managed connections + disposable bound client) ---------------------
-export {
-  asyncDisposable,
-  type OrmClientBase,
-  type ResolveConnectionOptions,
-  resolveConnection,
-} from "./client";
 // --- neutral diff display ---------------------------------------------------------------------
 export {
   type Diff,
@@ -83,8 +76,25 @@ export {
   scanLocalEntities,
 } from "./cli-kit/schema";
 export { colorEnabled, fail, ok, plural, style } from "./cli-kit/style";
+// --- ORM client foundation (managed connections + disposable bound client) ---------------------
+export {
+  asyncDisposable,
+  connectFromConfig,
+  type OrmClientBase,
+  type ResolveConnectionOptions,
+  resolveConnection,
+  resolveFromConfig,
+} from "./client";
+// --- config-as-factory types (defineConfig lives on the `./config` subpath) --------------------
+export type {
+  ConnectOptions,
+  EntryArgs,
+  EntryClient,
+  SchemicProject,
+} from "./config";
 // --- multi-connection contract (docs/MULTI-CONNECTION.md) -------------------------------------
 export {
+  type AnyConnectionEntry,
   type ConnectionConfigBase,
   type ConnectionEntry,
   type ConnectionInput,
@@ -92,6 +102,7 @@ export {
   isConnectionEntry,
   type ResolveContext,
   type ResolvedConnectionHandle,
+  type StandardSchemaLike,
 } from "./connection";
 // --- driver contract + registry ---------------------------------------------------------------
 export {
@@ -156,8 +167,6 @@ export {
   snapshotKinds,
   snapshotObjects,
 } from "./kind";
-// --- seed context (the `(db, ctx)` helper passed to each seed) ---------------------------------
-export type { SeedContext } from "./seed";
 // --- secret refs (apply-time-resolved placeholders for secret-bearing DDL; drivers re-export) ----
 export {
   env,
@@ -167,3 +176,5 @@ export {
   type SecretRef,
   secret,
 } from "./secrets";
+// --- seed context (the `(db, ctx)` helper passed to each seed) ---------------------------------
+export type { SeedContext } from "./seed";

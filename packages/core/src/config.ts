@@ -29,11 +29,11 @@
  * url/namespace/authLevel, its check-engine options, …) live in the driver package's
  * `<driver>Connection` factory, not here.
  */
-import type { ConnectionEntry } from "./connection";
+import type { AnyConnectionEntry, ConnectionEntry } from "./connection";
 
 export interface SchemicConfig {
   /** Named database connections — each produced by a per-driver `<driver>Connection(...)` factory. */
-  connections: Record<string, ConnectionEntry>;
+  connections: Record<string, AnyConnectionEntry>;
   /**
    * With more than one connection, the connection a bare command targets (must name a single static
    * connection). Absent + ambiguous → a live command errors asking for `--connection`.
@@ -45,7 +45,61 @@ export interface SchemicConfig {
   seed?: string;
 }
 
-/** Identity helper that types a `schemic.config.ts` default export. */
-export function defineConfig(config: SchemicConfig): SchemicConfig {
-  return config;
+/** The bound ORM client type a {@link ConnectionEntry} opens (inferred from the driver factory). */
+// biome-ignore lint/suspicious/noExplicitAny: matching the erased Args slot.
+export type EntryClient<E> =
+  E extends ConnectionEntry<infer Client, any> ? Client : never;
+/** The typed resolver `args` a {@link ConnectionEntry} accepts (from its `args` schema). */
+// biome-ignore lint/suspicious/noExplicitAny: matching the erased Client slot.
+export type EntryArgs<E> =
+  E extends ConnectionEntry<any, infer Args> ? Args : never;
+
+/** Options for `config.connect(name, opts)` — element key, typed resolver args, working dir. */
+export interface ConnectOptions<
+  Args extends Record<string, unknown> = Record<string, string>,
+> {
+  /** Address one element of a keyed collection (`<name>:<key>`). */
+  key?: string;
+  /** Resolver args — validated against the connection's `args` schema when it declares one. */
+  args?: Args;
+  /** Working directory relative paths resolve from (defaults to `process.cwd()`). */
+  cwd?: string;
+}
+
+/**
+ * What {@link defineConfig} ADDS to your config: the config IS the app's typed entry point to its
+ * databases. `connect(name)` autocompletes your connection names, returns that entry's own client
+ * type (a heterogeneous-driver project types per-connection), and validates `args` per the entry's
+ * schema. The client is disposable: `await using db = await schemic.connect()`.
+ */
+export interface SchemicProject<
+  Conns extends Record<string, AnyConnectionEntry>,
+> {
+  connect<N extends keyof Conns & string>(
+    name?: N,
+    opts?: ConnectOptions<EntryArgs<Conns[N]>>,
+  ): Promise<EntryClient<Conns[N]>>;
+}
+
+/**
+ * Type + enrich a Schemic config: returns the config with a typed `connect()` attached — the config
+ * itself is the factory. Scaffolded as `schemic.ts` with a NAMED export (deterministic auto-import):
+ *
+ * ```ts
+ * export const schemic = defineConfig({ connections: { ... } });
+ * export default schemic; // the CLI reads the default export
+ * // app code: import { schemic } from "./schemic";  →  await using db = await schemic.connect();
+ * ```
+ */
+export function defineConfig<const C extends SchemicConfig>(
+  config: C,
+): C & SchemicProject<C["connections"]> {
+  return {
+    ...config,
+    async connect(name?: string, opts?: ConnectOptions) {
+      // Lazy: authoring/loading a config stays light; the client machinery loads only when used.
+      const { connectFromConfig } = await import("./client");
+      return connectFromConfig(config, name, opts);
+    },
+  } as C & SchemicProject<C["connections"]>;
 }

@@ -1,13 +1,17 @@
 import { existsSync, statSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import type { SchemicConfig } from "@schemic/core/config";
 import { createJiti } from "jiti";
 import type { ConnectionConfigBase, ResolveContext } from "../connection";
 
+// `schemic.ts` is the scaffolded name (the config IS the app's DB module — `schemic.connect()`);
+// the `schemic.config.*` spellings keep working. Checked LAST + shape-guarded, so an unrelated
+// `./schemic.ts` helper module in a project never shadows a real `schemic.config.ts`.
 const CONFIG_NAMES = [
   "schemic.config.ts",
   "schemic.config.mjs",
   "schemic.config.js",
+  "schemic.ts",
 ];
 
 const DEFAULT_MIGRATIONS = "./database/migrations";
@@ -82,28 +86,39 @@ export function makeJiti() {
   });
 }
 
-/** Find + load `schemic.config.ts` into the dialect-neutral {@link SchemicConfig}. */
+/** Find + load `schemic.ts` / `schemic.config.ts` into the dialect-neutral {@link SchemicConfig}. */
 export async function loadProject(opts?: {
   config?: string;
   cwd?: string;
 }): Promise<{ config: SchemicConfig; root: string }> {
   const cwd = opts?.cwd ?? process.cwd();
-  const path = opts?.config
-    ? resolve(cwd, opts.config)
-    : CONFIG_NAMES.map((n) => resolve(cwd, n)).find((p) => existsSync(p));
-  if (!path || !existsSync(path)) {
-    throw new Error("No schemic.config.ts found — run `schemic init` first.");
+  const candidates = opts?.config
+    ? [resolve(cwd, opts.config)]
+    : CONFIG_NAMES.map((n) => resolve(cwd, n)).filter((p) => existsSync(p));
+  if (!candidates.length || !existsSync(candidates[0])) {
+    throw new Error(
+      "No schemic.ts / schemic.config.ts found — run `schemic init` first.",
+    );
   }
-  const root = dirname(path);
-  loadDotEnv(root); // populate process.env before the config module's explicit reads
-  const loaded = (await makeJiti().import(path)) as {
-    default?: SchemicConfig;
-  } & SchemicConfig;
-  const config = loaded.default ?? loaded;
-  if (!config?.connections || Object.keys(config.connections).length === 0) {
+  const jiti = makeJiti();
+  for (const path of candidates) {
+    const root = dirname(path);
+    loadDotEnv(root); // populate process.env before the config module's explicit reads
+    const loaded = (await jiti.import(path)) as {
+      default?: SchemicConfig;
+    } & SchemicConfig;
+    const config = loaded.default ?? loaded;
+    if (config?.connections && Object.keys(config.connections).length > 0) {
+      return { config, root };
+    }
+    // An AUTO-discovered bare `schemic.ts` without a connections map is an unrelated helper module,
+    // not a config — skip it (an explicitly-passed or `schemic.config.*` file still errors loudly).
+    if (!opts?.config && basename(path) === "schemic.ts") continue;
     throw new Error(`Invalid config at ${path}: expected a "connections" map.`);
   }
-  return { config, root };
+  throw new Error(
+    'No Schemic config found — ./schemic.ts exists but doesn\'t export a config with a "connections" map. Run `schemic init`, or export one via defineConfig.',
+  );
 }
 
 /**
