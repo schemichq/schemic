@@ -1435,9 +1435,10 @@ describe("table presets (defineTable.preset + TableDef.use)", () => {
     }
   });
 
-  test(".use accepts multiple presets (columns from each merge)", () => {
+  test("chained .use composes multiple presets (columns from each merge)", () => {
     const audit = defineTable.preset({ columns: { updatedBy: s.text() } });
-    const t = defineTable("doc", { title: s.text() }).use(tenant(), audit);
+    // single-arg + chained (matches surreal): each .use re-derives the field type.
+    const t = defineTable("doc", { title: s.text() }).use(tenant()).use(audit);
     expect(Object.keys(t.fields)).toEqual([
       "title",
       "tenant_id",

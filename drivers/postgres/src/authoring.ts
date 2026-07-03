@@ -944,27 +944,15 @@ type MergeCols<F, C> = [keyof F & keyof C] extends [never]
   : {
       [K in `preset column conflict: "${string & (keyof F & keyof C)}"`]: never;
     };
-/** Fold `.use(...presets)`: merge each preset's columns into `F` left-to-right (conflicts error). */
-type UsePresets<
-  F,
-  P extends readonly PgPreset<Record<string, AnyPgField>>[],
-> = P extends readonly [
-  infer H extends PgPreset<Record<string, AnyPgField>>,
-  ...infer R extends readonly PgPreset<Record<string, AnyPgField>>[],
-]
-  ? UsePresets<MergeCols<F, ColsOf<H>>, R>
-  : F;
-/** Per-preset conflict guard for `.use(...)`'s ARGUMENT: a preset whose columns collide with the table's
- * (`F`) maps to an error-message string, so `...presets: P & NoPresetConflict<F, P>` rejects it AT THE
- * CALL (an object isn't assignable to a string) — a compile error exactly where the conflict is written. */
-type NoPresetConflict<
-  F,
-  P extends readonly PgPreset<Record<string, AnyPgField>>[],
-> = {
-  [I in keyof P]: [keyof F & keyof ColsOf<P[I]>] extends [never]
-    ? P[I]
-    : `preset column conflict: "${string & (keyof F & keyof ColsOf<P[I]>)}" already exists on this table`;
-};
+/** Conflict guard for `.use(preset)`'s ARGUMENT: if the preset's columns (`C`) collide with the table's
+ * (`F`), this resolves to an error-message string, so `preset: P & NoConflict<F, ColsOf<P>>` rejects it
+ * AT THE CALL (an object isn't assignable to a string) — a compile error exactly where it's written; no
+ * conflict resolves to `unknown` (`P & unknown = P`, a no-op). `.use` is SINGLE-ARG CHAINED (`.use(a)
+ * .use(b)`), matching surreal: each step re-derives `F`, so it stays fully typed at any depth AND catches
+ * preset-vs-preset clashes — and it sidesteps the tsc crash class that variadic typed-merge trips. */
+type NoConflict<F, C> = [keyof F & keyof C] extends [never]
+  ? unknown
+  : `preset column conflict: "${string & (keyof F & keyof C)}" already exists on this table`;
 
 /**
  * A Postgres table definition — the `Authored` object the driver's `lower` reads. Structurally a
@@ -1082,31 +1070,33 @@ export class PgTableDef<
   }
 
   /**
-   * Apply reusable {@link PgPreset}s (from `defineTable.preset`): their `columns` are typed-merged into
-   * the table (appearing in the row / `.create` / `.update`; a column-name conflict — with the table or
-   * another preset — is a COMPILE error) and their `indexes` append. Reuses `.extend`'s cast-free merge.
-   * `const tenant = () => defineTable.preset({ columns: { tenant_id: s.uuid() } }); defineTable("x", {...}).use(tenant())`.
+   * Apply ONE reusable {@link PgPreset} (from `defineTable.preset`): its `columns` are typed-merged into
+   * the table (appearing in the row / `.create` / `.update`; a column-name conflict is a COMPILE error)
+   * and its `indexes` append. Reuses `.extend`'s cast-free merge. SINGLE-ARG + CHAINED — `.use(a).use(b)`
+   * (matching surreal): each step re-derives the field type so it stays fully typed at any depth AND
+   * catches preset-vs-preset clashes (b sees a's columns). `const tenant = () => defineTable.preset({
+   * columns: { tenant_id: s.uuid() } }); defineTable("x", {...}).use(tenant()).use(audit)`.
    */
-  use<P extends readonly PgPreset<Record<string, AnyPgField>>[]>(
-    ...presets: P & NoPresetConflict<F, P>
-  ): PgTableDef<Name, UsePresets<F, P>> {
+  use<P extends PgPreset<Record<string, AnyPgField>>>(
+    preset: P & NoConflict<F, ColsOf<P>>,
+  ): PgTableDef<Name, MergeCols<F, ColsOf<P>>> {
+    // NoConflict brands the ARG type (P & error-string on clash); read the plain runtime preset value.
+    const p = preset as PgPreset<Record<string, AnyPgField>>;
     let table: PgTableDef<Name, Record<string, AnyPgField>> = this;
-    for (const p of presets) {
-      if (p.columns) {
-        for (const k of Object.keys(p.columns))
-          if (k in table.fields)
-            throw new Error(
-              `postgres: preset column "${k}" conflicts with an existing column on table "${this.name}".`,
-            );
-        table = table.extend(p.columns); // reuse .extend's merge (preserves config)
-      }
-      if (p.indexes?.length)
-        table = new PgTableDef(table.name, table.fields, {
-          ...table.config,
-          indexes: [...(table.config.indexes ?? []), ...p.indexes],
-        });
+    if (p.columns) {
+      for (const k of Object.keys(p.columns))
+        if (k in table.fields)
+          throw new Error(
+            `postgres: preset column "${k}" conflicts with an existing column on table "${this.name}".`,
+          );
+      table = table.extend(p.columns); // reuse .extend's merge (preserves config)
     }
-    return table as unknown as PgTableDef<Name, UsePresets<F, P>>;
+    if (p.indexes?.length)
+      table = new PgTableDef(table.name, table.fields, {
+        ...table.config,
+        indexes: [...(table.config.indexes ?? []), ...p.indexes],
+      });
+    return table as unknown as PgTableDef<Name, MergeCols<F, ColsOf<P>>>;
   }
 
   /**
