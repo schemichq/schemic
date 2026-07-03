@@ -4,7 +4,7 @@
 //     truth the CLI already uses) and OWNS it — dispose/close closes it.
 //   - BYO: `connect(myPgConn)` wraps a connection you own — dispose/close is a NO-OP (we never close
 //     a connection the user owns; the hard dispose rule).
-// P1 is READS (`select`); writes (`create`/`update`/`delete`) are P2. Composes `./query`'s builder +
+// Surface: READS (`select`) + WRITES (`create`/`update`/`delete`). Composes `./query`'s builder +
 // `./driver`'s `connect`, so importing `/client` DOES pull the engine — it's a runtime ORM entry (like
 // `/query`), NOT the side-effect-free authoring index.
 
@@ -24,6 +24,7 @@ import {
   create,
   type DeleteQuery,
   type IdOf,
+  type RowOf,
   remove,
   type SelectQuery,
   select,
@@ -115,7 +116,7 @@ export class PgClient implements OrmClientBase {
    * A typed single-table read, pre-bound to this client's connection — the same `./query` builder, but
    * awaitable: `await db.select(user).where(u => u.age.gt(18))` runs and returns the decoded rows.
    */
-  select<TD extends PgTableDef>(table: TD): SelectQuery<TD, App<TD>> {
+  select<TD extends PgTableDef>(table: TD): SelectQuery<TD, RowOf<TD>> {
     return select(table, this.conn);
   }
 
@@ -142,7 +143,7 @@ export class PgClient implements OrmClientBase {
   delete<TD extends PgTableDef>(
     table: TD,
     id: IdOf<TD>,
-  ): DeleteQuery<TD, App<TD> | undefined> {
+  ): DeleteQuery<TD, RowOf<TD> | undefined> {
     return remove(table, id, this.conn);
   }
 

@@ -107,6 +107,43 @@ function renderPred(node: PredNode, b: Binder): string {
 
 // --- the builder ---------------------------------------------------------------------------------
 
+/**
+ * The RETURNED-row type: a returned row CARRIES ITS ID. When a table declares its own `id` column it's
+ * already in `App`; when it relies on pg's IMPLICIT `id text PRIMARY KEY` (added at emit, so outside the
+ * declared shape), we carry it as `{ id: string }` so `const c = await db.create(T)…; db.update(T, c.id)`
+ * chains (cross-driver convention — surreal injects `id: RecordId`). Mirrors {@link IdOf}'s split.
+ */
+export type RowOf<TD extends PgTableDef> = "id" extends keyof App<TD>
+  ? App<TD>
+  : App<TD> & { id: string };
+
+/** Does this table rely on pg's IMPLICIT `id text PRIMARY KEY`? True iff no `id` column is declared, no
+ * field is a `$primaryKey`, and there's no composite key — mirrors `createTableDdl`'s `!custom` rule. */
+function usesImplicitId(table: PgTableDef): boolean {
+  if ("id" in table.fields) return false;
+  if (table.config.primaryKey?.length) return false;
+  for (const f of Object.values(table.fields))
+    if ((f as { native?: { primaryKey?: boolean } }).native?.primaryKey)
+      return false;
+  return true;
+}
+
+/** Splice the implicit `id` back onto a decoded FULL row: the pg implicit PK isn't a declared field (so
+ * it's absent from `object`/`App`/`.decode`), but the wire row HAS it — carry it so returned rows are
+ * addressable. No-op when the row already has an `id` (declared) or the raw row carries none. */
+function withImplicitId(decoded: unknown, raw: unknown): unknown {
+  if (
+    decoded &&
+    typeof decoded === "object" &&
+    !("id" in decoded) &&
+    raw &&
+    typeof raw === "object" &&
+    "id" in raw
+  )
+    return { id: (raw as { id: unknown }).id, ...(decoded as object) };
+  return decoded;
+}
+
 /** A projected column: core's `ProjectionField` (`as` + decode `schema`) plus the source SQL `path`. */
 interface ProjItem extends ProjectionField {
   path: string;
@@ -200,7 +237,13 @@ export class SelectQuery<TD extends PgTableDef, Res>
               : `${escId(p.path)} AS ${escId(p.as)}`,
           )
           .join(", ")
-      : Object.keys(this.table.fields).map(escId).join(", ");
+      : // full row: fetch the implicit id too (it's not a declared field) so the row stays addressable
+        [
+          ...(usesImplicitId(this.table) ? ["id"] : []),
+          ...Object.keys(this.table.fields),
+        ]
+          .map(escId)
+          .join(", ");
     let sql = `SELECT ${cols} FROM ${escId(this.table.name)}`;
     if (this.state.where)
       sql += ` WHERE ${renderPred(this.state.where.node, b)}`;
@@ -215,7 +258,8 @@ export class SelectQuery<TD extends PgTableDef, Res>
     if (!this.decodeOn) return rows as Res[];
     if (this.state.projection)
       return decodeProjection<Res>(this.state.projection, rows);
-    return rows.map((r) => this.table.decode(r) as Res);
+    // Full row: carry the implicit id (absent from `object`) so returned rows stay addressable.
+    return rows.map((r) => withImplicitId(this.table.decode(r), r) as Res);
   }
 
   /**
@@ -250,8 +294,8 @@ export class SelectQuery<TD extends PgTableDef, Res>
 export function select<TD extends PgTableDef>(
   table: TD,
   conn?: PgConn,
-): SelectQuery<TD, App<TD>> {
-  return new SelectQuery<TD, App<TD>>(table, {}, true, conn);
+): SelectQuery<TD, RowOf<TD>> {
+  return new SelectQuery<TD, RowOf<TD>>(table, {}, true, conn);
 }
 
 // --- writes (P2): create / update / remove -------------------------------------------------------
@@ -308,7 +352,8 @@ function decodeReturn(
   if (ret.kind === "none" || !rows.length) return undefined;
   if (ret.kind === "projection")
     return decodeProjection(ret.projection, rows)[0];
-  return table.decode(rows[0]);
+  // Full row: carry the implicit id so `db.create(T)…` returns an addressable record.
+  return withImplicitId(table.decode(rows[0]), rows[0]);
 }
 
 /** Build a projection `ReturnState` from a `.return(row => ({...}))` callback (shared with `select`). */
@@ -336,7 +381,7 @@ export class CreateQuery<TD extends PgTableDef, Res>
   ) {}
 
   /** Re-type the returned projection: `.return("after")` (default full row), `.return(r => ({...}))`, or `.return("none")`. */
-  return(mode: "after"): CreateQuery<TD, App<TD>>;
+  return(mode: "after"): CreateQuery<TD, RowOf<TD>>;
   return(mode: "none"): CreateQuery<TD, undefined>;
   return<P extends Record<string, FieldRef<unknown>>>(
     cb: (row: Row<TD>) => P,
@@ -390,7 +435,7 @@ export class CreateBuilder<TD extends PgTableDef> {
     private readonly conn?: PgConn,
   ) {}
   /** INSERT this row (validated vs `T.create` NOW — a bad payload throws here, not at `await`). */
-  content(data: CreateInput<TD>): CreateQuery<TD, App<TD>> {
+  content(data: CreateInput<TD>): CreateQuery<TD, RowOf<TD>> {
     const values = z.encode(this.table.create, data) as Record<string, unknown>;
     return new CreateQuery(this.table, values, { kind: "after" }, this.conn);
   }
@@ -408,7 +453,7 @@ export class UpdateQuery<TD extends PgTableDef, Res>
     private readonly conn?: PgConn,
   ) {}
 
-  return(mode: "after"): UpdateQuery<TD, App<TD> | undefined>;
+  return(mode: "after"): UpdateQuery<TD, RowOf<TD> | undefined>;
   return(mode: "none"): UpdateQuery<TD, undefined>;
   return<P extends Record<string, FieldRef<unknown>>>(
     cb: (row: Row<TD>) => P,
@@ -471,7 +516,7 @@ export class UpdateBuilder<TD extends PgTableDef> {
   ) {}
   private build(
     values: Record<string, unknown>,
-  ): UpdateQuery<TD, App<TD> | undefined> {
+  ): UpdateQuery<TD, RowOf<TD> | undefined> {
     return new UpdateQuery(
       this.table,
       this.id,
@@ -481,19 +526,19 @@ export class UpdateBuilder<TD extends PgTableDef> {
     );
   }
   /** Partial UPDATE — set only the provided columns (validated vs `T.update`, fail-fast). */
-  merge(patch: UpdateInput<TD>): UpdateQuery<TD, App<TD> | undefined> {
+  merge(patch: UpdateInput<TD>): UpdateQuery<TD, RowOf<TD> | undefined> {
     return this.build(
       z.encode(this.table.update, patch) as Record<string, unknown>,
     );
   }
   /** Alias of {@link merge} for pg (flat columns) — an explicit SET of the provided columns. */
-  set(patch: UpdateInput<TD>): UpdateQuery<TD, App<TD> | undefined> {
+  set(patch: UpdateInput<TD>): UpdateQuery<TD, RowOf<TD> | undefined> {
     return this.build(
       z.encode(this.table.update, patch) as Record<string, unknown>,
     );
   }
   /** REPLACE the row — every non-generated column (validated vs `T.create`, fail-fast). */
-  content(row: CreateInput<TD>): UpdateQuery<TD, App<TD> | undefined> {
+  content(row: CreateInput<TD>): UpdateQuery<TD, RowOf<TD> | undefined> {
     return this.build(
       z.encode(this.table.create, row) as Record<string, unknown>,
     );
@@ -511,7 +556,7 @@ export class DeleteQuery<TD extends PgTableDef, Res>
     private readonly conn?: PgConn,
   ) {}
 
-  return(mode: "after"): DeleteQuery<TD, App<TD> | undefined>;
+  return(mode: "after"): DeleteQuery<TD, RowOf<TD> | undefined>;
   return(mode: "none"): DeleteQuery<TD, undefined>;
   return<P extends Record<string, FieldRef<unknown>>>(
     cb: (row: Row<TD>) => P,
@@ -581,6 +626,6 @@ export function remove<TD extends PgTableDef>(
   table: TD,
   id: IdOf<TD>,
   conn?: PgConn,
-): DeleteQuery<TD, App<TD> | undefined> {
+): DeleteQuery<TD, RowOf<TD> | undefined> {
   return new DeleteQuery(table, id, { kind: "after" }, conn);
 }

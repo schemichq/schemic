@@ -27,8 +27,12 @@ type Equal<A, B> =
 type Expect<T extends true> = T;
 type ResOf<Q> = Q extends SelectQuery<infer _TD, infer R> ? R : never;
 
+// an implicit-id table carries its id on the returned row: `App & { id: string }` (RowOf)
 type _bare = Expect<
-  Equal<ResOf<ReturnType<typeof select<typeof user>>>, App<typeof user>>
+  Equal<
+    ResOf<ReturnType<typeof select<typeof user>>>,
+    App<typeof user> & { id: string }
+  >
 >;
 const _proj = select(user).return((r) => ({ n: r.name, when: r.createdAt }));
 type _projRes = Expect<Equal<ResOf<typeof _proj>, { n: string; when: Date }>>;
@@ -41,7 +45,7 @@ describe("postgres/query — SQL lowering", () => {
       .limit(5)
       .toSQL();
     expect(sql).toBe(
-      'SELECT "name", "age", "createdAt", "slug" FROM "user" WHERE "age" >= $1 ORDER BY "name" DESC LIMIT $2;',
+      'SELECT "id", "name", "age", "createdAt", "slug" FROM "user" WHERE "age" >= $1 ORDER BY "name" DESC LIMIT $2;',
     );
     expect(params).toEqual([18, 5]);
   });
@@ -51,7 +55,7 @@ describe("postgres/query — SQL lowering", () => {
       .where((r) => and(r.age.gte(18), or(r.name.eq("a"), r.name.eq("b"))))
       .toSQL();
     expect(sql).toBe(
-      'SELECT "name", "age", "createdAt", "slug" FROM "user" WHERE ("age" >= $1 AND ("name" = $2 OR "name" = $3));',
+      'SELECT "id", "name", "age", "createdAt", "slug" FROM "user" WHERE ("age" >= $1 AND ("name" = $2 OR "name" = $3));',
     );
     expect(params).toEqual([18, "a", "b"]);
   });

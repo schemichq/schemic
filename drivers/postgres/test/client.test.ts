@@ -263,4 +263,35 @@ describe("postgres ORM client (P2 writes)", () => {
       await conn.close();
     }
   });
+
+  test("IMPLICIT-id table: returned rows CARRY their id (select + update + delete)", async () => {
+    // no declared `id` — pg adds the implicit `id text PRIMARY KEY`, outside the declared shape.
+    const note = defineTable("note", { title: s.text(), body: s.text() });
+    const conn = (await postgresDriver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
+    try {
+      await postgresDriver.apply(
+        conn,
+        emitKinds(registry, postgresDriver.explode([note], [])),
+      );
+      // seed with an explicit id (the implicit `text` PK has no generator — externally supplied)
+      await conn.query(
+        `INSERT INTO "note" ("id","title","body") VALUES ('n1','T','B');`,
+      );
+      const db = connect(conn);
+      // select carries the id (fetched even though it's not a declared field)
+      const [row] = await db.select(note);
+      expect(row).toEqual({ id: "n1", title: "T", body: "B" });
+      // the carried id is addressable -> update by it, and the returned row carries it too
+      const updated = await db.update(note, "n1").merge({ title: "T2" });
+      expect(updated).toEqual({ id: "n1", title: "T2", body: "B" });
+      // delete returns the removed row, id and all
+      const deleted = await db.delete(note, "n1");
+      expect(deleted).toEqual({ id: "n1", title: "T2", body: "B" });
+      expect((await db.select(note)).length).toBe(0);
+    } finally {
+      await conn.close();
+    }
+  });
 });
