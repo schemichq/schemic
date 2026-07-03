@@ -121,12 +121,18 @@ type MaybePromise<T> = T | Promise<T>;
 
 /**
  * Typed `postgresConnection(...)` factory — the only thing a config's `connections` map accepts for
- * this driver. Wraps {@link connectionEntry} with the Postgres connection shape. Pass a static config,
- * a resolver yielding one config, or a resolver yielding a keyed COLLECTION (each entry needs `key`).
+ * this driver. Wraps {@link connectionEntry} with the Postgres connection shape: pass a static config,
+ * or a resolver yielding one config or an ARRAY (a bulk fleet — migrations enumerate it; `connect`
+ * throws a teaching error, so pass args selecting one). A config `key` labels a fleet member (else the
+ * `label` hook's `url | pglite(memory)` is used).
  *
  * A PARAMETERIZED connection declares its args as the resolver's SECOND parameter — that type is
  * inferred as `Args`, so `schemic.connect("<name>", args)` is typed + autocompleted per connection
  * (no args schema to plumb; annotate the param and you're done).
+ *
+ * Two overloads (config / resolver) — matching `surrealConnection` — so their union covers
+ * `ConnectionInput`, making the factory assignable to core's `ChainableDriverFactory` (the `.connection`
+ * chained-builder driver marker).
  */
 export function postgresConnection(
   config: PostgresConnectionConfig,
@@ -135,13 +141,13 @@ export function postgresConnection<Args = undefined>(
   resolver: (
     ctx: ResolveContext,
     args: Args,
-  ) => MaybePromise<PostgresConnectionConfig>,
+  ) => MaybePromise<PostgresConnectionConfig | PostgresConnectionConfig[]>,
 ): ConnectionEntry<PgClient, Args>;
+// The UNIFIED `ConnectionInput` form (public) — one signature whose param is the whole config|resolver
+// union, so the factory is assignable to `ChainableDriverFactory` under the chain's C/Client inference
+// (the split config/resolver overloads above each cover only half the union).
 export function postgresConnection<Args = undefined>(
-  resolver: (
-    ctx: ResolveContext,
-    args: Args,
-  ) => MaybePromise<(PostgresConnectionConfig & { key: string })[]>,
+  input: ConnectionInput<PostgresConnectionConfig, Args>,
 ): ConnectionEntry<PgClient, Args>;
 export function postgresConnection<Args = undefined>(
   input: ConnectionInput<PostgresConnectionConfig, Args>,

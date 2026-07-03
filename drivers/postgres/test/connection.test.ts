@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import type { ChainableDriverFactory } from "@schemic/core";
+import { defineConfig } from "@schemic/core/config";
 import type { ConnectionConfigBase } from "@schemic/core/driver";
 import { getDriver } from "@schemic/core/driver";
+import type { PgClient } from "../src/client";
 import { postgresDriver } from "../src/driver";
 import {
   identifier,
@@ -154,5 +157,42 @@ describe("Driver.query (named -> positional, passthrough)", () => {
     const cfg = files["schemic.config.ts"] ?? "";
     expect(cfg).toContain("export const schemic = defineConfig({");
     expect(cfg).toContain("export default schemic;");
+  });
+});
+
+describe("chained defineConfig().connection() (typed cross-connections)", () => {
+  // (1) `postgresConnection` IS a valid `.connection()` driver marker — assignable to the core contract.
+  const _marker: ChainableDriverFactory<PostgresConnectionConfig, PgClient> =
+    postgresConnection;
+
+  // (2) the chain types through the factory: each `.connection` accumulates prior connections, the
+  //     resolver's `ctx.connections.<prior>` is a THENABLE sibling ORM client, and the entry infers
+  //     the driver's own `PgClient` + the resolver's typed args.
+  const cfg = defineConfig()
+    .connection("main", postgresConnection, { schema: "./main" })
+    .connection(
+      "replica",
+      postgresConnection,
+      async (ctx, args: { region: string }) => {
+        const main: PgClient = await ctx.connections.main; // sibling client, typed
+        void main.select;
+        return { schema: `./replica-${args.region}` };
+      },
+    );
+
+  test("the chained config exposes a typed connect() + the declared connections", () => {
+    expect(typeof cfg.connect).toBe("function");
+    expect(Object.keys(cfg.connections).sort()).toEqual(["main", "replica"]);
+    expect(cfg.connections.main.driver).toBe("postgres");
+  });
+
+  test("a FORWARD reference to a not-yet-declared connection is a compile error", () => {
+    defineConfig().connection(
+      "first",
+      postgresConnection,
+      // @ts-expect-error — `second` isn't declared yet (order = visibility; no forward refs)
+      async (ctx) => ({ schema: `./${await ctx.connections.second}` }),
+    );
+    expect(true).toBe(true);
   });
 });
