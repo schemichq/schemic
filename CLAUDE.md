@@ -60,8 +60,11 @@ Rules:
 Anything **pending Manuel's attention** — a decision, an approval (e.g. a BREAKING land), a security/
 secret action, a release-cut call, anything only he can decide — goes into the **session Task list**,
 never an inline "just a reminder that X is pending" in chat prose. The Task list is **persistent**, so
-Manuel can review it any time and ask again; he marks each item done as he attends it.
+Manuel can review it any time and ask again.
 
+- **Done → REMOVE it.** When an item is attended/resolved, **delete** it from the list (Task status
+  `deleted`) — do NOT leave it as `completed`. The list should show ONLY what's still pending Manuel, so
+  a glance is always "here's what's on your plate," with nothing to scroll past.
 - **Per-agent, not centralized.** EACH agent keeps its OWN pending-Manuel items in its OWN session Task
   list (visible in that agent's chat). Do **not** route them to `core-dev` — Manuel reviews each agent's
   chat for that agent's items.
