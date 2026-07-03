@@ -14,7 +14,6 @@ const CONFIG_NAMES = [
   "schemic.ts",
 ];
 
-
 /**
  * Is the schema path a single file (vs a directory of schema modules)? Determined by `stat` when
  * it exists, else inferred from a `.ts`/`.js`-ish extension.
@@ -188,7 +187,7 @@ export async function loadConfig(opts?: {
       `No connection named "${name}". Set "defaultConnection" or pass --connection. Known: ${names.join(", ")}.`,
     );
   }
-  const ctx: ResolveContext = { connections: {}, args: {}, env: process.env };
+  const ctx: ResolveContext = { connections: {}, env: process.env };
   const resolved = await entry.resolve(ctx);
   if (resolved.length !== 1) {
     throw new Error(

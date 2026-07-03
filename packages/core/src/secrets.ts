@@ -32,7 +32,9 @@ export function secret(name: string): SecretRef {
 export function isSecretRef(v: unknown): v is SecretRef {
   if (typeof v !== "object" || v === null) return false;
   const r = v as Partial<SecretRef>;
-  return (r.kind === "env" || r.kind === "secret") && typeof r.name === "string";
+  return (
+    (r.kind === "env" || r.kind === "secret") && typeof r.name === "string"
+  );
 }
 
 /**

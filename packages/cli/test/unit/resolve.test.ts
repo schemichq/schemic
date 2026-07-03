@@ -49,8 +49,8 @@ export default defineConfig({
   defaultConnection: "primary",
   connections: {
     primary: connectionEntry("faux", { schema: "./schema", url: "ws://primary" }),
-    tenants: connectionEntry("faux", (ctx) =>
-      (ctx.args.only ? [ctx.args.only] : ["acme", "globex"]).map((k) => ({
+    tenants: connectionEntry("faux", (_ctx, args?: { only?: string }) =>
+      (args?.only ? [args.only] : ["acme", "globex"]).map((k) => ({
         schema: "./schema", key: k, url: "ws://" + k,
       }))),
   },
@@ -107,9 +107,9 @@ describe("resolveTargets — addressing", () => {
 
   test("unknown connection errors with the known names", async () => {
     const config = writeConfig(COLLECTION);
-    await expect(resolveTargets({ config, connection: "nope" })).rejects.toThrow(
-      /No connection named "nope"/,
-    );
+    await expect(
+      resolveTargets({ config, connection: "nope" }),
+    ).rejects.toThrow(/No connection named "nope"/);
   });
 });
 
@@ -121,9 +121,9 @@ describe("resolveOne — single-connection guard", () => {
 
   test("rejects a bare collection (must pin a :key)", async () => {
     const config = writeConfig(COLLECTION);
-    await expect(
-      resolveOne({ config, connection: "tenants" }),
-    ).rejects.toThrow(/collection/);
+    await expect(resolveOne({ config, connection: "tenants" })).rejects.toThrow(
+      /collection/,
+    );
   });
 
   test("resolves a pinned collection element", async () => {
@@ -174,8 +174,8 @@ export default defineConfig({
   },
 });
 `);
-    await expect(
-      resolveTargets({ config, connection: "a" }),
-    ).rejects.toThrow(/cycle/);
+    await expect(resolveTargets({ config, connection: "a" })).rejects.toThrow(
+      /cycle/,
+    );
   });
 });

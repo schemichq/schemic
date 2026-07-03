@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveConnection } from "../../src/client";
 import { defineConfig } from "../../src/config";
-import { connectionEntry, type StandardSchemaLike } from "../../src/connection";
+import { connectionEntry } from "../../src/connection";
 
 // A fake driver entry whose embedded client opener just reflects the resolved config back.
 // Direct connectionEntry call so the Client generic INFERS from the opener's return type.
@@ -43,39 +43,47 @@ describe("config-as-factory (defineConfig().connect)", () => {
     );
   });
 
-  test("args are validated against the entry's schema before resolving", async () => {
-    const argsSchema: StandardSchemaLike = {
-      "~standard": {
-        validate: (v) =>
-          v && typeof (v as { tenant?: unknown }).tenant === "string"
-            ? { value: v }
-            : { issues: [{ message: "tenant is required" }] },
-      },
-    };
-    let seenArgs: Record<string, string> | undefined;
+  test("resolver args are the TYPED 2nd param; connect(name, args) selects one config", async () => {
+    let seen: { tenant: string } | undefined;
     const entry = connectionEntry(
       "fakedriver",
-      (ctx) => {
-        seenArgs = ctx.args;
-        return { schema: "./s", key: ctx.args.tenant };
+      (_ctx, args: { tenant: string }) => {
+        seen = args;
+        return { schema: "./s", key: args.tenant };
       },
-      {
-        args: argsSchema,
-        client: async (cfg) => ({ connection: cfg.connection }),
-      },
+      { client: async (cfg) => ({ connection: cfg.connection }) },
     );
     const schemic = defineConfig({ connections: { tenants: entry } });
-
-    const db = await schemic.connect("tenants", {
-      args: { tenant: "acme" },
-      key: "acme",
-    });
+    const db = await schemic.connect("tenants", { tenant: "acme" });
     expect(db.connection).toBe("tenants:acme");
-    expect(seenArgs).toEqual({ tenant: "acme" });
+    expect(seen).toEqual({ tenant: "acme" });
+  });
 
-    await expect(
-      schemic.connect("tenants", { args: {} as { tenant: string } }),
-    ).rejects.toThrow("tenant is required");
+  test("a BULK (array) resolution throws a teaching error from connect", async () => {
+    const entry = connectionEntry(
+      "fakedriver",
+      () => [
+        { schema: "./s", key: "a" },
+        { schema: "./s", key: "b" },
+      ],
+      { client: async (cfg) => ({ connection: cfg.connection }) },
+    );
+    const schemic = defineConfig({ connections: { fleet: entry } });
+    await expect(schemic.connect("fleet")).rejects.toThrow(
+      /resolved to 2 configs \(a, b\).*Pass args/s,
+    );
+  });
+
+  test("labels: config key > entry label hook > positional", async () => {
+    const { resolveFromConfig } = await import("../../src/client");
+    const entry = connectionEntry(
+      "fakedriver",
+      () => [{ schema: "./s", key: "keyed" }, { schema: "./s" }],
+      { label: (cfg) => `lbl:${cfg.connection}` },
+    );
+    const config = defineConfig({ connections: { fleet: entry } });
+    const r = await resolveFromConfig(config, "/proj", { name: "fleet" });
+    expect(r.labels).toEqual(["keyed", "lbl:fleet"]);
   });
 });
 

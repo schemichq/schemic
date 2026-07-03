@@ -24,12 +24,15 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
   `connect(name?)` MANAGED from the config / `connect(client)` BYO (close = no-op), `db.select(table)`
   pre-bound + awaitable (thenable builder; standalone `.run(db)` still works), AsyncDisposable;
   surreal adds a disposable `forkSession()`.
-- **core:** config-as-factory — `defineConfig` is generic and returns the config with a **typed
-  `connect()`**: connection names autocomplete (a typo is a compile error), each entry's own client
-  type is inferred (heterogeneous-driver projects type per-connection), resolver `args` validate
-  against the connection's optional Standard-Schema `args` schema, and keyed collections address via
-  `connect(name, { key })`. `connectionEntry(driver, input, { client, args })` carries the
-  factory-embedded lazy client opener + args schema.
+- **core:** config-as-factory with PARAMETERIZED connections — `defineConfig` is generic and returns
+  the config with a **typed `connect(name, args?)`**: connection names autocomplete (a typo is a
+  compile error), `args` is the resolver's own declared 2nd param (`(ctx, args) => config | config[]`,
+  typed per connection; absent for static connections), and each entry's own client type is inferred
+  (heterogeneous-driver projects type per-connection). An ARRAY resolution is bulk-only (migrations
+  enumerate it) — `connect` throws a teaching error; pass args selecting one. `key` is a display label
+  (not an address); entries may add a dialect `label` hook for bulk reporting. Resolvers can query
+  sibling connections via `ctx.connections` at runtime (lazy open through the entries' embedded client
+  openers, cycle-detected, auto-closed). CLI: `--args <json>` + `--arg k=v` sugar feed resolver args.
 - **core:** the config loader accepts a NAMED `schemic` export as well as a default — scaffolded form
   becomes `export const schemic = defineConfig(...)` in `schemic.config.ts` (deterministic
   `import { schemic }` -> `schemic.connect()` auto-import, no file rename); a bare `schemic.ts` is

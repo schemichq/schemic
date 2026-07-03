@@ -54,30 +54,20 @@ export type EntryClient<E> =
 export type EntryArgs<E> =
   E extends ConnectionEntry<any, infer Args> ? Args : never;
 
-/** Options for `config.connect(name, opts)` — element key, typed resolver args, working dir. */
-export interface ConnectOptions<
-  Args extends Record<string, unknown> = Record<string, string>,
-> {
-  /** Address one element of a keyed collection (`<name>:<key>`). */
-  key?: string;
-  /** Resolver args — validated against the connection's `args` schema when it declares one. */
-  args?: Args;
-  /** Working directory relative paths resolve from (defaults to `process.cwd()`). */
-  cwd?: string;
-}
-
 /**
  * What {@link defineConfig} ADDS to your config: the config IS the app's typed entry point to its
- * databases. `connect(name)` autocompletes your connection names, returns that entry's own client
- * type (a heterogeneous-driver project types per-connection), and validates `args` per the entry's
- * schema. The client is disposable: `await using db = await schemic.connect()`.
+ * databases. `connect(name, args?)` autocompletes your connection names, types `args` per connection
+ * (the resolver's declared 2nd param — absent for a static/argless connection), and returns that
+ * entry's own client type (a heterogeneous-driver project types per-connection). A PARAMETERIZED
+ * connection whose resolver returns an ARRAY is bulk-only: `connect` throws a teaching error — pass
+ * `args` selecting ONE config. The client is disposable: `await using db = await schemic.connect()`.
  */
 export interface SchemicProject<
   Conns extends Record<string, AnyConnectionEntry>,
 > {
   connect<N extends keyof Conns & string>(
     name?: N,
-    opts?: ConnectOptions<EntryArgs<Conns[N]>>,
+    args?: EntryArgs<Conns[N]>,
   ): Promise<EntryClient<Conns[N]>>;
 }
 
@@ -97,10 +87,10 @@ export function defineConfig<const C extends SchemicConfig>(
 ): C & SchemicProject<C["connections"]> {
   return {
     ...config,
-    async connect(name?: string, opts?: ConnectOptions) {
+    async connect(name?: string, args?: unknown) {
       // Lazy: authoring/loading a config stays light; the client machinery loads only when used.
       const { connectFromConfig } = await import("./client");
-      return connectFromConfig(config, name, opts);
+      return connectFromConfig(config, name, args);
     },
   } as C & SchemicProject<C["connections"]>;
 }

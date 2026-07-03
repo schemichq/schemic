@@ -40,35 +40,99 @@ export function asyncDisposable<T extends { close(): Promise<void> }>(
 export interface ResolveConnectionOptions {
   /** Connection name; defaults to `defaultConnection`, else the sole connection, else `"default"`. */
   name?: string;
-  /** Address one element of a keyed collection (`<name>:<key>`) — pass the `key`. */
-  key?: string;
   /** Path to `schemic.config.ts` (else auto-discovered from `cwd`). */
   config?: string;
   /** Working directory to discover the config + resolve relative paths from. */
   cwd?: string;
-  /** `--arg`-style values handed to a resolver connection. */
-  args?: Record<string, string>;
+  /** The resolver's typed args (its declared 2nd param) for a PARAMETERIZED connection. */
+  args?: unknown;
 }
 
-// Runtime resolution is single-connection: the cross-connection proxy DAG (a resolver reaching
-// `ctx.connections.<other>`) lives in the CLI and is out of P1 scope. Accessing it here throws clearly.
-const noCrossConnections = new Proxy(
-  {},
-  {
-    get() {
+/**
+ * A live resolution context for RUNTIME connects: `ctx.connections.<name>` lazily opens the sibling
+ * via ITS entry's embedded client opener (so a resolver can query another connection to enumerate a
+ * fleet), with CYCLE detection; everything opened during resolution is closed when it settles.
+ */
+function makeRuntimeContext(config: SchemicConfig, root: string) {
+  const opened = new Map<string, Promise<unknown>>();
+  const resolving = new Set<string>();
+
+  const open = async (name: string): Promise<unknown> => {
+    if (resolving.has(name)) {
       throw new Error(
-        "cross-connection resolution (ctx.connections.<name>) is not supported by the runtime client yet — use a static connection, or resolve via the CLI",
+        `cyclic connection resolution: "${name}" is already resolving (a resolver reached back into itself via ctx.connections)`,
       );
-    },
-  },
-) as ResolveContext["connections"];
+    }
+    const entry = config.connections[name];
+    if (!entry) throw new Error(`ctx.connections.${name}: no such connection`);
+    if (!entry.client) {
+      throw new Error(
+        `ctx.connections.${name}: the "${entry.driver}" connection factory predates runtime cross-connection access — update @schemic/${entry.driver}`,
+      );
+    }
+    resolving.add(name);
+    try {
+      const bases = await entry.resolve(context, undefined);
+      if (bases.length !== 1) {
+        throw new Error(
+          `ctx.connections.${name}: resolved to ${bases.length} configs — a sibling reached via ctx.connections must resolve to exactly one`,
+        );
+      }
+      const rc = resolveConnectionConfig(
+        config,
+        name,
+        bases[0],
+        entry.driver,
+        root,
+      );
+      return await entry.client(rc);
+    } finally {
+      resolving.delete(name);
+    }
+  };
+
+  const context: ResolveContext = {
+    env: process.env,
+    connections: new Proxy(
+      {},
+      {
+        get(_t, name: string) {
+          return {
+            query: async (sql: string, vars?: Record<string, unknown>) => {
+              let client = opened.get(name);
+              if (!client) {
+                client = open(name);
+                opened.set(name, client);
+              }
+              const db = (await client) as {
+                query(sql: string, vars?: unknown): Promise<unknown>;
+              };
+              return db.query(sql, vars);
+            },
+          };
+        },
+      },
+    ) as ResolveContext["connections"],
+  };
+
+  const closeOpened = async () => {
+    for (const c of opened.values()) {
+      try {
+        await ((await c) as { close?: () => Promise<void> }).close?.();
+      } catch {
+        // best-effort cleanup of resolution-time siblings
+      }
+    }
+    opened.clear();
+  };
+
+  return { context, closeOpened, resolving };
+}
 
 /**
- * Resolve ONE named connection from the project config to a {@link ResolvedConfig} — the MANAGED path a
- * driver's `connect(name?)` uses before calling `driver.connect(config)`. Reuses the same
- * `loadProject` + `resolveConnectionConfig` the CLI uses, so the config is the single source of truth.
- * Supports static + arg-based resolver connections; a resolver reaching sibling connections throws
- * (P1 is single-connection — see above).
+ * Resolve ONE named connection from the disk-discovered project config — the MANAGED path a driver's
+ * standalone `connect(name?)` uses before `driver.connect(config)`. Single-config or a teaching
+ * error (a bulk resolution must be arg-selected).
  */
 export async function resolveConnection(
   opts: ResolveConnectionOptions = {},
@@ -77,24 +141,29 @@ export async function resolveConnection(
     config: opts.config,
     cwd: opts.cwd,
   });
-  return (await resolveFromConfig(config, root, opts)).resolved;
+  return exactlyOne(
+    await resolveFromConfig(config, root, { name: opts.name, args: opts.args }),
+  );
 }
 
 /**
- * The shared single-connection resolution over an IN-MEMORY config: pick the entry (named /
- * defaultConnection / sole / `"default"`), validate `args` against the entry's schema (when declared),
- * run the resolver, select the keyed element, and build the {@link ResolvedConfig}. Used by both
+ * The shared single-name resolution over an IN-MEMORY config: pick the entry (named /
+ * defaultConnection / sole / `"default"`), run the resolver with its typed `args`, and build one
+ * {@link ResolvedConfig} per returned config, each with a display label (config `key` > the entry's
+ * `label` hook > positional `name[i]`). Resolvers may query siblings via `ctx.connections` (lazy,
+ * cycle-checked; opened siblings are closed when resolution settles). Used by both
  * {@link resolveConnection} (disk-discovered config) and {@link connectFromConfig} (`config.connect`).
  */
 export async function resolveFromConfig(
   config: SchemicConfig,
   root: string,
-  opts: {
-    name?: string;
-    key?: string;
-    args?: Record<string, unknown>;
-  } = {},
-): Promise<{ entry: AnyConnectionEntry; resolved: ResolvedConfig }> {
+  opts: { name?: string; args?: unknown } = {},
+): Promise<{
+  entry: AnyConnectionEntry;
+  name: string;
+  resolved: ResolvedConfig[];
+  labels: string[];
+}> {
   const names = Object.keys(config.connections);
   const name =
     opts.name ??
@@ -107,43 +176,43 @@ export async function resolveFromConfig(
     );
   }
 
-  // Validate resolver args against the entry's Standard Schema (when the factory declared one) —
-  // BEFORE resolve, since the resolver consumes ctx.args.
-  let args = (opts.args ?? {}) as Record<string, string>;
-  if (entry.args) {
-    const result = await entry.args["~standard"].validate(opts.args ?? {});
-    if ("issues" in result && result.issues) {
-      throw new Error(
-        `invalid args for connection "${name}": ${result.issues.map((i) => i.message).join("; ")}`,
-      );
+  const rt = makeRuntimeContext(config, root);
+  rt.resolving.add(name); // the target itself is mid-resolution — a self-reference is a cycle
+  try {
+    const bases = await entry.resolve(rt.context, opts.args);
+    if (!bases.length) {
+      throw new Error(`connection "${name}" resolved to no config`);
     }
-    args = (result as { value: Record<string, string> }).value;
+    const resolved = bases.map((b) =>
+      resolveConnectionConfig(config, name, b, entry.driver, root),
+    );
+    const labels = resolved.map(
+      (rc, i) => bases[i].key ?? entry.label?.(rc) ?? `${name}[${i}]`,
+    );
+    return { entry, name, resolved, labels };
+  } finally {
+    rt.resolving.delete(name);
+    await rt.closeOpened();
   }
+}
 
-  const ctx: ResolveContext = {
-    connections: noCrossConnections,
-    args,
-    env: process.env,
-  };
-  const bases = await entry.resolve(ctx);
-  const base = opts.key
-    ? bases.find((b) => b.key === opts.key)
-    : (bases[0] ?? undefined);
-  if (!base) {
+/** Single-config resolution or a TEACHING error — bulk (array) resolutions must be arg-selected. */
+function exactlyOne(r: {
+  name: string;
+  resolved: ResolvedConfig[];
+  labels: string[];
+}): ResolvedConfig {
+  if (r.resolved.length !== 1) {
     throw new Error(
-      opts.key
-        ? `connection "${name}" has no element with key "${opts.key}"`
-        : `connection "${name}" resolved to no config`,
+      `connection "${r.name}" resolved to ${r.resolved.length} configs (${r.labels.join(", ")}) — ` +
+        `a parameterized/bulk connection. Pass args selecting exactly one, e.g. schemic.connect("${r.name}", { ... }).`,
     );
   }
-  return {
-    entry,
-    resolved: resolveConnectionConfig(config, name, base, entry.driver, root),
-  };
+  return r.resolved[0];
 }
 
 /**
- * The runtime behind `config.connect(name, opts)` (see `defineConfig`): resolve the entry from the
+ * The runtime behind `config.connect(name, args?)` (see `defineConfig`): resolve the entry from the
  * in-memory config and open its bound ORM client via the factory-embedded
  * {@link AnyConnectionEntry.client} opener. The static return type is the entry's own client type
  * (inferred per entry in `SchemicProject`).
@@ -151,18 +220,14 @@ export async function resolveFromConfig(
 export async function connectFromConfig(
   config: SchemicConfig,
   name?: string,
-  opts?: { key?: string; args?: Record<string, unknown>; cwd?: string },
+  args?: unknown,
 ): Promise<unknown> {
-  const root = opts?.cwd ?? process.cwd();
-  const { entry, resolved } = await resolveFromConfig(config, root, {
-    name,
-    key: opts?.key,
-    args: opts?.args,
-  });
-  if (!entry.client) {
+  const r = await resolveFromConfig(config, process.cwd(), { name, args });
+  const resolved = exactlyOne(r);
+  if (!r.entry.client) {
     throw new Error(
-      `the "${entry.driver}" connection factory predates config.connect() — update @schemic/${entry.driver} to a version whose ${entry.driver}Connection embeds a client opener`,
+      `the "${r.entry.driver}" connection factory predates config.connect() — update @schemic/${r.entry.driver} to a version whose ${r.entry.driver}Connection embeds a client opener`,
     );
   }
-  return entry.client(resolved);
+  return r.entry.client(resolved);
 }

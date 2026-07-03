@@ -12,8 +12,8 @@ import {
   loadDefs,
   lowerSchema,
   ok,
-  plural,
   type PortableObject,
+  plural,
   style,
 } from "@schemic/core";
 
@@ -34,7 +34,10 @@ export async function portableDiff(
 
   // Desired = the declared schema, authored with this driver's s.* -> exploded -> lowered.
   const { tables, defs } = await loadDefs(config.schemaPath);
-  const desired: PortableObject[] = lowerSchema(reg, driver.explode(tables, defs));
+  const desired: PortableObject[] = lowerSchema(
+    reg,
+    driver.explode(tables, defs),
+  );
 
   // Live = the database, introspected through the driver, canonicalized identically to lowering.
   const conn = (await driver.connect(config)) as Conn;

@@ -86,12 +86,7 @@ export {
   resolveFromConfig,
 } from "./client";
 // --- config-as-factory types (defineConfig lives on the `./config` subpath) --------------------
-export type {
-  ConnectOptions,
-  EntryArgs,
-  EntryClient,
-  SchemicProject,
-} from "./config";
+export type { EntryArgs, EntryClient, SchemicProject } from "./config";
 // --- multi-connection contract (docs/MULTI-CONNECTION.md) -------------------------------------
 export {
   type AnyConnectionEntry,

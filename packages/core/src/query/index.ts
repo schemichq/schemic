@@ -9,9 +9,14 @@
  * - `callFunction` — invoke a defined DB function via the `callable` capability + decode through
  *   `.returns(R)` (the neutral half of the (B) `.call()`).
  */
-export { callFunction } from "./call";
-export { projectionSchema, decodeProjection, type ProjectionField } from "./codec";
-export type { Project } from "./project";
-export { brandRef, type FieldRefBase, type RefValue } from "./ref";
+
 // Re-exported so a driver builds its `.call()` from one import (`@schemic/core/query`).
 export type { CallableFunctions } from "../driver/driver";
+export { callFunction } from "./call";
+export {
+  decodeProjection,
+  type ProjectionField,
+  projectionSchema,
+} from "./codec";
+export type { Project } from "./project";
+export { brandRef, type FieldRefBase, type RefValue } from "./ref";

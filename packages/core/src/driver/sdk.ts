@@ -19,6 +19,26 @@ export {
   type ResolveContext,
   type StandardSchemaLike,
 } from "../connection";
+// The KIND REGISTRY (core-v2) — what a driver builds its `registry`/`explode`/`introspectAll` against.
+export {
+  buildKindDiff,
+  type Definable,
+  emitKinds,
+  introspectKinds,
+  type KindEngine,
+  type KindPlan,
+  KindRegistry,
+  type KindSnapshot,
+  type KindSpec,
+  lowerSchema,
+  type OrderNode,
+  orderObjects,
+  type PortableObject,
+  planKinds,
+  type Ref,
+  snapshotKinds,
+  snapshotObjects,
+} from "../kind";
 export type {
   ApplyOptions,
   Authored,
@@ -51,23 +71,3 @@ export {
 // The field SUBSTRATE every kind composes (the fixed-slot object types are retired — a driver owns
 // its own portable shapes; see ../kind).
 export type { PortableField, PortablePermissions } from "./portable-ir";
-// The KIND REGISTRY (core-v2) — what a driver builds its `registry`/`explode`/`introspectAll` against.
-export {
-  type Definable,
-  emitKinds,
-  introspectKinds,
-  type KindEngine,
-  type KindPlan,
-  KindRegistry,
-  type KindSnapshot,
-  type KindSpec,
-  lowerSchema,
-  type OrderNode,
-  orderObjects,
-  buildKindDiff,
-  planKinds,
-  type PortableObject,
-  type Ref,
-  snapshotKinds,
-  snapshotObjects,
-} from "../kind";

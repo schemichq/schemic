@@ -24,7 +24,7 @@ export interface StandardSchemaLike {
 export interface ConnectionConfigBase {
   /** Schema dir (the desired state + its migration files/snapshot). Shared dir = shared schema. */
   schema: string;
-  /** Address within a COLLECTION (array-returning resolver) — `<name>:<key>`. Required on array entries. */
+  /** Optional DISPLAY label for this config within a bulk (array) resolution — reporting/logs only. */
   key?: string;
   /** Migrations dir override; defaults relative to `schema`. */
   migrations?: string;
@@ -42,7 +42,6 @@ export interface ResolvedConnectionHandle {
  */
 export interface ResolveContext {
   connections: Record<string, ResolvedConnectionHandle>;
-  args: Record<string, string>;
   env: NodeJS.ProcessEnv;
 }
 
@@ -51,13 +50,10 @@ export interface ResolveContext {
  * `connections` map accepts. Never hand-authored. `driver` is the package the CLI dynamically loads;
  * `resolve` always normalizes to an ARRAY (a single connection -> one element, a collection -> many).
  */
-export interface ConnectionEntry<
-  Client = unknown,
-  Args extends Record<string, unknown> = Record<string, string>,
-> {
+export interface ConnectionEntry<Client = unknown, Args = undefined> {
   readonly __schemic: "connection";
   readonly driver: string;
-  resolve(ctx: ResolveContext): Promise<ConnectionConfigBase[]>;
+  resolve(ctx: ResolveContext, args?: Args): Promise<ConnectionConfigBase[]>;
   /**
    * Lazily open this connection's bound ORM CLIENT for a resolved config — embedded by the driver
    * factory (with a lazy `import()` of its own client module, so authoring a config never pulls the
@@ -65,11 +61,10 @@ export interface ConnectionEntry<
    */
   client?(config: ResolvedConfig): Promise<Client>;
   /**
-   * Standard Schema validating the resolver `args` for this connection (e.g. `s.object({ tenant:
-   * s.string() })`). When present, `config.connect(name, { args })` validates before resolving, and the
-   * resolver's `ctx.args` is typed as the schema's output.
+   * Dialect-specific DISPLAY identity for a resolved config (bulk reporting / errors / logs) —
+   * e.g. surreal `ns/db`, pg `host/db`. Precedence: config `key` > this hook > positional `name[i]`.
    */
-  args?: StandardSchemaLike;
+  label?(config: ResolvedConfig): string;
   /** PHANTOM (never assigned) — anchors `Client`/`Args` so `config.connect` can infer them per entry. */
   readonly __types?: { client: Client; args: Args };
 }
@@ -79,14 +74,9 @@ export interface ConnectionEntry<
 export type AnyConnectionEntry = ConnectionEntry<any, any>;
 
 /** A connection factory's input: a static config, or a resolver yielding one config or a keyed collection. */
-export type ConnectionInput<
-  C extends ConnectionConfigBase,
-  Args extends Record<string, unknown> = Record<string, string>,
-> =
+export type ConnectionInput<C extends ConnectionConfigBase, Args = undefined> =
   | C
-  | ((
-      ctx: Omit<ResolveContext, "args"> & { args: Args },
-    ) => MaybePromise<C | (C & { key: string })[]>);
+  | ((ctx: ResolveContext, args: Args) => MaybePromise<C | C[]>);
 
 /**
  * Build a {@link ConnectionEntry} from a driver tag + a static config or resolver — the primitive each
@@ -98,25 +88,23 @@ export type ConnectionInput<
 export function connectionEntry<
   C extends ConnectionConfigBase,
   Client = unknown,
-  Args extends Record<string, unknown> = Record<string, string>,
+  Args = undefined,
 >(
   driver: string,
   input: ConnectionInput<C, Args>,
   extras?: {
     client?: (config: ResolvedConfig) => Promise<Client>;
-    args?: StandardSchemaLike;
+    label?: (config: ResolvedConfig) => string;
   },
 ): ConnectionEntry<Client, Args> {
   return {
     __schemic: "connection",
     driver,
     ...(extras?.client ? { client: extras.client } : {}),
-    ...(extras?.args ? { args: extras.args } : {}),
-    async resolve(ctx) {
+    ...(extras?.label ? { label: extras.label } : {}),
+    async resolve(ctx, args) {
       const out =
-        typeof input === "function"
-          ? await input(ctx as Omit<ResolveContext, "args"> & { args: Args })
-          : input;
+        typeof input === "function" ? await input(ctx, args as Args) : input;
       return Array.isArray(out) ? out : [out];
     },
   };

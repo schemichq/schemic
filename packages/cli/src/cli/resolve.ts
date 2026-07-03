@@ -15,7 +15,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
-  type ConnectionEntry,
+  type AnyConnectionEntry,
   type ConnectionOverrides,
   type Driver,
   driverNames,
@@ -55,7 +55,11 @@ function pickCompiled(node: unknown): string | undefined {
  * fragile. `subpath` is an exports key (`"."` for the index, `"./driver"` for the engine entry); a
  * non-index subpath that the package doesn't declare returns `null` (so the caller can fall back).
  */
-function compiledEntry(pkg: string, base: string, subpath: string): string | null {
+function compiledEntry(
+  pkg: string,
+  base: string,
+  subpath: string,
+): string | null {
   try {
     const manifestPath = createRequire(base).resolve(`${pkg}/package.json`);
     const m = JSON.parse(readFileSync(manifestPath, "utf8")) as {
@@ -111,7 +115,9 @@ export async function ensureDriver(name: string): Promise<void> {
         })`,
     );
   if (!driverNames().includes(name))
-    throw new Error(`package ${pkg}/driver did not register a "${name}" driver.`);
+    throw new Error(
+      `package ${pkg}/driver did not register a "${name}" driver.`,
+    );
 }
 
 /** Addressing + connection overrides every command accepts. */
@@ -121,8 +127,10 @@ export interface ResolveOpts extends ConnectionOverrides {
   connection?: string;
   /** Resolve EVERY connection, fanning collections out to all their keyed elements. */
   all?: boolean;
-  /** `--arg k=v` (repeatable) → ResolveContext.args, so a resolver can yield a subset. */
+  /** `--arg k=v` (repeatable) sugar — merged into the resolver args. */
   arg?: string[];
+  /** `--args <json>` — the resolver's typed args as one JSON object (k=v sugar merges over it). */
+  args?: string;
 }
 
 /** A commander `collect` reducer for repeatable `--arg` flags. */
@@ -131,8 +139,18 @@ export function collectArg(value: string, prev: string[]): string[] {
 }
 
 /** Parse `["k=v", ...]` into `{ k: v }`; rejects an entry without `=`. */
-function parseArgs(arg: string[] | undefined): Record<string, string> {
-  const out: Record<string, string> = {};
+function parseArgs(
+  arg: string[] | undefined,
+  argsJson?: string,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (argsJson) {
+    try {
+      Object.assign(out, JSON.parse(argsJson) as Record<string, unknown>);
+    } catch {
+      throw new Error(`--args must be a JSON object (got "${argsJson}").`);
+    }
+  }
   for (const a of arg ?? []) {
     const i = a.indexOf("=");
     if (i < 0) throw new Error(`--arg must be key=value (got "${a}").`);
@@ -161,7 +179,7 @@ export async function resolveTargets(
   opts: ResolveOpts,
 ): Promise<ResolvedConfig[]> {
   const { config, root } = await loadProject({ config: opts.config });
-  const args = parseArgs(opts.arg);
+  const args = parseArgs(opts.arg, opts.args);
   const names = Object.keys(config.connections);
 
   // Siblings the lazy proxy connected during resolution — closed before we return.
@@ -171,7 +189,7 @@ export async function resolveTargets(
   >();
   const resolving = new Set<string>();
 
-  const entryOf = (name: string): ConnectionEntry => {
+  const entryOf = (name: string): AnyConnectionEntry => {
     const entry = config.connections[name];
     if (!isConnectionEntry(entry))
       throw new Error(
@@ -186,7 +204,7 @@ export async function resolveTargets(
     key?: string,
   ): Promise<ResolvedConfig> => {
     const entry = entryOf(name);
-    const list = await entry.resolve(ctx);
+    const list = await entry.resolve(ctx, args);
     const picked =
       key !== undefined
         ? list.find((c) => c.key === key)
@@ -245,12 +263,12 @@ export async function resolveTargets(
     },
   );
 
-  const ctx: ResolveContext = { connections, args, env: process.env };
+  const ctx: ResolveContext = { connections, env: process.env };
 
   // Fan a whole connection (single or collection) out to its config(s).
   const fanOut = async (name: string): Promise<ResolvedConfig[]> => {
     const entry = entryOf(name);
-    const list = await entry.resolve(ctx);
+    const list = await entry.resolve(ctx, args);
     return list.map((conn) =>
       resolveConnectionConfig(config, name, conn, entry.driver, root),
     );

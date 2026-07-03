@@ -270,6 +270,10 @@ const dbFlags = (cmd: Command): Command =>
       collectArg,
       [],
     )
+    .option(
+      "--args <json>",
+      "resolver args as one JSON object (--arg k=v merges over it)",
+    )
     .option("--url <url>", "override the connection endpoint")
     .option("--namespace <ns>", "override the namespace")
     .option("--database <db>", "override the database")

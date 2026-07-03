@@ -15,10 +15,11 @@ import type { FieldRefBase } from "./ref";
  * Refs are matched BEFORE the generic object branch, so a ref (which is itself an object carrying
  * operator methods) is unwrapped to its value rather than mapped field-by-field.
  */
-export type Project<P> = P extends FieldRefBase<infer T>
-  ? T
-  : P extends readonly (infer E)[]
-    ? Project<E>[]
-    : P extends object
-      ? { [K in keyof P]: Project<P[K]> }
-      : P;
+export type Project<P> =
+  P extends FieldRefBase<infer T>
+    ? T
+    : P extends readonly (infer E)[]
+      ? Project<E>[]
+      : P extends object
+        ? { [K in keyof P]: Project<P[K]> }
+        : P;
