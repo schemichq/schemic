@@ -97,18 +97,29 @@ function makeRuntimeContext(config: SchemicConfig, root: string) {
       {},
       {
         get(_t, name: string) {
+          const openOnce = () => {
+            let client = opened.get(name);
+            if (!client) {
+              client = open(name);
+              opened.set(name, client);
+            }
+            return client;
+          };
+          // The handle is THENABLE to the sibling's FULL ORM client (typed in the chained form:
+          // `const main = await ctx.connections.main; main.select(...)`) and keeps a direct
+          // `.query` for the neutral/literal form. Do NOT stash the client past resolution — it is
+          // closed when resolution settles.
           return {
             query: async (sql: string, vars?: Record<string, unknown>) => {
-              let client = opened.get(name);
-              if (!client) {
-                client = open(name);
-                opened.set(name, client);
-              }
-              const db = (await client) as {
+              const db = (await openOnce()) as {
                 query(sql: string, vars?: unknown): Promise<unknown>;
               };
               return db.query(sql, vars);
             },
+            then: (
+              onOk?: (v: unknown) => unknown,
+              onErr?: (e: unknown) => unknown,
+            ) => openOnce().then(onOk, onErr),
           };
         },
       },

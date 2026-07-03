@@ -12,6 +12,13 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 ## [Unreleased]
 
 ### Added
+- **core:** typed cross-connection resolution — (A) a resolver's `ctx.connections.<name>` handle is
+  now THENABLE to that sibling's FULL ORM client (`const main = await ctx.connections.main;
+  main.select(...)`) while keeping direct `.query`; (B) the CHAINED config builder —
+  `defineConfig().connection(name, driverFactory, staticConfig | (ctx, args) => config | config[])` —
+  where the driver FACTORY itself is the marker and each resolver's `ctx.connections` is contextually
+  typed with the ACCUMULATED prior connections (order = visibility = structural cycle prevention).
+  The literal `defineConfig({ connections })` form is unchanged.
 - **core / surrealdb / postgres:** table COMPOSITION + derived schemas (cross-driver convention, from
   real usage): `defineTable(name, s.object())`, a public native `s.object().fields` map (inverse of
   `.shape`), `TableDef.extend(shape | s.object())` typed cast-free column mixins, and derived

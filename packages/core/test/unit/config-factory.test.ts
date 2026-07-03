@@ -133,3 +133,48 @@ describe("schemic.ts discovery", () => {
     );
   });
 });
+
+describe("chained config (defineConfig().connection(...))", () => {
+  const fakeFactory = (
+    input: import("../../src/connection").ConnectionInput<
+      { schema: string; key?: string },
+      // biome-ignore lint/suspicious/noExplicitAny: test factory
+      any
+    >,
+  ) =>
+    connectionEntry("fakedriver", input, {
+      client: async (cfg) => ({
+        connection: cfg.connection,
+        query: async () => ["row"],
+      }),
+    });
+
+  test("chained static + parameterized with typed accumulated ctx", async () => {
+    let sawSibling: unknown;
+    const schemic = defineConfig()
+      .connection("main", fakeFactory, { schema: "./s" })
+      .connection(
+        "tenants",
+        fakeFactory,
+        async (ctx, args: { org: string }) => {
+          const main = await ctx.connections.main; // thenable handle -> full client
+          sawSibling = await main.query();
+          return { schema: "./s", key: args.org };
+        },
+      );
+    const db = await schemic.connect("tenants", { org: "acme" });
+    expect(db.connection).toBe("tenants:acme");
+    expect(sawSibling).toEqual(["row"]);
+    expect((await schemic.connect("main")).connection).toBe("main");
+    // @ts-expect-error — "nope" is not a chained connection name
+    await expect(schemic.connect("nope")).rejects.toThrow("not defined");
+  });
+
+  test("order = visibility: a resolver reaching FORWARD is a compile error (and later a cycle guard)", async () => {
+    defineConfig().connection("a", fakeFactory, (ctx) => {
+      // @ts-expect-error — "b" is declared AFTER "a", so it is not visible here
+      void ctx.connections.b;
+      return { schema: "./s" };
+    });
+  });
+});

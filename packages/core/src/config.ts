@@ -29,7 +29,14 @@
  * url/namespace/authLevel, its check-engine options, …) live in the driver package's
  * `<driver>Connection` factory, not here.
  */
-import type { AnyConnectionEntry, ConnectionEntry } from "./connection";
+import type {
+  AnyConnectionEntry,
+  ConnectionConfigBase,
+  ConnectionEntry,
+  ConnectionInput,
+  ResolveContext,
+  ResolvedConnectionHandle,
+} from "./connection";
 
 export interface SchemicConfig {
   /** Named database connections — each produced by a per-driver `<driver>Connection(...)` factory. */
@@ -82,15 +89,98 @@ export interface SchemicProject<
  * // app code: import { schemic } from "./schemic.config";  →  await using db = await schemic.connect();
  * ```
  */
+/**
+ * A resolver's `ctx` in the CHAINED form: `connections` is typed with the ACCUMULATED prior
+ * connections — each handle is thenable to that entry's FULL ORM client (`const main = await
+ * ctx.connections.main; main.select(...)`) and keeps a direct `.query`. Order = visibility: a
+ * resolver only sees connections declared BEFORE it (structural cycle prevention). Do not stash a
+ * sibling client — it is closed when resolution settles.
+ */
+export type ChainCtx<Conns extends Record<string, AnyConnectionEntry>> = Omit<
+  ResolveContext,
+  "connections"
+> & {
+  connections: {
+    [K in keyof Conns]: PromiseLike<EntryClient<Conns[K]>> &
+      ResolvedConnectionHandle;
+  };
+};
+
+/** The shape a driver connection factory must have to be used as the `.connection()` driver marker. */
+export interface ChainableDriverFactory<
+  C extends ConnectionConfigBase,
+  Client,
+> {
+  // biome-ignore lint/suspicious/noExplicitAny: the chain re-types input/args itself (variance cast).
+  (input: ConnectionInput<C, any>): ConnectionEntry<Client, any>;
+}
+
+/**
+ * The CHAINED config builder (`defineConfig().connection(...)`): each `.connection(name, factory,
+ * input)` uses the driver FACTORY ITSELF as the driver marker and contextually types the resolver's
+ * `ctx.connections` with everything declared so far. The literal `defineConfig({ connections })`
+ * form remains for static maps.
+ */
+export interface ChainedConfig<Conns extends Record<string, AnyConnectionEntry>>
+  extends SchemicProject<Conns> {
+  connections: Conns;
+  defaultConnection?: string;
+  migrationsTable?: string;
+  seed?: string;
+  connection<
+    N extends string,
+    C extends ConnectionConfigBase,
+    Client,
+    Args = undefined,
+  >(
+    name: N,
+    factory: ChainableDriverFactory<C, Client>,
+    input:
+      | C
+      | ((ctx: ChainCtx<Conns>, args: Args) => C | C[] | Promise<C | C[]>),
+  ): ChainedConfig<Conns & { [K in N]: ConnectionEntry<Client, Args> }>;
+}
+
+/** Start a CHAINED config: `defineConfig().connection("main", surrealConnection, {...})`. */
+export function defineConfig(
+  base?: Omit<SchemicConfig, "connections">,
+): ChainedConfig<Record<never, never>>;
+/** Type + enrich a literal config — returns it with the typed `connect()` attached. */
 export function defineConfig<const C extends SchemicConfig>(
   config: C,
-): C & SchemicProject<C["connections"]> {
-  return {
-    ...config,
+): C & SchemicProject<C["connections"]>;
+export function defineConfig(
+  config?: SchemicConfig | Omit<SchemicConfig, "connections">,
+): unknown {
+  const isLiteral = !!config && "connections" in config;
+  const base: SchemicConfig = isLiteral
+    ? (config as SchemicConfig)
+    : {
+        ...(config as Omit<SchemicConfig, "connections"> | undefined),
+        connections: {},
+      };
+
+  const withApi = (cfg: SchemicConfig): unknown => ({
+    ...cfg,
     async connect(name?: string, args?: unknown) {
       // Lazy: authoring/loading a config stays light; the client machinery loads only when used.
       const { connectFromConfig } = await import("./client");
-      return connectFromConfig(config, name, args);
+      return connectFromConfig(cfg, name, args);
     },
-  } as C & SchemicProject<C["connections"]>;
+    connection(
+      name: string,
+      factory: (input: unknown) => AnyConnectionEntry,
+      input: unknown,
+    ) {
+      // The factory IS the driver marker: it stamps the driver tag, config type, and client opener.
+      // The chain re-types ctx/args itself, so the factory is called through a variance cast.
+      const entry = factory(input as never);
+      return withApi({
+        ...cfg,
+        connections: { ...cfg.connections, [name]: entry },
+      });
+    },
+  });
+
+  return withApi(base);
 }
