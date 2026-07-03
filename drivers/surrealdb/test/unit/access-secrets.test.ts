@@ -1,6 +1,6 @@
 // Phase-2a: DEFINE ACCESS keys as env()/secret() references — emitted as bound `$param` placeholders
 // (value never in the DDL), with the `$param -> SecretRef` bindings attached for apply-time resolution.
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { emitDefStatement } from "../../src/driver";
 // env/secret imported from the surrealdb index — verifies the side-effect-free re-export path too.
 import { defineAccess, env, secret } from "../../src/index";
@@ -59,5 +59,41 @@ describe("DEFINE ACCESS secret keys (env/secret -> $param)", () => {
     );
     expect(s.ddl).toContain("TYPE JWT URL");
     expect(s.bindings).toBeUndefined();
+  });
+
+  test("inline-key lint: symmetric KEY warns; an asymmetric verify KEY is PUBLIC — no warning", () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      // Asymmetric verify KEY = the public key: inline is fine, no lint.
+      st(
+        defineAccess("pubkey_ok")
+          .onDatabase()
+          .jwt({ alg: "RS256", key: "-----BEGIN PUBLIC KEY-----..." }),
+      );
+      expect(warn).not.toHaveBeenCalled();
+
+      // ...but the asymmetric ISSUER KEY is the PRIVATE key: still lints.
+      st(
+        defineAccess("privkey_lints")
+          .onDatabase()
+          .jwt({
+            alg: "RS256",
+            key: "-----BEGIN PUBLIC KEY-----...",
+            issuer: { key: "-----BEGIN PRIVATE KEY-----..." },
+          }),
+      );
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain("privkey_lints");
+
+      // Symmetric (HS*) KEY is the shared secret: lints.
+      st(
+        defineAccess("hs_lints")
+          .onDatabase()
+          .jwt({ alg: "HS512", key: "shared-secret" }),
+      );
+      expect(warn).toHaveBeenCalledTimes(2);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

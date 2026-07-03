@@ -68,6 +68,16 @@ function makeRef(col: string): FieldRef<unknown> {
 }
 const colOf = (ref: unknown): string => (ref as RuntimeRef).__col;
 
+/** INTERNAL (shared with `./write`): the typed callback row for a table, every column a ref. */
+// biome-ignore lint/suspicious/noExplicitAny: TableDef's Shape varies per call site.
+export function refsFor<TD extends TableDef<string, any>>(table: TD): Row<TD> {
+  const refs: Record<string, FieldRef<unknown>> = {};
+  for (const key of Object.keys(table.object.shape)) refs[key] = makeRef(key);
+  return refs as unknown as Row<TD>;
+}
+/** INTERNAL (shared with `./write`): a ref's column name. */
+export const refCol: (ref: unknown) => string = colOf;
+
 // --- SurrealQL lowering --------------------------------------------------------------------------
 
 interface Lowered {
@@ -111,9 +121,7 @@ class Select<TD extends TableDef<string, any>, Res> {
     private readonly table: TD,
     private readonly state: State,
   ) {
-    const refs: Record<string, FieldRef<unknown>> = {};
-    for (const key of Object.keys(table.object.shape)) refs[key] = makeRef(key);
-    this.row = refs as unknown as Row<TD>;
+    this.row = refsFor(table);
   }
 
   private next<R>(patch: Partial<State>): Select<TD, R> {

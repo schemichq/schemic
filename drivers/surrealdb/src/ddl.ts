@@ -515,13 +515,16 @@ export function secretParam(ref: SecretRef): string {
 }
 
 /** Render a `DEFINE ACCESS … KEY` value. A `SecretRef` becomes a bound `$param` placeholder (the value
- *  is resolved at apply, never emitted into the DDL); an inline literal is quoted + linted. */
+ *  is resolved at apply, never emitted into the DDL); an inline literal is quoted + linted — unless
+ *  `isPublic` (an asymmetric verify KEY is the PUBLIC key: inline is fine, no secret to leak). */
 function renderAccessKey(
   access: string,
   key: string | SecretRef | undefined,
+  isPublic = false,
 ): string {
   if (key && isSecretRef(key)) return `$${secretParam(key)}`;
-  if (typeof key === "string" && key.length > 0) warnInlineKey(access);
+  if (typeof key === "string" && key.length > 0 && !isPublic)
+    warnInlineKey(access);
   return JSON.stringify(key ?? "");
 }
 
@@ -546,10 +549,14 @@ type JwtClauseFields = {
 
 /** Render a JWT verify/issue clause body — `ALGORITHM <alg> KEY <key> [WITH ISSUER KEY <ik>]` or
  *  `URL <url>` — shared by `TYPE JWT` and RECORD's `WITH JWT`. Keys go through {@link renderAccessKey}
- *  (secret → bound `$param`; inline literal → quoted + linted). `alg` defaults to `HS512`. */
+ *  (secret → bound `$param`; inline literal → quoted + linted). `alg` defaults to `HS512`. With an
+ *  ASYMMETRIC alg the verify KEY is the PUBLIC key — inline is fine, no lint (the private ISSUER KEY
+ *  still lints); a symmetric (HS*) KEY is the shared secret and lints. */
 function renderJwtClause(access: string, cfg: JwtClauseFields): string {
   if (cfg.url) return `URL ${JSON.stringify(cfg.url)}`;
-  let out = `ALGORITHM ${cfg.alg ?? "HS512"} KEY ${renderAccessKey(access, cfg.key)}`;
+  const alg = cfg.alg ?? "HS512";
+  const isAsymmetric = !alg.startsWith("HS");
+  let out = `ALGORITHM ${alg} KEY ${renderAccessKey(access, cfg.key, isAsymmetric)}`;
   if (cfg.issuer)
     out += ` WITH ISSUER KEY ${renderAccessKey(access, cfg.issuer.key)}`;
   return out;

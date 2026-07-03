@@ -1,7 +1,8 @@
-// The bound ORM CLIENT for SurrealDB (`@schemic/surrealdb/client`). P1 = reads: a connection-bound
-// `select` — no `.run(externalDb)` — over a Schemic-MANAGED (resolved from the project config) or a
-// BYO (wrap-your-own) SurrealDB connection. Built on core's neutral OrmClientBase (disposable
-// lifecycle). Writes are P2. See @schemic/core docs/proposals/managed-connections-and-orm-client.md.
+// The bound ORM CLIENT for SurrealDB (`@schemic/surrealdb/client`): connection-bound reads (P1,
+// `select`) + writes (P2, split builders `create`/`update`/`delete`) — no `.run(externalDb)` — over a
+// Schemic-MANAGED (resolved from the project config) or a BYO (wrap-your-own) SurrealDB connection.
+// Built on core's neutral OrmClientBase (disposable lifecycle). See @schemic/core
+// docs/proposals/managed-connections-and-orm-client.md.
 
 import {
   asyncDisposable,
@@ -12,7 +13,18 @@ import {
 import { type BoundQuery, Surreal, type SurrealSession } from "surrealdb";
 import { surrealDriver } from "./driver";
 import type { App, TableDef } from "./pure";
-import { type Queryable, type Select, select } from "./query";
+import {
+  type CreateQuery,
+  create,
+  type DeleteQuery,
+  type Queryable,
+  remove,
+  type Select,
+  select,
+  type TargetId,
+  type UpdateQuery,
+  update,
+} from "./query";
 
 // biome-ignore lint/suspicious/noExplicitAny: TableDef's Shape varies per call site.
 type AnyTable = TableDef<string, any>;
@@ -103,13 +115,37 @@ export class Client implements OrmClientBase {
     return select(table, this.conn);
   }
 
+  /** A connection-bound CREATE — `await db.create(User).content({ … })` returns the created row
+   *  (validated via `User.create`, encoded through the codec). */
+  create<TD extends AnyTable>(table: TD): CreateQuery<TD, App<TD>> {
+    return create(table, this.conn);
+  }
+
+  /** A connection-bound single-record UPDATE — `await db.update(User, id).merge({ … })` (deep merge,
+   *  via `User.update`) / `.content(row)` (replace) / `.set(patch)`. Returns the updated row. */
+  update<TD extends AnyTable>(
+    table: TD,
+    id: TargetId<TD>,
+  ): UpdateQuery<TD, App<TD>> {
+    return update(table, id, this.conn);
+  }
+
+  /** A connection-bound single-record DELETE — `await db.delete(User, id)`; `.return("before")`
+   *  hands back the deleted row. */
+  delete<TD extends AnyTable>(
+    table: TD,
+    id: TargetId<TD>,
+  ): DeleteQuery<TD, undefined> {
+    return remove(table, id, this.conn);
+  }
+
   /** Raw SurrealQL escape hatch: `await db.query(surql\`…\`)` -> raw rows; `.as(User)` to decode. */
   query(sql: string | BoundQuery, params?: Record<string, unknown>): RawQuery {
     return new RawQuery(this.conn, sql, params);
   }
 
   /** Fork a scoped, disposable {@link Session} (its own auth/session context) with the same bound
-   *  reads — `await using s = await db.forkSession()` releases the fork on exit. */
+   *  reads + writes — `await using s = await db.forkSession()` releases the fork on exit. */
   async forkSession(): Promise<Session> {
     return new Session(await this.conn.forkSession());
   }
@@ -136,6 +172,27 @@ export class Session implements OrmClientBase {
   /** A session-bound single-table SELECT (awaitable). */
   select<TD extends AnyTable>(table: TD): Select<TD, App<TD>> {
     return select(table, this.session);
+  }
+
+  /** A session-bound CREATE (runs under this session's auth context). */
+  create<TD extends AnyTable>(table: TD): CreateQuery<TD, App<TD>> {
+    return create(table, this.session);
+  }
+
+  /** A session-bound single-record UPDATE. */
+  update<TD extends AnyTable>(
+    table: TD,
+    id: TargetId<TD>,
+  ): UpdateQuery<TD, App<TD>> {
+    return update(table, id, this.session);
+  }
+
+  /** A session-bound single-record DELETE. */
+  delete<TD extends AnyTable>(
+    table: TD,
+    id: TargetId<TD>,
+  ): DeleteQuery<TD, undefined> {
+    return remove(table, id, this.session);
   }
 
   /** Raw SurrealQL escape hatch, scoped to this session. */

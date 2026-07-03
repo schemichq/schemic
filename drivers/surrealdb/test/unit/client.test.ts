@@ -115,6 +115,67 @@ describe.skipIf(!URL)("orm client (P1 reads)", () => {
   });
 });
 
+describe.skipIf(!URL)("orm client (P2 writes)", () => {
+  test("create -> update(merge/set) -> delete round-trip, decoded end to end", async () => {
+    const c = await conn("orm_writes");
+    const db = connect(c);
+
+    // CREATE: validated via User.create, returns the decoded created row.
+    const ada = await db.create(User).content({ name: "cara", age: 30 });
+    expect(String(ada.id.table.name)).toBe("orm_user");
+    expect(ada.name).toBe("cara");
+
+    // UPDATE .merge: deep-merge patch, returns the updated row.
+    const older = await db.update(User, ada.id).merge({ age: 31 });
+    expect(older.age).toBe(31);
+    expect(older.name).toBe("cara"); // merge preserved the rest
+
+    // UPDATE .set: explicit per-field assignment.
+    const renamed = await db.update(User, ada.id).set({ name: "cara l." });
+    expect(renamed.name).toBe("cara l.");
+    expect(renamed.age).toBe(31);
+
+    // .return(projection): the shared cross-driver RETURN surface.
+    const picked = await db
+      .update(User, ada.id)
+      .merge({ age: 32 })
+      .return((u) => ({ years: u.age }));
+    expect(picked).toEqual({ years: 32 });
+
+    // DELETE: nothing by default; .return("before") hands back the deleted row.
+    const gone = await db.delete(User, ada.id).return("before");
+    expect(gone.name).toBe("cara l.");
+    const rows = await db.select(User).where((u) => u.name.eq("cara l."));
+    expect(rows).toHaveLength(0);
+
+    await c.close();
+  });
+
+  test("a plain string id targets the STRING record id (no numeric coercion)", async () => {
+    const c = await conn("orm_writes_ids");
+    const db = connect(c);
+    await c.query("CREATE orm_user:s1 SET name = 'sid', age = 5;");
+    const updated = await db.update(User, "s1").merge({ age: 99 });
+    expect(updated.age).toBe(99);
+    await db.delete(User, "s1");
+    expect(await db.select(User)).toHaveLength(2); // the two numeric-id seeds remain
+    await c.close();
+  });
+
+  test("writes work on a forked session too", async () => {
+    const c = await conn("orm_writes_session");
+    const db = connect(c);
+    {
+      // Inner scope: the fork disposes BEFORE the parent connection closes.
+      await using session = await db.forkSession();
+      const row = await session.create(User).content({ name: "sess", age: 1 });
+      expect(row.name).toBe("sess");
+      await session.delete(User, row.id);
+    }
+    await c.close();
+  });
+});
+
 describe("config-as-factory (surrealConnection)", () => {
   test("surrealConnection embeds a lazy client-opener + a ns/db display label", () => {
     const entry = surrealConnection({
