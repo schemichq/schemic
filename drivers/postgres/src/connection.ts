@@ -9,8 +9,12 @@ import type {
   ConnectionEntry,
   ConnectionInput,
   ResolveContext,
+  ResolvedConfig,
 } from "@schemic/core/driver";
 import { connectionEntry } from "@schemic/core/driver";
+// Type-only (never a runtime pull, so /connection stays engine-free); the client opener below LAZY-imports
+// the real ./client at call time.
+import type { PgClient } from "./client";
 import { escId } from "./emit";
 
 // A minimal structural view of a PGlite/node-postgres connection (so core needs no hard pg dep).
@@ -106,23 +110,68 @@ export interface PostgresConnectionConfig extends ConnectionConfigBase {
  * this driver. Wraps {@link connectionEntry} with the Postgres connection shape. Pass a static config,
  * a resolver yielding one config, or a resolver yielding a keyed COLLECTION (each entry needs `key`).
  */
-export function postgresConnection(
+// Structural Standard-Schema (core doesn't re-export its `StandardSchemaLike` yet — flagged to core-dev;
+// this matches its shape, and a concrete Zod/valibot schema also carries `~standard.types.output` which
+// `ArgsOut` reads for the typed resolver args).
+interface StandardSchemaLike {
+  "~standard": {
+    validate(
+      value: unknown,
+    ):
+      | { value: unknown }
+      | { issues: readonly { message: string }[] }
+      | Promise<
+          { value: unknown } | { issues: readonly { message: string }[] }
+        >;
+  };
+}
+
+/** Extract a Standard-Schema's OUTPUT type (Zod/valibot/etc. carry `~standard.types.output`); fall back
+ * to the default `Record<string, string>` resolver-args shape when there's no args schema. */
+type ArgsOut<A> = A extends { "~standard": { types?: { output?: infer O } } }
+  ? O extends Record<string, unknown>
+    ? O
+    : Record<string, string>
+  : Record<string, string>;
+/** The resolved per-factory Args (a schema's output, else the string-map default). */
+type Resolved<A> = [A] extends [never] ? Record<string, string> : ArgsOut<A>;
+
+/** The factory-embedded client opener: LAZY-import `./client` + open a MANAGED `PgClient` from the
+ * resolved config. Lazy so authoring a config from this engine-free module never pulls the engine. */
+const openPgClient = (config: ResolvedConfig): Promise<PgClient> =>
+  import("./client").then((m) => m.clientFromResolved(config));
+
+/** Options for {@link postgresConnection}: a Standard-Schema validating this connection's resolver args. */
+export interface PostgresConnectionOpts<A extends StandardSchemaLike> {
+  /** Validates `config.connect(name, { args })`; the resolver's `ctx.args` is typed as its output. */
+  args?: A;
+}
+
+export function postgresConnection<A extends StandardSchemaLike = never>(
   config: PostgresConnectionConfig,
-): ConnectionEntry;
-export function postgresConnection(
+  opts?: PostgresConnectionOpts<A>,
+): ConnectionEntry<PgClient, Resolved<A>>;
+export function postgresConnection<A extends StandardSchemaLike = never>(
   resolver: (
-    ctx: ResolveContext,
+    ctx: ResolveContext & { args: Resolved<A> },
   ) => PostgresConnectionConfig | Promise<PostgresConnectionConfig>,
-): ConnectionEntry;
-export function postgresConnection(
+  opts?: PostgresConnectionOpts<A>,
+): ConnectionEntry<PgClient, Resolved<A>>;
+export function postgresConnection<A extends StandardSchemaLike = never>(
   resolver: (
-    ctx: ResolveContext,
+    ctx: ResolveContext & { args: Resolved<A> },
   ) =>
     | (PostgresConnectionConfig & { key: string })[]
     | Promise<(PostgresConnectionConfig & { key: string })[]>,
-): ConnectionEntry;
-export function postgresConnection(
-  input: ConnectionInput<PostgresConnectionConfig>,
-): ConnectionEntry {
-  return connectionEntry("postgres", input);
+  opts?: PostgresConnectionOpts<A>,
+): ConnectionEntry<PgClient, Resolved<A>>;
+export function postgresConnection<A extends StandardSchemaLike = never>(
+  input: ConnectionInput<PostgresConnectionConfig, Resolved<A>>,
+  opts?: PostgresConnectionOpts<A>,
+): ConnectionEntry<PgClient, Resolved<A>> {
+  return connectionEntry<PostgresConnectionConfig, PgClient, Resolved<A>>(
+    "postgres",
+    input,
+    { client: openPgClient, args: opts?.args },
+  );
 }

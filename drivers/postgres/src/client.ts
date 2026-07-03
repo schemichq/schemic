@@ -12,12 +12,86 @@ import {
   asyncDisposable,
   type OrmClientBase,
   type ResolveConnectionOptions,
+  type ResolvedConfig,
   resolveConnection,
 } from "@schemic/core";
-import type { App, PgTableDef } from "./authoring";
+import { type App, PgTableDef } from "./authoring";
 import type { PgConn } from "./connection";
 import { postgresDriver } from "./driver";
 import { type SelectQuery, select } from "./query";
+
+/** A Standard-Schema (a `z.*`, a table's `.object`/`.create`, `User.object.pick(...)`, …). */
+interface StandardSchemaLike {
+  "~standard": {
+    validate(
+      value: unknown,
+    ):
+      | { value: unknown }
+      | { issues: readonly { message: string }[] }
+      | Promise<
+          { value: unknown } | { issues: readonly { message: string }[] }
+        >;
+  };
+}
+/** The output type a Standard-Schema decodes to (Zod/valibot/etc. carry `~standard.types.output`). */
+type StandardOut<S> = S extends {
+  "~standard": { types?: { output?: infer O } };
+}
+  ? O
+  : unknown;
+
+/**
+ * A RAW SQL query bound to a connection (from `db.query(...)`): raw wire rows by DEFAULT; `.as(schema)`
+ * decodes each row through a Standard-Schema (or a table -> its `.object`). Thenable — runs on `await`.
+ */
+export class RawQuery<Res> implements PromiseLike<Res[]> {
+  constructor(
+    private readonly conn: PgConn,
+    private readonly sql: string,
+    private readonly params: unknown[],
+    private readonly schema?: StandardSchemaLike,
+  ) {}
+  /** Decode each row through a table's row codec (`db.query(...).as(User)`). */
+  as<T extends PgTableDef>(table: T): RawQuery<App<T>>;
+  /** Decode each row through any Standard-Schema (`User.object.pick(...)`, a `z.*`, …). */
+  as<S extends StandardSchemaLike>(schema: S): RawQuery<StandardOut<S>>;
+  as(schemaOrTable: StandardSchemaLike | PgTableDef): RawQuery<unknown> {
+    const schema =
+      schemaOrTable instanceof PgTableDef
+        ? (schemaOrTable.object as unknown as StandardSchemaLike)
+        : schemaOrTable;
+    return new RawQuery(this.conn, this.sql, this.params, schema);
+  }
+  /** Render `{ sql, params }` (the query is already lowered — this is just what will run). */
+  toSQL(): { sql: string; params: unknown[] } {
+    return { sql: this.sql, params: this.params };
+  }
+  /** Execute + (if `.as(...)`) decode each row. */
+  async run(): Promise<Res[]> {
+    const { rows } = await this.conn.query(this.sql, this.params);
+    const s = this.schema;
+    if (!s) return rows as Res[];
+    return rows.map((row) => {
+      const r = s["~standard"].validate(row);
+      if (r instanceof Promise)
+        throw new Error(
+          "db.query(...).as(schema): async schemas are not supported.",
+        );
+      if ("issues" in r)
+        throw new Error(
+          `db.query(...).as(schema): decode failed — ${r.issues.map((i) => i.message).join("; ")}`,
+        );
+      return r.value as Res;
+    });
+  }
+  // biome-ignore lint/suspicious/noThenProperty: intentional — a raw query is awaitable (mirrors the select builder)
+  then<R1 = Res[], R2 = never>(
+    onFulfilled?: ((value: Res[]) => R1 | PromiseLike<R1>) | null,
+    onRejected?: ((reason: unknown) => R2 | PromiseLike<R2>) | null,
+  ): PromiseLike<R1 | R2> {
+    return this.run().then(onFulfilled, onRejected);
+  }
+}
 
 /**
  * The bound Postgres ORM client. `db.select(table)` runs against THIS client's connection.
@@ -45,6 +119,19 @@ export class PgClient implements OrmClientBase {
    */
   select<TD extends PgTableDef>(table: TD): SelectQuery<TD, App<TD>> {
     return select(table, this.conn);
+  }
+
+  /**
+   * A RAW SQL escape hatch bound to this client — `db.query("SELECT …", [p])`. Thenable (runs on
+   * `await`); returns raw wire rows by DEFAULT (no decode, since the statement is arbitrary). Opt into
+   * decoding with `.as(schema)`, piping each row through ANY Standard-Schema — a table's `.object`,
+   * `User.object.pick({...})`, `User.create`, a composed `z.*`, etc. Replaces reaching into `db.conn`.
+   */
+  query(
+    sql: string,
+    params: unknown[] = [],
+  ): RawQuery<Record<string, unknown>> {
+    return new RawQuery(this.conn, sql, params);
   }
 
   /** Close the connection — MANAGED only; a BYO client is a no-op (never close a connection the user owns). */
@@ -82,4 +169,16 @@ export function connect(
   return resolveConnection(opts).then((config) =>
     postgresDriver.connect(config).then((conn) => PgClient.managed(conn)),
   );
+}
+
+/**
+ * Open a MANAGED client from an ALREADY-resolved config — the `client` opener that
+ * `postgresConnection(...)` embeds (lazily) so the typed `config.connect(name)` on `defineConfig` can
+ * build a `PgClient` per connection. (The factory passes this via a lazy `import("./client")`, so a
+ * config authored from `@schemic/postgres/connection` never statically pulls the engine.)
+ */
+export async function clientFromResolved(
+  config: ResolvedConfig,
+): Promise<PgClient> {
+  return PgClient.managed(await postgresDriver.connect(config));
 }

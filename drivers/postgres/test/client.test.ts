@@ -103,4 +103,37 @@ describe("postgres ORM client (P1)", () => {
       await conn.close();
     }
   });
+
+  test("db.query(sql, params?): raw by default; .as(table)/.as(schema) decodes; thenable", async () => {
+    const conn = await seed();
+    try {
+      const db = connect(conn);
+      // RAW by default (no decode — arbitrary statement)
+      const raw = await db.query(`SELECT count(*)::int AS n FROM "app_user";`);
+      expect(raw).toEqual([{ n: 2 }]);
+      // params bind positionally
+      const one = await db.query(`SELECT name FROM "app_user" WHERE id = $1;`, [
+        "u1",
+      ]);
+      expect(one).toEqual([{ name: "Ada" }]);
+      // .as(table) -> decode each row through the table's row codec (typed App rows)
+      const rows = await db
+        .query(`SELECT * FROM "app_user" ORDER BY id;`)
+        .as(user);
+      expect(rows.map((r) => r.name)).toEqual(["Ada", "Bo"]);
+      expect(typeof rows[0].age).toBe("number");
+      // .as(schema) -> any Standard-Schema (a picked subset here)
+      const picked = await db
+        .query(`SELECT name FROM "app_user" WHERE id = 'u1';`)
+        .as(user.object.pick({ name: true }));
+      expect(picked).toEqual([{ name: "Ada" }]);
+      // .toSQL() renders without executing
+      expect(db.query(`SELECT 1;`).toSQL()).toEqual({
+        sql: `SELECT 1;`,
+        params: [],
+      });
+    } finally {
+      await conn.close();
+    }
+  });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ConnectionConfigBase } from "@schemic/core/driver";
 import { getDriver } from "@schemic/core/driver";
+import { postgresDriver } from "../src/driver";
 import {
   identifier,
   type PgConn,
@@ -129,5 +130,29 @@ describe("Driver.query (named -> positional, passthrough)", () => {
     } finally {
       await conn.close();
     }
+  });
+
+  test("postgresConnection embeds a client opener (for config.connect) + optional args schema", () => {
+    const entry = postgresConnection({ schema: "./db", url: "" });
+    expect(entry.driver).toBe("postgres");
+    expect(typeof entry.client).toBe("function"); // lazy PgClient opener
+    expect(entry.args).toBeUndefined();
+    const argsSchema = {
+      "~standard": { validate: (v: unknown) => ({ value: v }) },
+    };
+    const withArgs = postgresConnection(() => ({ schema: "./db", url: "" }), {
+      args: argsSchema as never,
+    });
+    expect(withArgs.args).toBe(argsSchema); // forwarded for config.connect(name, { args }) validation
+  });
+
+  test("initScaffold keeps schemic.config.ts, now with the named `schemic` export (+ default)", () => {
+    // Per the refined spec: no file rename — the loader accepts a named `schemic` export, so the
+    // named-export DX works in schemic.config.ts itself.
+    const files = postgresDriver.initScaffold?.() ?? {};
+    expect(Object.keys(files)).toContain("schemic.config.ts");
+    const cfg = files["schemic.config.ts"] ?? "";
+    expect(cfg).toContain("export const schemic = defineConfig({");
+    expect(cfg).toContain("export default schemic;");
   });
 });

@@ -964,8 +964,9 @@ const INIT_CONFIG_TS = `import { defineConfig } from "@schemic/core/config";
 import { postgresConnection } from "@schemic/postgres/connection";
 
 // Connections-only config: a map of named connections, each from a driver factory. Values are
-// explicit — read env yourself (no magic env vars).
-export default defineConfig({
+// explicit — read env yourself (no magic env vars). \`defineConfig\` returns the config AND a typed
+// \`schemic.connect(name)\` — import { schemic } from "./schemic" and \`await schemic.connect("default")\`.
+export const schemic = defineConfig({
   connections: {
     default: postgresConnection({
       schema: "./database/schema",
@@ -975,6 +976,8 @@ export default defineConfig({
     }),
   },
 });
+
+export default schemic;
 `;
 
 const INIT_SCHEMA_TS = `import { defineTable, s, sqlExpr } from "@schemic/postgres";
