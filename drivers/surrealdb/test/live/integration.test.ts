@@ -208,12 +208,18 @@ live("function DDL introspects + round-trips", () => {
 });
 
 const Accesses = [
-  defineAccess("it_app").onDatabase()
+  defineAccess("it_app")
+    .onDatabase()
     .record()
     .signin(surql`SELECT * FROM it_user WHERE email = $email`)
     .duration({ token: "1h", session: "12h" }),
-  defineAccess("it_jwt").onDatabase().jwt({ alg: "HS512", key: "supersecretvalue" }),
-  defineAccess("it_svc").onDatabase().bearer({ for: "record" }).duration({ grant: "30d" }),
+  defineAccess("it_jwt")
+    .onDatabase()
+    .jwt({ alg: "HS512", key: "supersecretvalue" }),
+  defineAccess("it_svc")
+    .onDatabase()
+    .bearer({ for: "record" })
+    .duration({ grant: "30d" }),
 ];
 
 live("access DDL (record/jwt/bearer) introspects + round-trips", () => {
@@ -245,6 +251,80 @@ live("access DDL (record/jwt/bearer) introspects + round-trips", () => {
     const after = await snap();
     for (const n of ["it_app", "it_jwt", "it_svc"])
       expect(after[`access::${n}`].ddl).toBe(before[`access::${n}`].ddl);
+  });
+});
+
+// A preset-composed table: preset columns + AND-combined permissions + appended event/index. The
+// live check matters because combined perms are NESTED surql compositions — verify the emitted
+// DDL applies cleanly and round-trips drift-free through INFO … STRUCTURE.
+const Tenanted = defineTable("it_preset", {
+  id: z.string(),
+  title: s.string(),
+})
+  .permissions({ select: true, update: surql`user = $auth.id`, delete: false })
+  .use(
+    defineTable.preset({
+      columns: { org_id: s.string().$readonly() },
+      permissions: surql`org_id != NONE`,
+      events: [
+        {
+          name: "it_preset_guard",
+          when: surql`$event = 'UPDATE'`,
+          // biome-ignore lint/suspicious/noThenProperty: event DSL "then" clause, not a thenable
+          then: surql`RETURN true`,
+        },
+      ],
+      indexes: [{ name: "it_by_org", fields: ["org_id"] }],
+    }),
+  );
+
+live("preset-composed table applies + round-trips", () => {
+  beforeAll(async () => {
+    await db!.query(emitTable(Tenanted, { exists: "overwrite" }));
+  });
+  afterAll(async () => {
+    await db?.query("REMOVE TABLE IF EXISTS it_preset;");
+  });
+
+  test("INFO … STRUCTURE reports the preset column, event, and index", async () => {
+    const { tables } = await introspectStructured(db!);
+    const t = tables.find((t) => t.name === "it_preset");
+    expect(t?.fields.map((f) => f.name)).toContain("org_id");
+    expect(t?.events.find((e) => e.name === "it_preset_guard")).toBeDefined();
+    expect(t?.indexes.find((i) => i.name === "it_by_org")).toBeDefined();
+  });
+
+  test("authored struct === introspected struct (no diff --live phantom)", async () => {
+    const { explodeSchema, introspectAll } = await import(
+      "../../src/kinds/explode"
+    );
+    const { deepEqual } = await import("../../src/cli/struct");
+    const pick = (objs: { kind: string; name: string }[]) =>
+      objs.find(
+        (o) => o.kind === "table" && o.name === "it_preset",
+      ) as unknown as { struct: unknown };
+    const authored = pick(explodeSchema([Tenanted]));
+    const live = pick(await introspectAll(db!));
+    // JSON round-trip drops `undefined`-valued keys (the authored side carries them; the
+    // introspected side doesn't) — the pipeline's decisive compare is the canonical DDL anyway
+    // (next test); this guards the VALUE-level phantom class (combined-perm parens, expr spellings).
+    const scrub = (v: unknown) => JSON.parse(JSON.stringify(v));
+    expect(deepEqual(scrub(authored.struct), scrub(live.struct))).toBe(true);
+  });
+
+  test("re-applying the emitted DDL is idempotent (combined perms round-trip)", async () => {
+    const snap = () =>
+      introspectStructured(db!).then((s) => structuredSnapshot(s).statements);
+    const before = await snap();
+    await db!.query(emitTable(Tenanted, { exists: "overwrite" }));
+    const after = await snap();
+    for (const key of Object.keys(before).filter((k) =>
+      k.includes("it_preset"),
+    ))
+      expect(after[key]?.ddl).toBe(before[key].ddl);
+    // The combined update rule survived the DB round-trip intact (DB-canonical, paren-free).
+    const tableDdl = before["table::it_preset"]?.ddl ?? "";
+    expect(tableDdl).toContain("user = $auth.id AND org_id != NONE");
   });
 });
 

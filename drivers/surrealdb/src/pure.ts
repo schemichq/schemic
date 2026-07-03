@@ -2517,6 +2517,156 @@ type MakeWire<S extends Shape> = Partial<z.input<z.ZodObject<ZShape<S>>>>;
 /** Same, over ALL fields — the `.system` view includes `$internal()` ones. */
 type MakeWireAll<S extends Shape> = Partial<z.input<z.ZodObject<ZShapeAll<S>>>>;
 
+// --- table presets (composable bundles applied via TableDef.use) --------------------------------
+
+/** A row-change event contributed by a preset — the `.event(name, spec)` shape, name inline. */
+export interface PresetEvent {
+  name: string;
+  when?: Expr;
+  then: Expr | Expr[];
+  async?: EventAsync;
+  comment?: string;
+}
+/** A composite index contributed by a preset — the `.index(name, fields, opts)` shape, inline. */
+export interface PresetIndex extends IndexOptions {
+  name: string;
+  fields: readonly string[];
+}
+/**
+ * A reusable, composable table PRESET — a bundle of `columns` + `permissions` + `events` + `indexes`
+ * stamped onto a table via {@link TableDef.use}. A preset EMITS nothing on its own (it composes onto a
+ * table), which is why it hangs off {@link defineTable.preset} rather than the `define*` family.
+ * Configurable presets are plain functions returning one:
+ * `const tenant = (field: string) => defineTable.preset({ columns: { [field]: … }, permissions: … })`.
+ */
+export interface TablePreset<Cols extends Shape = {}> {
+  /** Columns the preset adds — typed-merged into the table. A name clash with the table or another
+   *  preset is a COMPILE error (no silent clobber). */
+  columns?: Cols;
+  /** Table `PERMISSIONS`, per-op **AND**-combined with the table's own + other presets' — a preset can
+   *  only NARROW access, never widen it. */
+  permissions?: TablePermissions;
+  /** Row-change events, appended. */
+  events?: PresetEvent[];
+  /** Composite indexes, appended. */
+  indexes?: PresetIndex[];
+}
+
+/** A preset's contributed columns (its `Cols`). */
+type PresetCols<P> = P extends TablePreset<infer C> ? C : {};
+// biome-ignore lint/suspicious/noExplicitAny: the canonical `IsAny` probe.
+type IsAny<T> = 0 extends 1 & T ? true : false;
+/** Surfaced (as a compile error on the `.use(...)` argument) when a preset column collides with a table
+ *  column. `.use` still returns a plain `TableDef`, so it stays a clean `AnyTable` subtype. */
+export interface PresetColumnConflict<K> {
+  readonly __schemicPresetColumnConflict: K;
+}
+/** Constrain a `.use(...)` argument: if the preset's columns clash with the table's, intersect the
+ *  marker so the passed preset no longer matches (a compile error naming the conflicting key). The
+ *  `IsAny` guard keeps the shape-agnostic `TableDef<string, any>` usable. */
+type CheckPreset<S extends Shape, P> =
+  IsAny<S> extends true
+    ? P
+    : [Extract<keyof PresetCols<P>, keyof Omit<S, "id">>] extends [never]
+      ? P
+      : PresetColumnConflict<Extract<keyof PresetCols<P>, keyof Omit<S, "id">>>;
+// NOTE: `.use` is deliberately SINGLE-ARG (chain `.use(a).use(b)`), not variadic. Both variadic typing
+// strategies — `UnionToIntersection<PresetCols<Ps[number]>>` over a tuple, and an intersected variadic
+// arg-constraint — crash tsc 5.9.3 (`getSignatureApplicabilityError` Debug Failure), and fixed-arity
+// overloads cap type safety at their arity. Chaining keeps FULL column typing + compile-time conflict
+// detection at ANY depth: each `.use` re-checks the next preset against the table-so-far, so
+// preset-vs-preset clashes surface too. A runtime throw backs up the compile check.
+
+const PERM_OPS: readonly PermOp[] = ["select", "create", "update", "delete"];
+/** Normalize a `TablePermissions` to a per-op map of CONCRETE rules (a bare boolean/expr applies to
+ *  every op; `same as X` refs resolve to X's rule up front, so combining never ANDs a ref string). */
+function permOpMap(
+  p: TablePermissions | undefined,
+): Partial<Record<PermOp, boolean | BoundQuery>> {
+  if (p === undefined) return {};
+  if (typeof p === "boolean" || p instanceof BoundQuery)
+    return { select: p, create: p, update: p, delete: p };
+  const out: Partial<Record<PermOp, boolean | BoundQuery>> = {};
+  for (const op of PERM_OPS) {
+    let rule = p[op];
+    if (rule === undefined) continue;
+    const chain: PermOp[] = [op];
+    while (typeof rule === "string") {
+      const ref = rule.slice("same as ".length).trim() as PermOp;
+      if (chain.includes(ref))
+        throw new Error(
+          `PERMISSIONS: "same as" reference cycle: ${[...chain, ref].join(" -> ")}`,
+        );
+      chain.push(ref);
+      rule = p[ref];
+      if (rule === undefined)
+        throw new Error(
+          `PERMISSIONS: "same as ${ref}" references op "${ref}", which is not in the spec`,
+        );
+    }
+    out[op] = rule;
+  }
+  return out;
+}
+/** Does a WHERE expr need parens as an `AND` operand? Only when it holds a TOP-LEVEL `OR`/`||`
+ *  (lower precedence than `AND`). This matches the DB's canonical spelling — SurrealDB strips
+ *  redundant parens in `INFO … STRUCTURE` (verified live on 3.1.4), so emitting them would
+ *  phantom-diff every `diff --live`. Scans the raw template text: bindings interpolate as quoted
+ *  literals, so they can never introduce a top-level operator. */
+function needsParens(expr: string): boolean {
+  let depth = 0;
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < expr.length; i++) {
+    const c = expr[i] as string;
+    if (quote) {
+      if (c === "\\") i++;
+      else if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'") quote = c;
+    else if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") depth--;
+    else if (depth === 0) {
+      if (c === "|" && expr[i + 1] === "|") return true;
+      const isOr =
+        (c === "O" || c === "o") &&
+        (expr[i + 1] === "R" || expr[i + 1] === "r") &&
+        (i === 0 || !/[\w$]/.test(expr[i - 1] as string)) &&
+        (i + 2 >= expr.length || !/[\w$]/.test(expr[i + 2] as string));
+      if (isOr) return true;
+    }
+  }
+  return false;
+}
+/** AND two per-op perms: `false` (NONE) absorbs, `true` (FULL) is the identity, exprs `AND` together
+ *  in DB-canonical form (parens only where precedence needs them — see {@link needsParens}). */
+function andPerm(
+  a: boolean | BoundQuery | undefined,
+  b: boolean | BoundQuery | undefined,
+): boolean | BoundQuery | undefined {
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  if (a === false || b === false) return false;
+  if (a === true) return b;
+  if (b === true) return a;
+  const wrap = (q: BoundQuery) => (needsParens(q.query) ? surql`(${q})` : q);
+  return surql`${wrap(a)} AND ${wrap(b)}`;
+}
+/** Per-op AND-combine of two table permission specs — the `.use()` semantic (narrows, never widens). */
+function combinePermissions(
+  existing: TablePermissions | undefined,
+  add: TablePermissions,
+): TablePermissions {
+  const A = permOpMap(existing);
+  const B = permOpMap(add);
+  const out: Partial<Record<PermOp, Perm>> = {};
+  for (const op of PERM_OPS) {
+    const v = andPerm(A[op], B[op]);
+    if (v !== undefined) out[op] = v;
+  }
+  return out;
+}
+
 /** A table (or relation) definition: shape + DDL config, with chainable builders. */
 export class TableDef<Name extends string, S extends Shape> {
   /** Zod object over the inner schemas — drives validation, encode/decode, types. */
@@ -2819,6 +2969,38 @@ export class TableDef<Name extends string, S extends Shape> {
       this.config,
     );
   }
+  /**
+   * Apply a {@link TablePreset | preset} — a reusable bundle of columns + permissions + events + indexes
+   * (`defineTable("post", fields).use(tenant("org_id")).use(timestamps())`). Its columns typed-merge into
+   * the table (fully typed at any depth — **chain** `.use(a).use(b)` for several); permissions per-op
+   * AND-combine (narrow, never widen); events + indexes append. A column-name clash with an existing
+   * column throws at apply/gen time. (Single-arg + chaining, deliberately — a variadic typed merge would
+   * either cap the arity or drop the column types past that cap; chaining keeps every preset typesafe.)
+   */
+  use<P extends TablePreset>(
+    preset: P & CheckPreset<S, P>,
+  ): TableDef<Name, WithSmartId<Name, Omit<S, "id"> & PresetCols<P>>> {
+    // biome-ignore lint/suspicious/noExplicitAny: fold through the driver methods; return typed by the signature.
+    let t: any = this;
+    if (preset.columns) {
+      for (const k of Object.keys(preset.columns))
+        if (k !== "id" && k in (t.fields as object))
+          throw new Error(
+            `preset column "${k}" conflicts with an existing column on table "${t.name}"`,
+          );
+      t = t.extend(preset.columns);
+    }
+    if (preset.permissions !== undefined)
+      t = t.permissions(
+        combinePermissions(t.config.permissions, preset.permissions),
+      );
+    for (const e of preset.events ?? []) t = t.event(e.name, e);
+    for (const i of preset.indexes ?? []) t = t.index(i.name, i.fields, i);
+    return t as TableDef<
+      Name,
+      WithSmartId<Name, Omit<S, "id"> & PresetCols<P>>
+    >;
+  }
   pick<K extends keyof S>(...keys: K[]): TableDef<Name, Pick<S, K>> {
     const src = this.fields as unknown as Record<string, AnyField>;
     const f: Record<string, AnyField> = {};
@@ -3119,6 +3301,15 @@ export function defineTable<Name extends string, S extends Shape = {}>(
     },
   );
 }
+/**
+ * Define a reusable {@link TablePreset} — a composable bundle of `columns` / `permissions` / `events` /
+ * `indexes` applied to a table via {@link TableDef.use}. Wrap it in a plain function to make it
+ * configurable: `const tenant = (field: string) => defineTable.preset({ … })`. (It hangs off
+ * `defineTable` rather than being a `define*` of its own because a preset emits no DDL by itself.)
+ */
+defineTable.preset = <Cols extends Shape = {}>(
+  preset: TablePreset<Cols>,
+): TablePreset<Cols> => preset;
 
 // biome-ignore lint/suspicious/noExplicitAny: shape-agnostic table reference for relation endpoints
 type AnyTable = TableDef<string, any>;
