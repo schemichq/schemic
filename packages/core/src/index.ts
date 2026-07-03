@@ -15,6 +15,13 @@ export {
   type ResolvedConfig,
   resolveConnectionConfig,
 } from "./cli-kit/config";
+// --- ORM client foundation (managed connections + disposable bound client) ---------------------
+export {
+  asyncDisposable,
+  type OrmClientBase,
+  type ResolveConnectionOptions,
+  resolveConnection,
+} from "./client";
 // --- neutral diff display ---------------------------------------------------------------------
 export {
   type Diff,
