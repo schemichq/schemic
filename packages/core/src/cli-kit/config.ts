@@ -106,8 +106,17 @@ export async function loadProject(opts?: {
     loadDotEnv(root); // populate process.env before the config module's explicit reads
     const loaded = (await jiti.import(path)) as {
       default?: SchemicConfig;
+      schemic?: SchemicConfig;
     } & SchemicConfig;
-    const config = loaded.default ?? loaded;
+    // Accept a default export OR the named `schemic` export — the scaffolded form is the NAMED one
+    // (`export const schemic = defineConfig(...)`), so app code auto-imports a deterministic
+    // identifier (`import { schemic } from "./schemic.config"` -> `schemic.connect()`). Selected by
+    // SHAPE, not presence: jiti's interopDefault makes `loaded.default` a truthy proxy even when the
+    // module has no real default export, so a presence chain would shadow the named export.
+    const config = [loaded.default, loaded.schemic, loaded].find(
+      (c): c is SchemicConfig =>
+        !!c && typeof c === "object" && "connections" in c,
+    );
     if (config?.connections && Object.keys(config.connections).length > 0) {
       return { config, root };
     }

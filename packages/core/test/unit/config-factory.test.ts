@@ -95,6 +95,19 @@ describe("schemic.ts discovery", () => {
     expect(rc.driver).toBe("testdriver");
   });
 
+  test("a NAMED-ONLY `schemic` export (no default) loads — the scaffolded form", async () => {
+    writeFileSync(
+      join(dir, "schemic.config.ts"),
+      CONFIG_BODY.replace("export default schemic;\n", "").replace(
+        "testdriver",
+        "nameddriver",
+      ),
+    );
+    const rc = await resolveConnection({ cwd: dir });
+    expect(rc.driver).toBe("nameddriver");
+    rmSync(join(dir, "schemic.config.ts"));
+  });
+
   test("schemic.config.ts wins over schemic.ts when both exist", async () => {
     writeFileSync(
       join(dir, "schemic.config.ts"),

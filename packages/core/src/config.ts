@@ -83,12 +83,13 @@ export interface SchemicProject<
 
 /**
  * Type + enrich a Schemic config: returns the config with a typed `connect()` attached — the config
- * itself is the factory. Scaffolded as `schemic.ts` with a NAMED export (deterministic auto-import):
+ * itself is the factory. The loader accepts a `default` export OR the NAMED `schemic` export; the
+ * scaffolded form is the named one (deterministic auto-import, no file rename needed):
  *
  * ```ts
+ * // schemic.config.ts (a bare schemic.ts also works)
  * export const schemic = defineConfig({ connections: { ... } });
- * export default schemic; // the CLI reads the default export
- * // app code: import { schemic } from "./schemic";  →  await using db = await schemic.connect();
+ * // app code: import { schemic } from "./schemic.config";  →  await using db = await schemic.connect();
  * ```
  */
 export function defineConfig<const C extends SchemicConfig>(
