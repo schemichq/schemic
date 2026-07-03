@@ -115,38 +115,107 @@ describe.skipIf(!URL)("orm client (P1 reads)", () => {
   });
 });
 
-describe.skipIf(!URL)("config-as-factory (surrealConnection)", () => {
-  test("surrealConnection embeds a lazy client-opener + optional args schema", () => {
-    const argsSchema = s.object({ tenant: s.string() });
-    const entry = surrealConnection(
-      { schema: "./x", url: "ws://x/rpc", namespace: "n", database: "d" },
-      { args: argsSchema },
-    );
+describe("config-as-factory (surrealConnection)", () => {
+  test("surrealConnection embeds a lazy client-opener + a ns/db display label", () => {
+    const entry = surrealConnection({
+      schema: "./x",
+      url: "ws://x/rpc",
+      namespace: "n",
+      database: "d",
+    });
     expect(entry.driver).toBe("surrealdb");
     expect(typeof entry.client).toBe("function"); // powers config.connect(name)
-    expect(entry.args).toBe(argsSchema);
+    // Dialect display identity for bulk reporting (precedence: config key > this > name[i]):
+    const rc = {
+      connection: "default",
+      params: { url: "ws://x/rpc", namespace: "n", database: "d" },
+    };
+    expect(entry.label?.(rc as never)).toBe("n/d @ ws://x/rpc");
   });
 
-  test("defineConfig(...).connect(name) opens a typed MANAGED client via the factory", async () => {
+  test("a parameterized resolver receives its TYPED args as the 2nd param", async () => {
+    const entry = surrealConnection((_ctx, args: { region: string }) => ({
+      schema: "./x",
+      url: `ws://${args.region}.x/rpc`,
+      namespace: "n",
+      database: "d",
+    }));
+    const ctx = { env: process.env, connections: {} };
+    const bases = await entry.resolve(ctx as never, { region: "eu" });
+    expect(bases).toHaveLength(1);
+    expect((bases[0] as { url?: string }).url).toBe("ws://eu.x/rpc");
+  });
+
+  test("an ARRAY return is a bulk fleet — resolve yields one config per element", async () => {
+    const entry = surrealConnection((_ctx, args: { orgs: string[] }) =>
+      args.orgs.map((org) => ({
+        schema: "./x",
+        url: "ws://x/rpc",
+        namespace: org,
+        database: "app",
+        key: org, // display label override for bulk reporting
+      })),
+    );
+    const ctx = { env: process.env, connections: {} };
+    const bases = await entry.resolve(ctx as never, { orgs: ["acme", "beta"] });
+    expect(bases.map((b) => b.key)).toEqual(["acme", "beta"]);
+  });
+
+  test("connect(name, args) types args per connection (compile-time)", () => {
     const schemic = defineConfig({
       connections: {
-        default: surrealConnection({
-          schema: "./_unused_for_connect",
-          url: URL as string,
-          namespace: "orm_factory",
-          database: "orm_factory",
-          username: "root",
-          password: "root",
-          authLevel: "root",
+        fixed: surrealConnection({
+          schema: "./x",
+          url: "ws://x/rpc",
+          namespace: "n",
+          database: "d",
         }),
+        tenant: surrealConnection(
+          (_ctx, args: { region: string; org?: string }) => ({
+            schema: "./x",
+            url: `ws://${args.region}.x/rpc`,
+            namespace: args.org ?? "n",
+            database: "d",
+          }),
+        ),
       },
     });
-    const db = await schemic.connect("default"); // MANAGED — the factory's client-opener runs
-    await db.query(
-      "REMOVE TABLE IF EXISTS orm_user; CREATE orm_user:1 SET name='z', age=1;",
-    );
-    const rows = await db.select(User);
-    expect(rows).toHaveLength(1);
-    await db.close(); // managed -> closes the connection it opened
+    // Compile-only (never invoked — no network): args autocomplete + reject per connection.
+    const _check = () => {
+      void schemic.connect("tenant", { region: "eu", org: "acme" });
+      // @ts-expect-error — wrong args shape (region must be a string)
+      void schemic.connect("tenant", { region: 5 });
+      // @ts-expect-error — a static connection takes no args
+      void schemic.connect("fixed", { region: "eu" });
+      // @ts-expect-error — unknown connection name
+      void schemic.connect("nope");
+    };
+    expect(typeof _check).toBe("function");
   });
+
+  test.skipIf(!URL)(
+    "defineConfig(...).connect(name) opens a typed MANAGED client via the factory",
+    async () => {
+      const schemic = defineConfig({
+        connections: {
+          default: surrealConnection({
+            schema: "./_unused_for_connect",
+            url: URL as string,
+            namespace: "orm_factory",
+            database: "orm_factory",
+            username: "root",
+            password: "root",
+            authLevel: "root",
+          }),
+        },
+      });
+      const db = await schemic.connect("default"); // MANAGED — the factory's client-opener runs
+      await db.query(
+        "REMOVE TABLE IF EXISTS orm_user; CREATE orm_user:1 SET name='z', age=1;",
+      );
+      const rows = await db.select(User);
+      expect(rows).toHaveLength(1);
+      await db.close(); // managed -> closes the connection it opened
+    },
+  );
 });

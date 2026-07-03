@@ -72,14 +72,13 @@ export class RawQuery<Row = unknown> implements PromiseLike<Row[]> {
 
 /** Managed-connection options for {@link connect} (a subset of core's `resolveConnection`). */
 export interface ConnectOptions {
-  /** Address one element of a keyed collection (`<name>:<key>`). */
-  key?: string;
   /** Path to `schemic.config.ts` (else auto-discovered from `cwd`). */
   config?: string;
   /** Working directory to discover the config from. */
   cwd?: string;
-  /** `--arg`-style values handed to a resolver connection. */
-  args?: Record<string, string>;
+  /** The resolver's args (its declared 2nd param) for a PARAMETERIZED connection. Untyped here —
+   *  for per-connection typed args use the config factory: `schemic.connect(name, args)`. */
+  args?: unknown;
 }
 
 /**
@@ -155,7 +154,7 @@ asyncDisposable(Session.prototype);
  * Get a bound ORM client. **BYO** — wrap an existing connection (its `close()` is a no-op):
  * `const db = connect(mySurreal)`. **MANAGED** — resolve + connect from the project config (the single
  * source of truth), owning the connection: `await using db = await connect()` / `connect("reporting")`
- * / `connect("tenant", { key })`.
+ * / `connect("tenant", { args: { region: "eu", org: "acme" } })`.
  */
 export function connect(client: Surreal): Client;
 export function connect(name?: string, opts?: ConnectOptions): Promise<Client>;

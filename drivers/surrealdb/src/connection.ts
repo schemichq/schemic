@@ -2,11 +2,9 @@
 // SurrealDB connection shape, so `defineConfig({ connections: { … } })` gets a typed `surrealConnection`
 // with no hand-authored `driver: "…"` string. Design: @schemic/core docs/MULTI-CONNECTION.md.
 
-import type { StandardSchemaLike } from "@schemic/core";
 import {
   type ConnectionConfigBase,
   type ConnectionEntry,
-  type ConnectionInput,
   connectionEntry,
   type ResolveContext,
 } from "@schemic/core/driver";
@@ -37,55 +35,55 @@ export interface SurrealConnectionConfig
   check?: SurrealZodCheck;
 }
 
-/** The typed resolver-`args` OUTPUT inferred from an optional Standard-Schema `args` (a real schema
- *  carries `~standard.types.output`); with no `args` schema, args are plain `Record<string, string>`. */
-type ArgsOf<A> = A extends {
-  "~standard": { types: { output: infer O extends Record<string, unknown> } };
-}
-  ? O
-  : Record<string, string>;
-
-/** The resolver `ctx` with its `args` typed to the connection's `args` schema output. */
-type Ctx<A> = Omit<ResolveContext, "args"> & { args: ArgsOf<A> };
-
 /**
- * Build a SurrealDB {@link ConnectionEntry} for a config's `connections` map. Three forms:
- * a single static config, a resolver returning one config, or a resolver returning a keyed
- * COLLECTION (one connection per entry — `key` is then required and addressable as `<name>:<key>`).
+ * Build a SurrealDB {@link ConnectionEntry} for a config's `connections` map: a single static config,
+ * or a resolver — `(ctx, args) => config | config[]`. Declare the resolver's `args` as its (typed) 2nd
+ * param; `schemic.connect(name, args)` then autocompletes + type-checks them per connection. A single
+ * returned config is directly connectable; an ARRAY is a bulk fleet (migrations enumerate it; `connect`
+ * throws a teaching error — pass args selecting one). Inside a resolver, `ctx.connections.<sibling>`
+ * lazily opens another connection (e.g. query the control-plane DB to enumerate tenants).
  *
- * The returned entry embeds a lazy client-opener + the optional `args` schema, so `defineConfig(...)`'s
- * typed `connect(name)` hands back a `@schemic/surrealdb` {@link Client} and validates/types `args`.
+ * The returned entry embeds a lazy client-opener (powering `defineConfig(...)`'s typed `connect`) and
+ * a `ns/db @ url` display label for bulk reporting (an explicit config `key` wins over it).
  */
-export function surrealConnection<A extends StandardSchemaLike = never>(
+export function surrealConnection(
   config: SurrealConnectionConfig,
-  opts?: { args?: A },
-): ConnectionEntry<Client, ArgsOf<A>>;
-export function surrealConnection<A extends StandardSchemaLike = never>(
+): ConnectionEntry<Client, undefined>;
+export function surrealConnection<Args = undefined>(
   resolve: (
-    ctx: Ctx<A>,
-  ) => SurrealConnectionConfig | Promise<SurrealConnectionConfig>,
-  opts?: { args?: A },
-): ConnectionEntry<Client, ArgsOf<A>>;
-export function surrealConnection<A extends StandardSchemaLike = never>(
-  resolve: (
-    ctx: Ctx<A>,
+    ctx: ResolveContext,
+    args: Args,
   ) =>
-    | (SurrealConnectionConfig & { key: string })[]
-    | Promise<(SurrealConnectionConfig & { key: string })[]>,
-  opts?: { args?: A },
-): ConnectionEntry<Client, ArgsOf<A>>;
-export function surrealConnection<A extends StandardSchemaLike = never>(
-  input: ConnectionInput<SurrealConnectionConfig, ArgsOf<A>>,
-  opts?: { args?: A },
-): ConnectionEntry<Client, ArgsOf<A>> {
-  return connectionEntry<SurrealConnectionConfig, Client, ArgsOf<A>>(
+    | SurrealConnectionConfig
+    | SurrealConnectionConfig[]
+    | Promise<SurrealConnectionConfig | SurrealConnectionConfig[]>,
+): ConnectionEntry<Client, Args>;
+export function surrealConnection<Args = undefined>(
+  input:
+    | SurrealConnectionConfig
+    | ((
+        ctx: ResolveContext,
+        args: Args,
+      ) =>
+        | SurrealConnectionConfig
+        | SurrealConnectionConfig[]
+        | Promise<SurrealConnectionConfig | SurrealConnectionConfig[]>),
+): ConnectionEntry<Client, Args> {
+  return connectionEntry<SurrealConnectionConfig, Client, Args>(
     "surrealdb",
     input,
     {
       // Lazy `import()` so authoring a config never pulls the engine (bundle-splittable).
       client: (config) =>
         import("./client").then((m) => m.connectFromConfig(config)),
-      args: opts?.args,
+      // Dialect display identity for bulk reporting/errors — `ns/db @ url`.
+      label: (config) => {
+        const p = config.params as Partial<
+          Record<"url" | "namespace" | "database", string>
+        >;
+        const nsdb = [p.namespace, p.database].filter(Boolean).join("/");
+        return [nsdb, p.url].filter(Boolean).join(" @ ") || config.connection;
+      },
     },
   );
 }
