@@ -19,7 +19,17 @@ import {
 import { type App, PgTableDef } from "./authoring";
 import type { PgConn } from "./connection";
 import { postgresDriver } from "./driver";
-import { type SelectQuery, select } from "./query";
+import {
+  type CreateBuilder,
+  create,
+  type DeleteQuery,
+  type IdOf,
+  remove,
+  type SelectQuery,
+  select,
+  type UpdateBuilder,
+  update,
+} from "./query";
 
 /** The output type a Standard-Schema decodes to (Zod/valibot/etc. carry `~standard.types.output`). */
 type StandardOut<S> = S extends {
@@ -107,6 +117,33 @@ export class PgClient implements OrmClientBase {
    */
   select<TD extends PgTableDef>(table: TD): SelectQuery<TD, App<TD>> {
     return select(table, this.conn);
+  }
+
+  /**
+   * INSERT one record, pre-bound to this client: `await db.create(User).content({ … })`. The payload
+   * validates vs `User.create` at the `.content(...)` call (fail-fast); resolves the created row.
+   */
+  create<TD extends PgTableDef>(table: TD): CreateBuilder<TD> {
+    return create(table, this.conn);
+  }
+
+  /**
+   * UPDATE one record by id, pre-bound: `await db.update(User, id).merge({ … })` (partial) / `.content(row)`
+   * (replace) / `.set({ … })`. The patch validates vs `User.update` / `User.create` at the call (fail-fast).
+   */
+  update<TD extends PgTableDef>(table: TD, id: IdOf<TD>): UpdateBuilder<TD> {
+    return update(table, id, this.conn);
+  }
+
+  /**
+   * DELETE one record by id, pre-bound: `await db.delete(User, id)` — resolves the deleted row (the client
+   * method is `delete`; the standalone export is `remove`, since `delete` is a reserved word).
+   */
+  delete<TD extends PgTableDef>(
+    table: TD,
+    id: IdOf<TD>,
+  ): DeleteQuery<TD, App<TD> | undefined> {
+    return remove(table, id, this.conn);
   }
 
   /**

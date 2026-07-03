@@ -137,3 +137,130 @@ describe("postgres ORM client (P1)", () => {
     }
   });
 });
+
+describe("postgres ORM client (P2 writes)", () => {
+  test("db.create(T).content(data) INSERTs + returns the created row", async () => {
+    const conn = await seed();
+    try {
+      const db = connect(conn);
+      const created = await db
+        .create(user)
+        .content({ id: "u3", name: "Cy", age: 40 });
+      expect(created).toEqual({ id: "u3", name: "Cy", age: 40 });
+      expect((await db.select(user)).length).toBe(3);
+    } finally {
+      await conn.close();
+    }
+  });
+
+  test("db.update(T, id).merge(patch) does a partial UPDATE (only given cols)", async () => {
+    const conn = await seed();
+    try {
+      const db = connect(conn);
+      const updated = await db.update(user, "u2").merge({ age: 21 });
+      expect(updated).toEqual({ id: "u2", name: "Bo", age: 21 });
+      // untouched column stays
+      expect((await db.select(user).where((u) => u.id.eq("u2")))[0].name).toBe(
+        "Bo",
+      );
+    } finally {
+      await conn.close();
+    }
+  });
+
+  test("db.update(T, id).content(row) REPLACES every column", async () => {
+    const conn = await seed();
+    try {
+      const db = connect(conn);
+      const replaced = await db
+        .update(user, "u1")
+        .content({ id: "u1", name: "Ada L.", age: 31 });
+      expect(replaced).toEqual({ id: "u1", name: "Ada L.", age: 31 });
+    } finally {
+      await conn.close();
+    }
+  });
+
+  test("db.delete(T, id) removes the row + returns it; .return('none') returns undefined", async () => {
+    const conn = await seed();
+    try {
+      const db = connect(conn);
+      const deleted = await db.delete(user, "u1");
+      expect(deleted).toEqual({ id: "u1", name: "Ada", age: 30 });
+      expect((await db.select(user)).map((u) => u.id)).toEqual(["u2"]);
+      // a no-match delete resolves undefined
+      expect(await db.delete(user, "nope")).toBeUndefined();
+      // .return("none") -> no RETURNING, resolves undefined
+      expect(await db.delete(user, "u2").return("none")).toBeUndefined();
+      expect((await db.select(user)).length).toBe(0);
+    } finally {
+      await conn.close();
+    }
+  });
+
+  test(".return(projection) re-types + decodes the RETURNING subset", async () => {
+    const conn = await seed();
+    try {
+      const db = connect(conn);
+      const row = await db
+        .update(user, "u2")
+        .merge({ age: 22 })
+        .return((u) => ({ who: u.name, years: u.age }));
+      expect(row).toEqual({ who: "Bo", years: 22 });
+    } finally {
+      await conn.close();
+    }
+  });
+
+  test("validation is FAIL-FAST at the .content/.merge call site (not at await)", async () => {
+    const conn = await seed();
+    try {
+      const db = connect(conn);
+      // a bad payload throws SYNCHRONOUSLY at .content(...), before any await
+      expect(() =>
+        db
+          .create(user)
+          .content({ id: "x", name: "N", age: "not-a-number" as never }),
+      ).toThrow();
+      expect(() =>
+        db.update(user, "u1").merge({ age: "nope" as never }),
+      ).toThrow();
+    } finally {
+      await conn.close();
+    }
+  });
+
+  test("standalone create/update/remove run on an explicit conn (unbound builder)", async () => {
+    const { create, remove, update } = await import("../src/query");
+    const conn = await seed();
+    try {
+      await create(user).content({ id: "u9", name: "Zed", age: 50 }).run(conn);
+      await update(user, "u9").merge({ age: 51 }).run(conn);
+      const gone = await remove(user, "u9").run(conn);
+      expect(gone).toEqual({ id: "u9", name: "Zed", age: 51 });
+      // unbound + no conn -> teaching error
+      await expect(
+        create(user).content({ id: "z", name: "z", age: 1 }).run(),
+      ).rejects.toThrow(/needs a connection/);
+    } finally {
+      await conn.close();
+    }
+  });
+
+  test("update/remove reject a composite primary key (use db.query)", async () => {
+    const composite = defineTable("membership", {
+      orgId: s.text(),
+      userId: s.text(),
+      role: s.text(),
+    }).primaryKey("orgId", "userId");
+    const conn = await seed();
+    try {
+      const db = connect(conn);
+      expect(() => db.delete(composite, "x").toSQL()).toThrow(
+        /single-column primary key/,
+      );
+    } finally {
+      await conn.close();
+    }
+  });
+});

@@ -150,9 +150,10 @@ round-trip (author `s.*` → lower → emit → introspect → diff = 0) · `[n/
 - [x] `.toSQL()` renders `{ sql, params }` without executing; `.run(conn)` executes + decodes. A query may be BOUND to a connection (`select(t, conn)` or the ORM client's `db.select(t)`) — then it's **thenable** (`await` runs it) and `.run()` takes no arg; chaining preserves the binding; standalone `select(t).run(db)` still works
 - [x] `PgTableDef.object` (a `z.ZodObject` over the columns) + `.decode(row)` / `.safeDecode(row)` — the row codec the builder reuses (mirrors `@schemic/surrealdb`'s `TableDef.object`/`decode`)
 - [~] **implicit `id` is not queryable** — a table's implicit `id text PRIMARY KEY` is added at emit time, not a field, so it's absent from `object`/`App`/the row refs. Declare an explicit `id` column (`id: s.uuid()`, `s.text().$primaryKey()`, …) to filter/return it. (Phase-0 line; aligns with the "name your PK" guidance below.)
-- [n/a] joins / CTEs / sub-selects / aggregates / writes — later phases (Phase-0 is single-table SELECT)
+- [x] **single-record WRITES (P2)** — `create(T).content(data)` (INSERT, validated vs `T.create`), `update(T, id).merge(patch)` / `.set(patch)` (partial UPDATE vs `T.update`) / `.content(row)` (replace vs `T.create`), `remove(T, id)` (DELETE; standalone export named `remove` — `delete` reserved; client method `db.delete`). All by SINGLE-COLUMN pk (`config.primaryKey` else implicit `id`; composite throws → use `db.query`). `.return("after"` default full row `| "none"` | projection callback `r => ({…})`); RETURNING lowered + decoded (full row via `.decode`, projection via core `decodeProjection`). Validation is codec-channel FAIL-FAST — `z.encode(T.create|update, …)` throws the ZodError at the `.content`/`.merge`/`.set` CALL SITE (not at `await`) and doubles as app→wire lowering. Thenable + `.run(conn?)`; pre-bound on the client. Mirrors surreal's ratified split-builder surface. NOTE pg flat columns → `.merge` and `.set` coincide (partial SET); surreal-native `before`/`diff` return modes are omitted (not pg-native)
+- [n/a] joins / CTEs / sub-selects / aggregates — later phases (Phase-0 is single-table SELECT)
 
-### ORM client — `@schemic/postgres/client` (P1: reads)
+### ORM client — `@schemic/postgres/client` (P1: reads · P2: writes)
 > Opt-in subpath. A disposable handle that BINDS a connection and exposes the query surface PRE-BOUND, so
 > `db.select(t)` runs against the client's connection with no `.run(externalDb)` threading. Extends core's
 > `OrmClientBase`; composes `./query` (the bindable/thenable builder) + `./driver`'s `connect`. Same shape
@@ -164,7 +165,8 @@ round-trip (author `s.*` → lower → emit → introspect → diff = 0) · `[n/
 - [x] typed `config.connect(name, args?)` — `postgresConnection(...)` embeds a lazy `client` opener + a dialect `label` (url | `pglite(memory)`, for bulk reporting), typed as `ConnectionEntry<PgClient, Args>`. Args are the resolver's typed SECOND parameter (connections v2 — no args schema to plumb; annotate the param and `Args` is inferred), so `defineConfig(...).connect(name, args)` autocompletes names + types args + infers the `PgClient` per entry. `client.connect(name, args?)` passes the same args through for a parameterized/bulk selection
 - [x] `AsyncDisposable` — `await using db = await connect()` closes a managed client at block exit; `[Symbol.asyncDispose] === close`
 - [x] dispose rule enforced at construction (private ctor; `managed`/`byo` statics): MANAGED close closes, BYO close is a no-op
-- [n/a] writes (`create/update/delete` split builder) + `db.call` + a scoped `db.session()` — P2 / later
+- [x] **writes (P2)** — `db.create(T).content(data)` / `db.update(T, id).merge|content|set(...)` / `db.delete(T, id)`, all pre-bound + thenable (`await db.create(User).content({…})`). Split builder + codec-channel fail-fast validation; see the `./query` writes line above for the full surface
+- [n/a] `db.call` (function invoke) + a scoped `db.session()`/transaction — later (pg session = a `BEGIN`/`COMMIT` tx scope; degenerate for PGlite reads, deferred)
 
 > `$postgres` codec params are now precisely typed (`encode(app)`, `decode(wire)`), since the `s.*` leaf
 > factories return a precise `PgField<S>` (the `mk<S>` generic) rather than a wide `PgField<ZodType>` —
