@@ -11,6 +11,35 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 
 ## [Unreleased]
 
+### Added
+- **core / surrealdb / postgres:** table COMPOSITION + derived schemas (cross-driver convention, from
+  real usage): `defineTable(name, s.object())`, a public native `s.object().fields` map (inverse of
+  `.shape`), `TableDef.extend(shape | s.object())` typed cast-free column mixins, and derived
+  Standard-Schema input schemas — `TableDef.create` (defaults/id optional, internal dropped) and
+  `TableDef.update` (partial, id/readonly excluded) — composable via `.partial/.extend/.refine/.or`.
+- **core:** ORM client P1 foundation — `OrmClientBase` (disposable bound-client contract: `close` +
+  `[Symbol.asyncDispose]`, so `await using db = await connect()` auto-closes), the `asyncDisposable`
+  mixin, and `resolveConnection(name?)` (managed path over the project config).
+- **surrealdb / postgres:** the bound ORM client (P1 reads) at `@schemic/<driver>/client` —
+  `connect(name?)` MANAGED from the config / `connect(client)` BYO (close = no-op), `db.select(table)`
+  pre-bound + awaitable (thenable builder; standalone `.run(db)` still works), AsyncDisposable;
+  surreal adds a disposable `forkSession()`.
+- **core:** config-as-factory — `defineConfig` is generic and returns the config with a **typed
+  `connect()`**: connection names autocomplete (a typo is a compile error), each entry's own client
+  type is inferred (heterogeneous-driver projects type per-connection), resolver `args` validate
+  against the connection's optional Standard-Schema `args` schema, and keyed collections address via
+  `connect(name, { key })`. `connectionEntry(driver, input, { client, args })` carries the
+  factory-embedded lazy client opener + args schema.
+- **core:** the config loader accepts a NAMED `schemic` export as well as a default — scaffolded form
+  becomes `export const schemic = defineConfig(...)` in `schemic.config.ts` (deterministic
+  `import { schemic }` -> `schemic.connect()` auto-import, no file rename); a bare `schemic.ts` is
+  also discovered (shape-guarded).
+
+### Changed (BREAKING — alpha)
+- **surrealdb:** dropped the deprecated `$`-less field aliases `.unique()`/`.index()` — use
+  `.$unique()`/`.$index()` (aligns with postgres, already `$`-only; table-level composite
+  `.index(name, fields)` unchanged).
+
 ## [0.1.0-alpha.24] - 2026-07-01
 
 ### Added

@@ -11,11 +11,13 @@ export type { ResolvedConfig } from "../cli-kit/config";
 export type { Diff, DiffItem } from "../cli-kit/diff";
 // Multi-connection: the primitive each driver wraps in its typed `<driver>Connection(...)` factory.
 export {
+  type AnyConnectionEntry,
   type ConnectionConfigBase,
   type ConnectionEntry,
   type ConnectionInput,
   connectionEntry,
   type ResolveContext,
+  type StandardSchemaLike,
 } from "../connection";
 export type {
   ApplyOptions,
