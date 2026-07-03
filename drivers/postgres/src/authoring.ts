@@ -734,10 +734,13 @@ export const s = {
     s.object(shape).strict(),
   looseObject: <Sh extends Record<string, AnyField | z.ZodType>>(shape: Sh) =>
     s.object(shape).loose(),
-  // array(elem) -> `<elem>[]`; carries the element's pg metadata so it lowers to an array of that type.
-  array: (elem: AnyField | z.ZodType): PgField =>
+  // array(elem) -> `<elem>[]`; carries the element's pg metadata so it lowers to an array of that type,
+  // and its Zod ELEMENT type so `App` sees `E[]` (needed for the query builder's array-op narrowing).
+  array: <E extends AnyField | z.ZodType>(
+    elem: E,
+  ): PgField<z.ZodArray<SchemaOf<E>>> =>
     new PgField(
-      z.array(toZod(elem)),
+      z.array(toZod(elem) as SchemaOf<E>),
       elem instanceof PgField ? elem.native : {},
     ),
   // composite types -> jsonb (the App value is the composite; stored opaquely as one jsonb column,

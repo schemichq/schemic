@@ -71,6 +71,139 @@ describe("postgres/query — SQL lowering", () => {
   });
 });
 
+// A table with string / int / array / nullable columns — to exercise the Phase-1 typed-narrowed ops.
+const p1 = defineTable("p1", {
+  id: s.text().$primaryKey(),
+  title: s.text(),
+  views: s.integer(),
+  tags: s.array(s.text()),
+  note: s.text().nullable(),
+});
+
+describe("postgres/query — Phase 1 ops (SQL lowering)", () => {
+  test("in / notIn → IN (…) / NOT IN (…); empty set → FALSE / TRUE", () => {
+    expect(
+      select(p1)
+        .where((r) => r.id.in(["a", "b"]))
+        .toSQL().sql,
+    ).toContain('"id" IN ($1, $2)');
+    expect(
+      select(p1)
+        .where((r) => r.id.notIn(["a"]))
+        .toSQL().sql,
+    ).toContain('"id" NOT IN ($1)');
+    expect(
+      select(p1)
+        .where((r) => r.id.in([]))
+        .toSQL().sql,
+    ).toContain("WHERE FALSE");
+    expect(
+      select(p1)
+        .where((r) => r.id.notIn([]))
+        .toSQL().sql,
+    ).toContain("WHERE TRUE");
+  });
+
+  test("isNone / isNotNone → IS NULL / IS NOT NULL (no bind)", () => {
+    const a = select(p1)
+      .where((r) => r.note.isNone())
+      .toSQL();
+    expect(a.sql).toContain('"note" IS NULL');
+    expect(a.params).toEqual([]);
+    expect(
+      select(p1)
+        .where((r) => r.note.isNotNone())
+        .toSQL().sql,
+    ).toContain('"note" IS NOT NULL');
+  });
+
+  test("startsWith → starts_with(); endsWith → right(col, char_length($1)) = $1 (single bind)", () => {
+    expect(
+      select(p1)
+        .where((r) => r.title.startsWith("al"))
+        .toSQL(),
+    ).toEqual({
+      sql: 'SELECT "id", "title", "views", "tags", "note" FROM "p1" WHERE starts_with("title", $1);',
+      params: ["al"],
+    });
+    expect(
+      select(p1)
+        .where((r) => r.title.endsWith("ma"))
+        .toSQL(),
+    ).toEqual({
+      sql: 'SELECT "id", "title", "views", "tags", "note" FROM "p1" WHERE right("title", char_length($1)) = $1;',
+      params: ["ma"],
+    });
+  });
+
+  test("contains → = ANY; containsAny → &&; containsAll → @> (array bound whole)", () => {
+    expect(
+      select(p1)
+        .where((r) => r.tags.contains("y"))
+        .toSQL(),
+    ).toEqual({
+      sql: 'SELECT "id", "title", "views", "tags", "note" FROM "p1" WHERE $1 = ANY("tags");',
+      params: ["y"],
+    });
+    expect(
+      select(p1)
+        .where((r) => r.tags.containsAny(["x", "z"]))
+        .toSQL().sql,
+    ).toContain('"tags" && $1');
+    expect(
+      select(p1)
+        .where((r) => r.tags.containsAll(["x", "y"]))
+        .toSQL().sql,
+    ).toContain('"tags" @> $1');
+  });
+
+  test("start → OFFSET (after LIMIT)", () => {
+    const { sql, params } = select(p1).limit(5).start(10).toSQL();
+    expect(sql).toContain("LIMIT $1 OFFSET $2");
+    expect(params).toEqual([5, 10]);
+  });
+
+  test(".count() → SELECT count(*) with WHERE only", () => {
+    const { sql } = select(p1)
+      .where((r) => r.views.gt(3))
+      .count()
+      .toSQL();
+    expect(sql).toBe(
+      'SELECT count(*)::int AS count FROM "p1" WHERE "views" > $1;',
+    );
+  });
+
+  test(".one() forces LIMIT 1", () => {
+    expect(
+      select(p1)
+        .where((r) => r.id.eq("x"))
+        .one()
+        .toSQL().sql,
+    ).toContain("LIMIT $");
+  });
+});
+
+describe("postgres/query — Phase 1 typed narrowing (compile-time)", () => {
+  test("op sets narrow by column type", () => {
+    // string ops only on string columns
+    select(p1).where((r) => r.title.startsWith("a"));
+    select(p1).where((r) => r.title.endsWith("a"));
+    // @ts-expect-error — startsWith is string-only (views is an int column)
+    select(p1).where((r) => r.views.startsWith("a"));
+    // contains* only on array columns
+    select(p1).where((r) => r.tags.contains("x"));
+    select(p1).where((r) => r.tags.containsAll(["x"]));
+    // @ts-expect-error — contains is array-only (title is a string column)
+    select(p1).where((r) => r.title.contains("x"));
+    // @ts-expect-error — arrays don't get string ops
+    select(p1).where((r) => r.tags.startsWith("x"));
+    // in / isNone are on EVERY column
+    select(p1).where((r) => r.views.in([1, 2]));
+    select(p1).where((r) => r.note.isNone());
+    expect(true).toBe(true);
+  });
+});
+
 describe("postgres/query — decode", () => {
   const when = new Date("2020-05-06T07:08:09.000Z");
   const rawRows = [{ name: "Ada", age: 36, createdAt: when, slug: "ada-l" }];

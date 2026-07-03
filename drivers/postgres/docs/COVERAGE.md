@@ -144,7 +144,9 @@ round-trip (author `s.*` → lower → emit → introspect → diff = 0) · `[n/
 > cross-driver. Decodes through `PgTableDef.object` — the same row codec a full-row read uses.
 - [x] `select(table)` → typed single-table `SELECT`; bare result is `App<TD>[]` (decoded)
 - [x] `.where(r => …)` with `eq/neq/lt/lte/gt/gte` + `and(...)`/`or(...)`, lowered to positional `$1..$n` binds
-- [x] `.orderBy(r => col, "asc"|"desc")`, `.limit(n)`
+- [x] **Phase-1 WHERE ops (cross-driver contract)** — `in`/`notIn` (`IN (…)`/`NOT IN`; empty set → `FALSE`/`TRUE`), `isNone`/`isNotNone` (`IS [NOT] NULL`) on EVERY column; **type-narrowed** ops: `startsWith`/`endsWith` on STRING columns only (`starts_with(col,$1)` / `right(col, char_length($1)) = $1`), `contains`/`containsAny`/`containsAll` on ARRAY columns only (`$1 = ANY(col)` / `col && $1` / `col @> $1`). Narrowing = `FieldRefOps<T>` base + conditional `StringRefOps`/`ArrayRefOps<E>` intersections + `IsAny` guard (mirrors surreal exactly; `ts-expect-error`-locked). NOTE: no substring `contains` on strings (array-only, per the cross-driver decision — a future `.includes` would be substring). Requires `s.array(elem)` to carry its element type into `App` (fixed here).
+- [x] `.orderBy(r => col, "asc"|"desc")`, `.limit(n)`, `.start(n)` (→ `OFFSET`, pagination)
+- [x] terminals: `.one()` (first row `| undefined`, forces `LIMIT 1`), `.count()` (`SELECT count(*)`, where-only → `number`), `get(T, id)` / `db.get(T, id)` (fetch-by-id → row `| undefined`, the read half of id-chaining) — all thenable when bound, `.run(conn)` standalone
 - [x] `.return(r => ({ alias: r.col, … }))` flat projection — re-types the result via core's `Project<P>`
 - [x] decode-by-default (full-row via `PgTableDef.object`, projection via core's `decodeProjection`); `.raw()` opts out
 - [x] `.toSQL()` renders `{ sql, params }` without executing; `.run(conn)` executes + decodes. A query may be BOUND to a connection (`select(t, conn)` or the ORM client's `db.select(t)`) — then it's **thenable** (`await` runs it) and `.run()` takes no arg; chaining preserves the binding; standalone `select(t).run(db)` still works

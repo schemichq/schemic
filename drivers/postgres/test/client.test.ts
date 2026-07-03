@@ -295,3 +295,106 @@ describe("postgres ORM client (P2 writes)", () => {
     }
   });
 });
+
+describe("postgres ORM client — query Phase 1 (live)", () => {
+  const post = defineTable("qp_post", {
+    id: s.text().$primaryKey(),
+    title: s.text(),
+    views: s.integer(),
+    tags: s.array(s.text()),
+    note: s.text().nullable(),
+  });
+  async function seedPosts(): Promise<PgConn> {
+    const conn = (await postgresDriver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
+    await postgresDriver.apply(
+      conn,
+      emitKinds(registry, postgresDriver.explode([post], [])),
+    );
+    await conn.query(
+      `INSERT INTO "qp_post" ("id","title","views","tags","note") VALUES
+        ('p1','alpha',10,ARRAY['x','y'],'hi'),
+        ('p2','beta',20,ARRAY['y','z'],NULL),
+        ('p3','gamma',30,ARRAY['w'],'yo');`,
+    );
+    return conn;
+  }
+  const ids = (rs: { id: string }[]) => rs.map((r) => r.id).sort();
+
+  test("in/notIn, isNone/isNotNone, startsWith/endsWith, contains* all filter correctly", async () => {
+    const conn = await seedPosts();
+    try {
+      const db = connect(conn);
+      expect(
+        ids(await db.select(post).where((r) => r.id.in(["p1", "p3"]))),
+      ).toEqual(["p1", "p3"]); // prettier-ignore
+      expect(
+        ids(await db.select(post).where((r) => r.id.notIn(["p1"]))),
+      ).toEqual(["p2", "p3"]); // prettier-ignore
+      expect(ids(await db.select(post).where((r) => r.note.isNone()))).toEqual([
+        "p2",
+      ]); // prettier-ignore
+      expect(
+        ids(await db.select(post).where((r) => r.note.isNotNone())),
+      ).toEqual(["p1", "p3"]); // prettier-ignore
+      expect(
+        ids(await db.select(post).where((r) => r.title.startsWith("al"))),
+      ).toEqual(["p1"]); // prettier-ignore
+      expect(
+        ids(await db.select(post).where((r) => r.title.endsWith("ma"))),
+      ).toEqual(["p3"]); // prettier-ignore
+      expect(
+        ids(await db.select(post).where((r) => r.tags.contains("y"))),
+      ).toEqual(["p1", "p2"]); // prettier-ignore
+      expect(
+        ids(await db.select(post).where((r) => r.tags.containsAny(["x", "z"]))),
+      ).toEqual(["p1", "p2"]); // prettier-ignore
+      expect(
+        ids(await db.select(post).where((r) => r.tags.containsAll(["x", "y"]))),
+      ).toEqual(["p1"]); // prettier-ignore
+      expect(await db.select(post).where((r) => r.id.in([]))).toEqual([]); // empty IN -> no rows
+    } finally {
+      await conn.close();
+    }
+  });
+
+  test("start (OFFSET) pagination + .one() + .count() + db.get(id)", async () => {
+    const conn = await seedPosts();
+    try {
+      const db = connect(conn);
+      // 2nd row by ascending views (skip 1)
+      const page = await db
+        .select(post)
+        .orderBy((r) => r.views)
+        .limit(1)
+        .start(1); // prettier-ignore
+      expect(page.map((r) => r.id)).toEqual(["p2"]);
+      // one() -> single row | undefined
+      const one = await db
+        .select(post)
+        .where((r) => r.id.eq("p2"))
+        .one(); // prettier-ignore
+      expect(one?.title).toBe("beta");
+      expect(
+        await db
+          .select(post)
+          .where((r) => r.id.eq("nope"))
+          .one(),
+      ).toBeUndefined(); // prettier-ignore
+      // count() -> number, where-only
+      expect(
+        await db
+          .select(post)
+          .where((r) => r.views.gt(15))
+          .count(),
+      ).toBe(2); // prettier-ignore
+      expect(await db.select(post).count()).toBe(3);
+      // get(T, id) -> row | undefined (read half of id-chaining)
+      expect((await db.get(post, "p3"))?.title).toBe("gamma");
+      expect(await db.get(post, "missing")).toBeUndefined();
+    } finally {
+      await conn.close();
+    }
+  });
+});

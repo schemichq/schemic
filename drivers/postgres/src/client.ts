@@ -23,7 +23,9 @@ import {
   type CreateBuilder,
   create,
   type DeleteQuery,
+  get,
   type IdOf,
+  type PgSelectOne,
   type RowOf,
   remove,
   type SelectQuery,
@@ -118,6 +120,14 @@ export class PgClient implements OrmClientBase {
    */
   select<TD extends PgTableDef>(table: TD): SelectQuery<TD, RowOf<TD>> {
     return select(table, this.conn);
+  }
+
+  /**
+   * Fetch ONE record by id, pre-bound: `await db.get(User, id)` — resolves the decoded row or
+   * `undefined`. The read half of id-chaining (`db.create` hands you an id, `db.get` fetches it back).
+   */
+  get<TD extends PgTableDef>(table: TD, id: IdOf<TD>): PgSelectOne<RowOf<TD>> {
+    return get(table, id, this.conn);
   }
 
   /**

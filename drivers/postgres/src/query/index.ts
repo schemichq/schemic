@@ -27,6 +27,15 @@ import { escId } from "../emit";
 type Cmp = "=" | "<>" | "<" | "<=" | ">" | ">=";
 type PredNode =
   | { kind: "cmp"; path: string; op: Cmp; value: unknown }
+  | { kind: "in"; path: string; values: readonly unknown[]; not: boolean }
+  | { kind: "null"; path: string; not: boolean }
+  | { kind: "strfn"; path: string; fn: "starts" | "ends"; value: string }
+  | {
+      kind: "arr";
+      path: string;
+      op: "contains" | "any" | "all";
+      value: unknown;
+    }
   | { kind: "and" | "or"; parts: PredNode[] };
 
 /** An opaque boolean expression produced by field operators / `and`/`or` — rendered in `WHERE`. */
@@ -43,15 +52,55 @@ export function or(...parts: Expr[]): Expr {
 
 // --- field refs ----------------------------------------------------------------------------------
 
-/** A Postgres field reference: the neutral `FieldRefBase` carrier + pg comparison operators. */
-export interface FieldRef<T> extends FieldRefBase<T> {
+/** The operators EVERY column carries: comparisons, set membership (`in`/`notIn`), and NULL checks
+ *  (`isNone`/`isNotNone`, cross-driver names for `IS [NOT] NULL`). The neutral `FieldRefBase` carrier
+ *  lets core's `Project` read the app type back. */
+export interface FieldRefOps<T> extends FieldRefBase<T> {
   eq(v: T): Expr;
   neq(v: T): Expr;
   lt(v: T): Expr;
   lte(v: T): Expr;
   gt(v: T): Expr;
   gte(v: T): Expr;
+  /** `col IN (…)` — the value is one of. */
+  in(values: readonly T[]): Expr;
+  /** `col NOT IN (…)`. */
+  notIn(values: readonly T[]): Expr;
+  /** `col IS NULL` — the (nullable) column is absent. */
+  isNone(): Expr;
+  /** `col IS NOT NULL`. */
+  isNotNone(): Expr;
 }
+/** String-only operators — `starts_with(col, …)` / `right(col, …) = …`. (No substring `contains`: that's
+ *  array membership on pg; a future `.includes(...)` would be the substring op — cross-driver decision.) */
+export interface StringRefOps {
+  startsWith(prefix: string): Expr;
+  endsWith(suffix: string): Expr;
+}
+/** Array-only operators — pg `= ANY` / `&&` / `@>`. */
+export interface ArrayRefOps<E> {
+  /** `v = ANY(col)` — the array holds the element. */
+  contains(v: E): Expr;
+  /** `col && [...]` — the arrays overlap (holds ANY of). */
+  containsAny(vs: readonly E[]): Expr;
+  /** `col @> [...]` — the array holds ALL of. */
+  containsAll(vs: readonly E[]): Expr;
+}
+
+/** The canonical `IsAny` probe — `1 & any` collapses to `any`, so `0 extends (1 & T)` is only true for `any`. */
+type IsAny<T> = 0 extends 1 & T ? true : false;
+
+/** A column reference inside a `where`/`orderBy`/`return` callback. The operator set NARROWS by the
+ *  column's app type — string ops on strings, `contains*` on arrays — via conditional intersections.
+ *  The `IsAny` guard keeps a shape-agnostic `PgTableDef` row assignable (an `any` column gets base ops
+ *  only). Mirrors `@schemic/surrealdb`'s `FieldRef` exactly. */
+export type FieldRef<T> = FieldRefOps<T> &
+  (IsAny<T> extends true
+    ? unknown
+    : ([NonNullable<T>] extends [string] ? StringRefOps : unknown) &
+        ([NonNullable<T>] extends [readonly (infer E)[]]
+          ? ArrayRefOps<E>
+          : unknown));
 
 /** Internal carrier behind a FieldRef — its column path + source Zod schema (for projection decode). */
 interface RefImpl {
@@ -62,6 +111,12 @@ interface RefImpl {
 function makeRef(path: string, schema: z.ZodType): FieldRef<unknown> & RefImpl {
   const cmp = (op: Cmp) => (value: unknown) =>
     new Expr({ kind: "cmp", path, op, value });
+  const inOp = (not: boolean) => (values: readonly unknown[]) =>
+    new Expr({ kind: "in", path, values, not });
+  const strfn = (fn: "starts" | "ends") => (value: string) =>
+    new Expr({ kind: "strfn", path, fn, value });
+  const arr = (op: "contains" | "any" | "all") => (value: unknown) =>
+    new Expr({ kind: "arr", path, op, value });
   return brandRef({
     __path: path,
     __schema: schema,
@@ -71,7 +126,16 @@ function makeRef(path: string, schema: z.ZodType): FieldRef<unknown> & RefImpl {
     lte: cmp("<="),
     gt: cmp(">"),
     gte: cmp(">="),
-  }) as FieldRef<unknown> & RefImpl;
+    in: inOp(false),
+    notIn: inOp(true),
+    isNone: () => new Expr({ kind: "null", path, not: false }),
+    isNotNone: () => new Expr({ kind: "null", path, not: true }),
+    startsWith: strfn("starts"),
+    endsWith: strfn("ends"),
+    contains: arr("contains"),
+    containsAny: arr("any"),
+    containsAll: arr("all"),
+  }) as unknown as FieldRef<unknown> & RefImpl;
 }
 
 /** The typed row handed to `where`/`orderBy`/`return` callbacks — one `FieldRef` per declared column. */
@@ -99,8 +163,29 @@ class Binder {
 }
 
 function renderPred(node: PredNode, b: Binder): string {
-  if (node.kind === "cmp")
-    return `${escId(node.path)} ${node.op} ${b.bind(node.value)}`;
+  switch (node.kind) {
+    case "cmp":
+      return `${escId(node.path)} ${node.op} ${b.bind(node.value)}`;
+    case "in": {
+      // an empty set: `IN ()` is invalid — `in [] ` is always false, `notIn []` always true.
+      if (!node.values.length) return node.not ? "TRUE" : "FALSE";
+      const list = node.values.map((v) => b.bind(v)).join(", ");
+      return `${escId(node.path)} ${node.not ? "NOT IN" : "IN"} (${list})`;
+    }
+    case "null":
+      return `${escId(node.path)} IS ${node.not ? "NOT NULL" : "NULL"}`;
+    case "strfn": {
+      const p = b.bind(node.value); // one bind, referenced twice for the suffix length + compare
+      return node.fn === "starts"
+        ? `starts_with(${escId(node.path)}, ${p})`
+        : `right(${escId(node.path)}, char_length(${p})) = ${p}`;
+    }
+    case "arr":
+      // contains -> element membership; any -> overlap; all -> superset (bind the JS array directly).
+      return node.op === "contains"
+        ? `${b.bind(node.value)} = ANY(${escId(node.path)})`
+        : `${escId(node.path)} ${node.op === "any" ? "&&" : "@>"} ${b.bind(node.value)}`;
+  }
   const joiner = node.kind === "and" ? " AND " : " OR ";
   return `(${node.parts.map((p) => renderPred(p, b)).join(joiner)})`;
 }
@@ -153,6 +238,8 @@ interface State {
   where?: Expr;
   order?: { path: string; dir: "asc" | "desc" }[];
   limit?: number;
+  /** Rows to skip (`OFFSET`), for pagination alongside `limit`. */
+  start?: number;
   /** Flat projection columns (absent → full row). */
   projection?: ProjItem[];
 }
@@ -199,6 +286,11 @@ export class SelectQuery<TD extends PgTableDef, Res>
     return this.with({ limit: n });
   }
 
+  /** Skip the first `n` rows (`OFFSET n`) — pagination alongside `.limit(...)`. */
+  start(n: number): SelectQuery<TD, Res> {
+    return this.with({ start: n });
+  }
+
   /** Project to a flat shape: `.return(r => ({ name: r.name, at: r.createdAt }))`. Re-types the result. */
   return<P extends Record<string, FieldRef<unknown>>>(
     cb: (row: Row<TD>) => P,
@@ -226,6 +318,17 @@ export class SelectQuery<TD extends PgTableDef, Res>
     );
   }
 
+  /** Take the FIRST matching row (forces `LIMIT 1`) — resolves to the row or `undefined`. */
+  one(): PgSelectOne<Res> {
+    return new PgSelectOne<Res>(this.limit(1));
+  }
+
+  /** Count the matching rows (`SELECT count(*) … WHERE …`) — `where` applies; order/limit/projection
+   *  don't. Awaitable when bound; `.run(conn)` standalone. */
+  count(): PgCountQuery {
+    return new PgCountQuery(this.table.name, this.state.where, this.conn);
+  }
+
   /** Render to `{ sql, params }` (positional binds) without executing. */
   toSQL(): { sql: string; params: unknown[] } {
     const b = new Binder();
@@ -250,6 +353,7 @@ export class SelectQuery<TD extends PgTableDef, Res>
     if (this.state.order?.length)
       sql += ` ORDER BY ${this.state.order.map((o) => `${escId(o.path)} ${o.dir.toUpperCase()}`).join(", ")}`;
     if (this.state.limit != null) sql += ` LIMIT ${b.bind(this.state.limit)}`;
+    if (this.state.start != null) sql += ` OFFSET ${b.bind(this.state.start)}`;
     return { sql: `${sql};`, params: b.params };
   }
 
@@ -296,6 +400,79 @@ export function select<TD extends PgTableDef>(
   conn?: PgConn,
 ): SelectQuery<TD, RowOf<TD>> {
   return new SelectQuery<TD, RowOf<TD>>(table, {}, true, conn);
+}
+
+/** A single-row terminal over a {@link SelectQuery} — resolves to the first row or `undefined`. */
+export class PgSelectOne<Res> implements PromiseLike<Res | undefined> {
+  constructor(private readonly sel: SelectQuery<PgTableDef, Res>) {}
+
+  /** Render `{ sql, params }` (the wrapped select, already `LIMIT 1`). */
+  toSQL(): { sql: string; params: unknown[] } {
+    return this.sel.toSQL();
+  }
+
+  async run(conn?: PgConn): Promise<Res | undefined> {
+    return (await this.sel.run(conn))[0];
+  }
+
+  // biome-ignore lint/suspicious/noThenProperty: intentional — a bound one() is awaitable (mirrors select)
+  then<R1 = Res | undefined, R2 = never>(
+    onFulfilled?: ((value: Res | undefined) => R1 | PromiseLike<R1>) | null,
+    onRejected?: ((reason: unknown) => R2 | PromiseLike<R2>) | null,
+  ): PromiseLike<R1 | R2> {
+    return this.run().then(onFulfilled, onRejected);
+  }
+}
+
+/** A count terminal — `SELECT count(*) FROM <table> [WHERE …]`, resolves to a number. `where` applies;
+ *  order/limit/projection don't. */
+export class PgCountQuery implements PromiseLike<number> {
+  constructor(
+    private readonly table: string,
+    private readonly where: Expr | undefined,
+    private readonly conn?: PgConn,
+  ) {}
+
+  toSQL(): { sql: string; params: unknown[] } {
+    const b = new Binder();
+    let sql = `SELECT count(*)::int AS count FROM ${escId(this.table)}`;
+    if (this.where) sql += ` WHERE ${renderPred(this.where.node, b)}`;
+    return { sql: `${sql};`, params: b.params };
+  }
+
+  async run(conn?: PgConn): Promise<number> {
+    const c = conn ?? this.conn;
+    if (!c) throw new Error("count(...).run() needs a connection.");
+    const { sql, params } = this.toSQL();
+    const { rows } = await c.query<{ count: number }>(sql, params);
+    return rows[0]?.count ?? 0;
+  }
+
+  // biome-ignore lint/suspicious/noThenProperty: intentional — a bound count() is awaitable (mirrors select)
+  then<R1 = number, R2 = never>(
+    onFulfilled?: ((value: number) => R1 | PromiseLike<R1>) | null,
+    onRejected?: ((reason: unknown) => R2 | PromiseLike<R2>) | null,
+  ): PromiseLike<R1 | R2> {
+    return this.run().then(onFulfilled, onRejected);
+  }
+}
+
+/** Fetch ONE record by id — `get(User, id)` resolves to the decoded row or `undefined`. The read half of
+ *  id-chaining (`create` hands you an id, `get` fetches it back). Filters by the single-column pk (the
+ *  implicit `id` too — which isn't a declared field, so it's matched directly, not via a row ref). */
+export function get<TD extends PgTableDef>(
+  table: TD,
+  id: IdOf<TD>,
+  conn?: PgConn,
+): PgSelectOne<RowOf<TD>> {
+  const pk = pkColumn(table);
+  const where = new Expr({
+    kind: "cmp",
+    path: pk,
+    op: "=",
+    value: encodeField(table, pk, id),
+  });
+  return new SelectQuery<TD, RowOf<TD>>(table, { where }, true, conn).one();
 }
 
 // --- writes (P2): create / update / remove -------------------------------------------------------
