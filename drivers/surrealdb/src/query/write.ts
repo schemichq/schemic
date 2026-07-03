@@ -19,27 +19,25 @@ import {
   type Project,
   type ProjectionField,
 } from "@schemic/core/query";
-import { escapeIdent, RecordId } from "surrealdb";
+import { escapeIdent, type RecordId } from "surrealdb";
 import type { App, Create, TableDef, Update, Wire } from "../pure";
 import {
-  type FieldRef,
+  type FieldRefOps,
   type Queryable,
   type Row,
   refCol,
   refsFor,
+  type TargetId,
+  thingOf,
 } from "./index";
+
+export type { TargetId } from "./index";
 
 /** SurrealDB's write `RETURN` modes (`"diff"`/`"before"` are surreal-native extras). */
 export type WriteReturn = "none" | "before" | "after" | "diff";
 
 // biome-ignore lint/suspicious/noExplicitAny: TableDef's Shape varies per call site.
 type AnyTableDef = TableDef<string, any>;
-
-/** A write target: the app-typed smart id (a `RecordId`) or its plain string id part. */
-export type TargetId<TD extends AnyTableDef> = App<TD>["id"] | string;
-
-const thingOf = (table: AnyTableDef, id: unknown): RecordId =>
-  id instanceof RecordId ? id : new RecordId(table.name, id as string);
 
 interface Lowered {
   readonly sql: string;
@@ -75,7 +73,7 @@ abstract class WriteQuery<TD extends AnyTableDef, Res> {
 
   /** Lower a `.return(row => …)` projection callback to the RETURN column list. */
   protected projOf(
-    fn: (row: Row<TD>) => Record<string, FieldRef<unknown>>,
+    fn: (row: Row<TD>) => Record<string, FieldRefOps<unknown>>,
   ): { as: string; col: string }[] {
     return Object.entries(fn(refsFor(this.table))).map(([as, ref]) => ({
       as,
@@ -156,11 +154,13 @@ export class CreateQuery<
   return(mode: "none"): CreateQuery<TD, undefined>;
   return(mode: "before" | "after"): CreateQuery<TD, App<TD>>;
   return(mode: "diff"): CreateQuery<TD, unknown>;
-  return<P extends Record<string, FieldRef<unknown>>>(
+  return<P extends Record<string, FieldRefOps<unknown>>>(
     fn: (row: Row<TD>) => P,
   ): CreateQuery<TD, Project<P>>;
   return(
-    mode: WriteReturn | ((row: Row<TD>) => Record<string, FieldRef<unknown>>),
+    mode:
+      | WriteReturn
+      | ((row: Row<TD>) => Record<string, FieldRefOps<unknown>>),
   ): CreateQuery<TD, unknown> {
     const ret = typeof mode === "function" ? this.projOf(mode) : mode;
     return new CreateQuery(
@@ -261,11 +261,13 @@ export class UpdateQuery<
   return(mode: "none"): UpdateQuery<TD, undefined>;
   return(mode: "before" | "after"): UpdateQuery<TD, App<TD>>;
   return(mode: "diff"): UpdateQuery<TD, unknown>;
-  return<P extends Record<string, FieldRef<unknown>>>(
+  return<P extends Record<string, FieldRefOps<unknown>>>(
     fn: (row: Row<TD>) => P,
   ): UpdateQuery<TD, Project<P>>;
   return(
-    mode: WriteReturn | ((row: Row<TD>) => Record<string, FieldRef<unknown>>),
+    mode:
+      | WriteReturn
+      | ((row: Row<TD>) => Record<string, FieldRefOps<unknown>>),
   ): UpdateQuery<TD, unknown> {
     const ret = typeof mode === "function" ? this.projOf(mode) : mode;
     return new UpdateQuery(
@@ -340,13 +342,13 @@ export class DeleteQuery<
   return(mode: "none"): DeleteQuery<TD, undefined>;
   return(mode: "before"): DeleteQuery<TD, App<TD>>;
   return(mode: "diff"): DeleteQuery<TD, unknown>;
-  return<P extends Record<string, FieldRef<unknown>>>(
+  return<P extends Record<string, FieldRefOps<unknown>>>(
     fn: (row: Row<TD>) => P,
   ): DeleteQuery<TD, Project<P>>;
   return(
     mode:
       | Exclude<WriteReturn, "after">
-      | ((row: Row<TD>) => Record<string, FieldRef<unknown>>),
+      | ((row: Row<TD>) => Record<string, FieldRefOps<unknown>>),
   ): DeleteQuery<TD, unknown> {
     const ret = typeof mode === "function" ? this.projOf(mode) : mode;
     return new DeleteQuery(

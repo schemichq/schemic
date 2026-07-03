@@ -125,6 +125,11 @@ describe.skipIf(!URL)("orm client (P2 writes)", () => {
     expect(String(ada.id.table.name)).toBe("orm_user");
     expect(ada.name).toBe("cara");
 
+    // GET by id: the read half of the chain (row or undefined).
+    const fetched = await db.get(User, ada.id);
+    expect(fetched?.name).toBe("cara");
+    expect(await db.get(User, "missing")).toBeUndefined();
+
     // UPDATE .merge: deep-merge patch, returns the updated row.
     const older = await db.update(User, ada.id).merge({ age: 31 });
     expect(older.age).toBe(31);

@@ -17,9 +17,11 @@ import {
   type CreateQuery,
   create,
   type DeleteQuery,
+  get,
   type Queryable,
   remove,
   type Select,
+  type SelectOne,
   select,
   type TargetId,
   type UpdateQuery,
@@ -115,6 +117,12 @@ export class Client implements OrmClientBase {
     return select(table, this.conn);
   }
 
+  /** Fetch ONE record by id — `await db.get(User, id)` resolves to the decoded row or `undefined`
+   *  (the read half of id-chaining: `create` hands you an id, `get` fetches it back). */
+  get<TD extends AnyTable>(table: TD, id: TargetId<TD>): SelectOne<App<TD>> {
+    return get(table, id, this.conn);
+  }
+
   /** A connection-bound CREATE — `await db.create(User).content({ … })` returns the created row
    *  (validated via `User.create`, encoded through the codec). */
   create<TD extends AnyTable>(table: TD): CreateQuery<TD, App<TD>> {
@@ -172,6 +180,11 @@ export class Session implements OrmClientBase {
   /** A session-bound single-table SELECT (awaitable). */
   select<TD extends AnyTable>(table: TD): Select<TD, App<TD>> {
     return select(table, this.session);
+  }
+
+  /** Fetch ONE record by id, scoped to this session. */
+  get<TD extends AnyTable>(table: TD, id: TargetId<TD>): SelectOne<App<TD>> {
+    return get(table, id, this.session);
   }
 
   /** A session-bound CREATE (runs under this session's auth context). */
