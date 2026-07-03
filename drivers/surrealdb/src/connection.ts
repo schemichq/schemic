@@ -58,6 +58,21 @@ export function surrealConnection<Args = undefined>(
     | SurrealConnectionConfig[]
     | Promise<SurrealConnectionConfig | SurrealConnectionConfig[]>,
 ): ConnectionEntry<Client, Args>;
+// The union-input form — what makes the factory itself usable as the CHAIN's driver marker
+// (`defineConfig().connection(name, surrealConnection, input)`): core's ChainableDriverFactory
+// calls it with `ConnectionInput<C, Args>`, which neither single-shape overload above accepts.
+// Last in the list, so direct static/resolver calls keep their precise inference.
+export function surrealConnection<Args = undefined>(
+  input:
+    | SurrealConnectionConfig
+    | ((
+        ctx: ResolveContext,
+        args: Args,
+      ) =>
+        | SurrealConnectionConfig
+        | SurrealConnectionConfig[]
+        | Promise<SurrealConnectionConfig | SurrealConnectionConfig[]>),
+): ConnectionEntry<Client, Args>;
 export function surrealConnection<Args = undefined>(
   input:
     | SurrealConnectionConfig
