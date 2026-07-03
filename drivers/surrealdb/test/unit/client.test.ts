@@ -4,8 +4,10 @@
 // standalone `select(table).run(conn)` path.
 
 import { describe, expect, test } from "bun:test";
+import { defineConfig } from "@schemic/core/config";
 import { Surreal } from "surrealdb";
 import { connect } from "../../src/client";
+import { surrealConnection } from "../../src/connection";
 import { defineTable, s } from "../../src/index";
 import { select } from "../../src/query";
 
@@ -87,5 +89,64 @@ describe.skipIf(!URL)("orm client (P1 reads)", () => {
   test("managed connect() reaches the resolver (throws on a missing connection)", async () => {
     // No project config in cwd -> resolveConnection throws clearly, proving the managed path is wired.
     await expect(connect("definitely_not_a_connection")).rejects.toThrow();
+  });
+
+  test("db.query is a raw escape hatch; .as(schema) opts into decode", async () => {
+    const c = await conn("orm_rawq");
+    const db = connect(c);
+
+    const raw = await db.query("SELECT name, age FROM orm_user ORDER BY name");
+    expect(raw).toHaveLength(2);
+    expect((raw[0] as { name: string }).name).toBe("ada");
+
+    // .as(table) -> full decode through the table codec:
+    const typed = await db
+      .query("SELECT * FROM orm_user ORDER BY name")
+      .as(User);
+    expect(typed.map((r) => r.name)).toEqual(["ada", "bob"]);
+
+    // .as(zod schema) -> parse each row (User.object.pick(...)):
+    const picked = await db
+      .query("SELECT name FROM orm_user ORDER BY name")
+      .as(User.object.pick({ name: true }));
+    expect(picked.map((r) => r.name)).toEqual(["ada", "bob"]);
+
+    await c.close();
+  });
+});
+
+describe.skipIf(!URL)("config-as-factory (surrealConnection)", () => {
+  test("surrealConnection embeds a lazy client-opener + optional args schema", () => {
+    const argsSchema = s.object({ tenant: s.string() });
+    const entry = surrealConnection(
+      { schema: "./x", url: "ws://x/rpc", namespace: "n", database: "d" },
+      { args: argsSchema },
+    );
+    expect(entry.driver).toBe("surrealdb");
+    expect(typeof entry.client).toBe("function"); // powers config.connect(name)
+    expect(entry.args).toBe(argsSchema);
+  });
+
+  test("defineConfig(...).connect(name) opens a typed MANAGED client via the factory", async () => {
+    const schemic = defineConfig({
+      connections: {
+        default: surrealConnection({
+          schema: "./_unused_for_connect",
+          url: URL as string,
+          namespace: "orm_factory",
+          database: "orm_factory",
+          username: "root",
+          password: "root",
+          authLevel: "root",
+        }),
+      },
+    });
+    const db = await schemic.connect("default"); // MANAGED — the factory's client-opener runs
+    await db.query(
+      "REMOVE TABLE IF EXISTS orm_user; CREATE orm_user:1 SET name='z', age=1;",
+    );
+    const rows = await db.select(User);
+    expect(rows).toHaveLength(1);
+    await db.close(); // managed -> closes the connection it opened
   });
 });

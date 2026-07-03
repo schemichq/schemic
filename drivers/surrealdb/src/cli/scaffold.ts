@@ -8,7 +8,11 @@ import { surrealConnection } from "@schemic/surrealdb/connection";
 // Connections-only config: each named connection comes from a driver's \`<driver>Connection(...)\`
 // factory, so there's no \`driver: "…"\` string to keep in sync. Values are explicit — read env here
 // yourself (no implicit SURREAL_* magic). Add more named connections for multi-tenant / multi-DB setups.
-export default defineConfig({
+//
+// Exported as \`schemic\` (a factory): this config also IS your app's DB entrypoint —
+// \`import { schemic } from "./schemic.config"\` then \`await using db = await schemic.connect()\`
+// (typed per connection). The CLI reads the same config.
+export const schemic = defineConfig({
   connections: {
     default: surrealConnection({
       schema: "./database/schema",
@@ -24,6 +28,7 @@ export default defineConfig({
     }),
   },
 });
+export default schemic;
 `;
 
 const USER_TABLE = `import { defineTable, s, surql } from "@schemic/surrealdb";

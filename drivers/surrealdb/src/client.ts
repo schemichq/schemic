@@ -6,15 +6,69 @@
 import {
   asyncDisposable,
   type OrmClientBase,
+  type ResolvedConfig,
   resolveConnection,
 } from "@schemic/core";
-import { Surreal, type SurrealSession } from "surrealdb";
+import { type BoundQuery, Surreal, type SurrealSession } from "surrealdb";
 import { surrealDriver } from "./driver";
 import type { App, TableDef } from "./pure";
-import { type Select, select } from "./query";
+import { type Queryable, type Select, select } from "./query";
 
 // biome-ignore lint/suspicious/noExplicitAny: TableDef's Shape varies per call site.
 type AnyTable = TableDef<string, any>;
+
+/** Something a raw row can be decoded through in {@link RawQuery.as}: a table (via its `decode`) or any
+ *  Standard-Schema / Zod schema (via `parse`) — e.g. `User`, `User.object`, `User.object.pick({…})`. */
+interface Decoder<T> {
+  decode?(row: unknown): T;
+  parse?(row: unknown): T;
+}
+
+/**
+ * A raw SurrealQL query bound to a connection — the escape hatch for anything the typed builders don't
+ * cover. Awaiting it yields the first statement's **raw** rows (no decode); `.as(schema)` opts into
+ * decoding each row through a table or any Standard-Schema. Replaces reaching into `db.conn`.
+ */
+export class RawQuery<Row = unknown> implements PromiseLike<Row[]> {
+  constructor(
+    private readonly conn: Queryable,
+    private readonly sql: string | BoundQuery,
+    private readonly params?: Record<string, unknown>,
+  ) {}
+
+  private async rows(): Promise<unknown[]> {
+    const out = (
+      typeof this.sql === "string"
+        ? await this.conn.query(this.sql, this.params)
+        : await this.conn.query(this.sql)
+    ) as unknown[];
+    return (out[0] ?? []) as unknown[]; // the first statement's rows
+  }
+
+  /** Await -> the first statement's raw rows (undecoded). */
+  then<R1 = Row[], R2 = never>(
+    onfulfilled?: ((value: Row[]) => R1 | PromiseLike<R1>) | null,
+    onrejected?: ((reason: unknown) => R2 | PromiseLike<R2>) | null,
+  ): Promise<R1 | R2> {
+    return this.rows()
+      .then((r) => r as Row[])
+      .then(onfulfilled, onrejected);
+  }
+
+  /** Decode each row through a table (`User`) or any Standard-Schema/Zod schema (`User.object`, a
+   *  `.pick(...)`, a composed schema). */
+  as<TD extends AnyTable>(table: TD): Promise<App<TD>[]>;
+  as<T>(schema: Decoder<T>): Promise<T[]>;
+  as<T>(schema: Decoder<T>): Promise<T[]> {
+    const decode = (row: unknown): T =>
+      typeof schema.decode === "function"
+        ? schema.decode(row)
+        : typeof schema.parse === "function"
+          ? schema.parse(row)
+          : (row as T);
+    return this.rows().then((r) => r.map(decode));
+  }
+}
 
 /** Managed-connection options for {@link connect} (a subset of core's `resolveConnection`). */
 export interface ConnectOptions {
@@ -50,6 +104,11 @@ export class Client implements OrmClientBase {
     return select(table, this.conn);
   }
 
+  /** Raw SurrealQL escape hatch: `await db.query(surql\`…\`)` -> raw rows; `.as(User)` to decode. */
+  query(sql: string | BoundQuery, params?: Record<string, unknown>): RawQuery {
+    return new RawQuery(this.conn, sql, params);
+  }
+
   /** Fork a scoped, disposable {@link Session} (its own auth/session context) with the same bound
    *  reads — `await using s = await db.forkSession()` releases the fork on exit. */
   async forkSession(): Promise<Session> {
@@ -80,6 +139,11 @@ export class Session implements OrmClientBase {
     return select(table, this.session);
   }
 
+  /** Raw SurrealQL escape hatch, scoped to this session. */
+  query(sql: string | BoundQuery, params?: Record<string, unknown>): RawQuery {
+    return new RawQuery(this.session, sql, params);
+  }
+
   /** Close (dispose) the forked session — leaves the parent connection open. */
   async close(): Promise<void> {
     await this.session.closeSession();
@@ -104,7 +168,18 @@ export function connect(
   // MANAGED: resolve the named connection from the config, then open it (we own + close it).
   return (async () => {
     const config = await resolveConnection({ name: nameOrClient, ...opts });
-    const conn = await surrealDriver.connect(config);
-    return new Client(conn, true);
+    return connectFromConfig(config);
   })();
+}
+
+/**
+ * Open a MANAGED client from an already-{@link ResolvedConfig | resolved} config (no re-resolution) —
+ * the opener the `surrealConnection` factory embeds so `defineConfig(...).connect(name)` can hand back a
+ * typed, owned `Client`. Lazy-imported by the connection factory to keep the engine out of config-authoring.
+ */
+export async function connectFromConfig(
+  config: ResolvedConfig,
+): Promise<Client> {
+  const conn = await surrealDriver.connect(config);
+  return new Client(conn, true);
 }
