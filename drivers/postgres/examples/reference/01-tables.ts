@@ -10,7 +10,7 @@ export const group: ExampleGroup = {
       note: 'no PK authored -> the driver adds `"id" text PRIMARY KEY` (mirrors Surreal\'s record id)',
       code: `defineTable("user", { name: s.text() })`,
       ddl: `CREATE TABLE "user" (
-  "id" text PRIMARY KEY,
+  "id" text PRIMARY KEY DEFAULT gen_random_uuid()::text,
   "name" text NOT NULL
 );`,
     }),
@@ -28,7 +28,7 @@ export const group: ExampleGroup = {
       note: "emit-faithful; excluded from change-detection (PG rewrites expressions on read)",
       code: `defineTable("account", { balance: s.numeric(12, 2) }).check("balance >= 0")`,
       ddl: `CREATE TABLE "account" (
-  "id" text PRIMARY KEY,
+  "id" text PRIMARY KEY DEFAULT gen_random_uuid()::text,
   "balance" numeric(12, 2) NOT NULL,
   CHECK (balance >= 0)
 );`,

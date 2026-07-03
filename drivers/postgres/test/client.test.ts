@@ -275,20 +275,22 @@ describe("postgres ORM client (P2 writes)", () => {
         conn,
         emitKinds(registry, postgresDriver.explode([note], [])),
       );
-      // seed with an explicit id (the implicit `text` PK has no generator — externally supplied)
-      await conn.query(
-        `INSERT INTO "note" ("id","title","body") VALUES ('n1','T','B');`,
-      );
       const db = connect(conn);
+      // INSERT via the ORM WITHOUT an id — the DB-side default (gen_random_uuid) fills it, and the
+      // created row CARRIES the generated id (the full create -> update chain works end to end).
+      const created = await db.create(note).content({ title: "T", body: "B" });
+      expect(typeof created.id).toBe("string");
+      expect(created.id.length).toBeGreaterThan(0);
+      const id = created.id;
       // select carries the id (fetched even though it's not a declared field)
       const [row] = await db.select(note);
-      expect(row).toEqual({ id: "n1", title: "T", body: "B" });
+      expect(row).toEqual({ id, title: "T", body: "B" });
       // the carried id is addressable -> update by it, and the returned row carries it too
-      const updated = await db.update(note, "n1").merge({ title: "T2" });
-      expect(updated).toEqual({ id: "n1", title: "T2", body: "B" });
+      const updated = await db.update(note, id).merge({ title: "T2" });
+      expect(updated).toEqual({ id, title: "T2", body: "B" });
       // delete returns the removed row, id and all
-      const deleted = await db.delete(note, "n1");
-      expect(deleted).toEqual({ id: "n1", title: "T2", body: "B" });
+      const deleted = await db.delete(note, id);
+      expect(deleted).toEqual({ id, title: "T2", body: "B" });
       expect((await db.select(note)).length).toBe(0);
     } finally {
       await conn.close();

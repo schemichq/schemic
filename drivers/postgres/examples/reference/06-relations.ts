@@ -23,12 +23,12 @@ export const group: ExampleGroup = {
   return [customer, order];
 })()`,
       ddl: `CREATE TABLE "customer" (
-  "id" text PRIMARY KEY,
+  "id" text PRIMARY KEY DEFAULT gen_random_uuid()::text,
   "email" text NOT NULL CHECK (email ~* '^[^@]+@[^@]+$'),
   "name" text NOT NULL
 );
 CREATE TABLE "order" (
-  "id" text PRIMARY KEY,
+  "id" text PRIMARY KEY DEFAULT gen_random_uuid()::text,
   "createdAt" timestamp with time zone NOT NULL DEFAULT now(),
   "customer" text NOT NULL,
   "quantity" integer NOT NULL CHECK (quantity > 0),

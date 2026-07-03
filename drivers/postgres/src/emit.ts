@@ -223,16 +223,31 @@ export function fieldColumnDdl(f: PortableField): string {
   return s;
 }
 
+/** The SQL default that auto-generates an implicit `id` (builtin — no extension). */
+export const IMPLICIT_ID_DEFAULT = "gen_random_uuid()::text";
+
 /**
  * The `CREATE TABLE (...)` statement body for a table — the implicit `id` PK (or a custom/composite
  * PRIMARY KEY), every column with its clauses, and table-level CHECKs. The single source for table
  * creation DDL, used by the `table` kind's `emit`/`canonical`.
+ *
+ * The implicit `id` gets a DB-side `DEFAULT gen_random_uuid()::text` so an implicit-id table is
+ * INSERTABLE (the DB fills the id — like any `$default`), and bare-SQL inserts benefit too. Pass
+ * `forCanonical` to OMIT that default: DEFAULT is drift-excluded (pg rewrites it + it's not the
+ * change-key), so the canonical stays byte-identical to pre-default snapshots — no phantom diff.
  */
-export function createTableDdl(t: PgCreateInput): string {
+export function createTableDdl(
+  t: PgCreateInput,
+  opts?: { forCanonical?: boolean },
+): string {
   const fields = pgEmitFields(t);
   const custom = !!(t.primaryKey && t.primaryKey.length > 0);
   const cols: string[] = [];
-  if (!custom) cols.push(`${escId("id")} text PRIMARY KEY`); // implicit id (mirrors Surreal).
+  if (!custom)
+    cols.push(
+      // implicit id (mirrors Surreal) — DB-side auto-gen default, dropped from the canonical form.
+      `${escId("id")} text PRIMARY KEY${opts?.forCanonical ? "" : ` DEFAULT ${IMPLICIT_ID_DEFAULT}`}`,
+    );
   for (const f of fields) cols.push(fieldColumnDdl(f));
   if (custom) cols.push(`PRIMARY KEY (${t.primaryKey?.map(escId).join(", ")})`);
   for (const c of t.checks ?? []) cols.push(`CHECK (${c})`);

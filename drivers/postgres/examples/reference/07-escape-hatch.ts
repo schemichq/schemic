@@ -16,7 +16,7 @@ export const group: ExampleGroup = {
       title: "factory: s.$postgres(pgType, codec) (from scratch)",
       code: `defineTable("blob", { raw: s.$postgres("text", z.string()) })`,
       ddl: `CREATE TABLE "blob" (
-  "id" text PRIMARY KEY,
+  "id" text PRIMARY KEY DEFAULT gen_random_uuid()::text,
   "raw" text NOT NULL
 );`,
     }),
@@ -31,7 +31,7 @@ export const group: ExampleGroup = {
   }),
 })`,
       ddl: `CREATE TABLE "tx" (
-  "id" text PRIMARY KEY,
+  "id" text PRIMARY KEY DEFAULT gen_random_uuid()::text,
   "amount" varchar(32) NOT NULL
 );`,
     }),

@@ -96,7 +96,7 @@ describe("emitKinds", () => {
       ]),
     ]);
     expect(out).toEqual([
-      'CREATE TABLE "user" (\n  "id" text PRIMARY KEY,\n  "active" boolean NOT NULL,\n  "age" integer,\n  "name" text NOT NULL\n);',
+      'CREATE TABLE "user" (\n  "id" text PRIMARY KEY DEFAULT gen_random_uuid()::text,\n  "active" boolean NOT NULL,\n  "age" integer,\n  "name" text NOT NULL\n);',
     ]);
   });
 
@@ -107,7 +107,7 @@ describe("emitKinds", () => {
       }),
     ]);
     expect(out).toEqual([
-      'CREATE TABLE "user" (\n  "id" text PRIMARY KEY,\n  "email" text NOT NULL\n);',
+      'CREATE TABLE "user" (\n  "id" text PRIMARY KEY DEFAULT gen_random_uuid()::text,\n  "email" text NOT NULL\n);',
       'CREATE UNIQUE INDEX "user_email_key" ON "user" ("email");',
     ]);
   });
@@ -249,6 +249,30 @@ describe("composite / non-id FK round-trip", () => {
       await conn.close();
     }
   });
+
+  test("implicit-id table: DB-default id is INSERTABLE + round-trips with NO phantom diff", async () => {
+    const tables: PgTable[] = [tbl("iid_note", [f("title", scalar("string"))])]; // no PK -> implicit id
+    const objs = splitTables(tables);
+    const conn = (await driver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
+    try {
+      await driver.apply(conn, emitKinds(registry, objs));
+      // the DB-side default is dropped from the canonical form, so introspect (which skips the implicit
+      // id) vs authored = empty: a pre-default snapshot must NOT phantom-diff.
+      const live = await driver.introspectAll(conn);
+      const { up, down } = buildKindDiff(registry, live, objs);
+      expect({ up, down }).toEqual({ up: [], down: [] });
+      // insertable without supplying id — the DB fills it (gen_random_uuid()::text)
+      const { rows } = await conn.query<{ id: string }>(
+        `INSERT INTO "iid_note" ("title") VALUES ('x') RETURNING "id";`,
+      );
+      expect(typeof rows[0].id).toBe("string");
+      expect(rows[0].id.length).toBeGreaterThan(0);
+    } finally {
+      await conn.close();
+    }
+  });
 });
 
 // --- diff --------------------------------------------------------------------------------------
@@ -288,7 +312,7 @@ describe("buildKindDiff up/down", () => {
     const next = [...base, tbl("tag", [f("label", scalar("string"))])];
     expect(ud(diffK(base, next))).toEqual({
       up: [
-        'CREATE TABLE "tag" (\n  "id" text PRIMARY KEY,\n  "label" text NOT NULL\n);',
+        'CREATE TABLE "tag" (\n  "id" text PRIMARY KEY DEFAULT gen_random_uuid()::text,\n  "label" text NOT NULL\n);',
       ],
       down: ['DROP TABLE IF EXISTS "tag" CASCADE;'],
     });
@@ -299,7 +323,7 @@ describe("buildKindDiff up/down", () => {
     expect(ud(diffK(prev, base))).toEqual({
       up: ['DROP TABLE IF EXISTS "tag" CASCADE;'],
       down: [
-        'CREATE TABLE "tag" (\n  "id" text PRIMARY KEY,\n  "label" text NOT NULL\n);',
+        'CREATE TABLE "tag" (\n  "id" text PRIMARY KEY DEFAULT gen_random_uuid()::text,\n  "label" text NOT NULL\n);',
       ],
     });
   });

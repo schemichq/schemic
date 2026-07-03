@@ -49,6 +49,12 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 - **surrealdb:** dropped the deprecated `$`-less field aliases `.unique()`/`.index()` — use
   `.$unique()`/`.$index()` (aligns with postgres, already `$`-only; table-level composite
   `.index(name, fields)` unchanged).
+- **postgres:** the implicit `id` (a table with no declared PK) now emits with a DB-side
+  `DEFAULT gen_random_uuid()::text`, so implicit-id tables are INSERTABLE (the DB fills the id; the
+  created row carries the generated uuid — surreal-parity). The emitted `CREATE TABLE` for implicit-id
+  tables changed; the default is drift-excluded (dropped from the canonical form) so existing schemas do
+  NOT phantom-diff and are NOT auto-migrated (add it manually or recreate to gain auto-gen). Declare an
+  explicit `id` column for a client-controlled id or a different generator.
 
 ## [0.1.0-alpha.24] - 2026-07-01
 

@@ -232,11 +232,15 @@ const tableEngine: KindEngine<PgTablePortable, PgTablePortable> = {
   // applied schema vs introspect (PG rewrites exprs on read; comments aren't introspected). This is
   // the fixed-slot driver's emit/equal asymmetry, restored at the kind seam.
   canonical: (t) =>
-    createTableDdl({
-      name: t.name,
-      fields: t.fields.map((f) => canonField(f, t.name)),
-      ...(t.primaryKey ? { primaryKey: t.primaryKey } : {}),
-    }),
+    createTableDdl(
+      {
+        name: t.name,
+        fields: t.fields.map((f) => canonField(f, t.name)),
+        ...(t.primaryKey ? { primaryKey: t.primaryKey } : {}),
+      },
+      // drop the implicit id's DB default (like all defaults) so it never counts as drift -> no phantom
+      { forCanonical: true },
+    ),
 
   // Per-FIELD display items (Manuel's decision: field-level changes grouped under their table). Each
   // carries `table` so the CLI groups them hierarchically. DISPLAY ONLY — never affects up/down DDL.

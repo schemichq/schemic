@@ -16,7 +16,7 @@ export const group: ExampleGroup = {
   token: s.uuid(),
 })`,
       ddl: `CREATE TABLE "t" (
-  "id" text PRIMARY KEY,
+  "id" text PRIMARY KEY DEFAULT gen_random_uuid()::text,
   "active" boolean NOT NULL,
   "count" integer NOT NULL,
   "created" timestamp with time zone NOT NULL,
@@ -36,7 +36,7 @@ export const group: ExampleGroup = {
   approx: s.real(),
 })`,
       ddl: `CREATE TABLE "t" (
-  "id" text PRIMARY KEY,
+  "id" text PRIMARY KEY DEFAULT gen_random_uuid()::text,
   "approx" real NOT NULL,
   "big" bigint NOT NULL,
   "label" varchar(255) NOT NULL,
@@ -48,7 +48,7 @@ export const group: ExampleGroup = {
       title: "array column",
       code: `defineTable("t", { tags: s.text().array() })`,
       ddl: `CREATE TABLE "t" (
-  "id" text PRIMARY KEY,
+  "id" text PRIMARY KEY DEFAULT gen_random_uuid()::text,
   "tags" text[] NOT NULL
 );`,
     }),
@@ -59,7 +59,7 @@ export const group: ExampleGroup = {
   profile: s.object({ bio: s.text(), age: s.integer() }),
 })`,
       ddl: `CREATE TABLE "t" (
-  "id" text PRIMARY KEY,
+  "id" text PRIMARY KEY DEFAULT gen_random_uuid()::text,
   "meta" jsonb NOT NULL,
   "profile" jsonb NOT NULL
 );`,

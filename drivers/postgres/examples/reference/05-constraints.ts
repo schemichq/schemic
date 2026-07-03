@@ -13,11 +13,11 @@ export const group: ExampleGroup = {
   defineTable("post", { author: s.references("usr") }),
 ]`,
       ddl: `CREATE TABLE "post" (
-  "id" text PRIMARY KEY,
+  "id" text PRIMARY KEY DEFAULT gen_random_uuid()::text,
   "author" text NOT NULL
 );
 CREATE TABLE "usr" (
-  "id" text PRIMARY KEY,
+  "id" text PRIMARY KEY DEFAULT gen_random_uuid()::text,
   "name" text NOT NULL
 );
 ALTER TABLE "post" ADD CONSTRAINT "post_author_fkey" FOREIGN KEY ("author") REFERENCES "usr" ("id");`,
@@ -32,11 +32,11 @@ ALTER TABLE "post" ADD CONSTRAINT "post_author_fkey" FOREIGN KEY ("author") REFE
   }),
 ]`,
       ddl: `CREATE TABLE "post" (
-  "id" text PRIMARY KEY,
+  "id" text PRIMARY KEY DEFAULT gen_random_uuid()::text,
   "author" text NOT NULL
 );
 CREATE TABLE "usr" (
-  "id" text PRIMARY KEY,
+  "id" text PRIMARY KEY DEFAULT gen_random_uuid()::text,
   "name" text NOT NULL
 );
 ALTER TABLE "post" ADD CONSTRAINT "post_author_fkey" FOREIGN KEY ("author") REFERENCES "usr" ("id") ON DELETE CASCADE ON UPDATE RESTRICT;`,
@@ -49,11 +49,11 @@ ALTER TABLE "post" ADD CONSTRAINT "post_author_fkey" FOREIGN KEY ("author") REFE
   return [usr, post];
 })()`,
       ddl: `CREATE TABLE "post" (
-  "id" text PRIMARY KEY,
+  "id" text PRIMARY KEY DEFAULT gen_random_uuid()::text,
   "author" text NOT NULL
 );
 CREATE TABLE "usr" (
-  "id" text PRIMARY KEY,
+  "id" text PRIMARY KEY DEFAULT gen_random_uuid()::text,
   "name" text NOT NULL
 );
 ALTER TABLE "post" ADD CONSTRAINT "post_author_fkey" FOREIGN KEY ("author") REFERENCES "usr" ("id") ON DELETE CASCADE;`,

@@ -10,7 +10,7 @@ export const group: ExampleGroup = {
       note: "the $unique convention names it <table>_<col>_key",
       code: `defineTable("user", { email: s.text().$unique() })`,
       ddl: `CREATE TABLE "user" (
-  "id" text PRIMARY KEY,
+  "id" text PRIMARY KEY DEFAULT gen_random_uuid()::text,
   "email" text NOT NULL
 );
 CREATE UNIQUE INDEX "user_email_key" ON "user" ("email");`,
@@ -20,7 +20,7 @@ CREATE UNIQUE INDEX "user_email_key" ON "user" ("email");`,
       note: "emit-only: non-unique indexes are not introspected back yet, so they do not round-trip (see COVERAGE)",
       code: `defineTable("post", { title: s.text() }).index(["title"])`,
       ddl: `CREATE TABLE "post" (
-  "id" text PRIMARY KEY,
+  "id" text PRIMARY KEY DEFAULT gen_random_uuid()::text,
   "title" text NOT NULL
 );
 CREATE INDEX "post_title_idx" ON "post" ("title");`,
@@ -29,7 +29,7 @@ CREATE INDEX "post_title_idx" ON "post" ("title");`,
       title: "composite UNIQUE index",
       code: `defineTable("membership", { org: s.text(), user: s.text() }).index(["org", "user"], { unique: true })`,
       ddl: `CREATE TABLE "membership" (
-  "id" text PRIMARY KEY,
+  "id" text PRIMARY KEY DEFAULT gen_random_uuid()::text,
   "org" text NOT NULL,
   "user" text NOT NULL
 );
