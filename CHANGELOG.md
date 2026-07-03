@@ -35,6 +35,13 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
   `import { schemic }` -> `schemic.connect()` auto-import, no file rename); a bare `schemic.ts` is
   also discovered (shape-guarded).
 
+### Fixed
+- **core:** the DEFAULT migrations dir now follows the documented contract — RELATIVE TO THE SCHEMA
+  (its sibling `migrations` dir) instead of a root-fixed `./database/migrations`. A nested schema
+  (`schema: "./src/database/schema"`) previously split state: `init` scaffolded the snapshot
+  schema-relative while `gen` wrote migrations + a second snapshot at the root default. Standard
+  scaffold layouts are unchanged; an explicit `migrations` override still resolves from the root.
+
 ### Changed (BREAKING — alpha)
 - **surrealdb:** dropped the deprecated `$`-less field aliases `.unique()`/`.index()` — use
   `.$unique()`/`.$index()` (aligns with postgres, already `$`-only; table-level composite

@@ -14,7 +14,6 @@ const CONFIG_NAMES = [
   "schemic.ts",
 ];
 
-const DEFAULT_MIGRATIONS = "./database/migrations";
 
 /**
  * Is the schema path a single file (vs a directory of schema modules)? Determined by `stat` when
@@ -148,7 +147,14 @@ export function resolveConnectionConfig(
 ): ResolvedConfig {
   const { schema, migrations, key, ...params } = conn;
   const schemaPath = resolve(root, schema);
-  const migrationsDir = resolve(root, migrations ?? DEFAULT_MIGRATIONS);
+  // Default migrations dir is RELATIVE TO THE SCHEMA (the documented contract): the sibling
+  // `migrations` dir next to the schema dir (or next to a single-file schema). For the standard
+  // scaffold (`schema: "./database/schema"`) that is `./database/migrations`, unchanged; a nested
+  // schema (`./src/database/schema`) correctly gets `./src/database/migrations` instead of a
+  // root-fixed default that split state across two locations.
+  const migrationsDir = migrations
+    ? resolve(root, migrations)
+    : resolve(schemaPath, "..", "migrations");
   return {
     connection: key ? `${connection}:${key}` : connection,
     driver,
