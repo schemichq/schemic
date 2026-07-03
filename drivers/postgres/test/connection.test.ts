@@ -58,14 +58,14 @@ describe("postgresConnection factory", () => {
     expect(resolved(await entry.resolve(ctx))).toEqual([cfg]);
   });
 
-  test("single-config resolver -> resolve yields one element", async () => {
-    const entry = postgresConnection((c) => ({
+  test("single-config resolver -> resolve yields one element (args = typed 2nd param)", async () => {
+    const entry = postgresConnection((_ctx, args: { dir?: string }) => ({
       schema: "./schema",
-      url: `file:${c.args.dir ?? "/tmp/db"}`,
+      url: `file:${args.dir ?? "/tmp/db"}`,
     }));
-    expect(
-      resolved(await entry.resolve({ ...ctx, args: { dir: "/data" } })),
-    ).toEqual([{ schema: "./schema", url: "file:/data" }]);
+    expect(resolved(await entry.resolve(ctx, { dir: "/data" }))).toEqual([
+      { schema: "./schema", url: "file:/data" },
+    ]);
   });
 
   test("collection resolver -> resolve yields the keyed array as-is", async () => {
@@ -132,18 +132,18 @@ describe("Driver.query (named -> positional, passthrough)", () => {
     }
   });
 
-  test("postgresConnection embeds a client opener (for config.connect) + optional args schema", () => {
+  test("postgresConnection embeds a client opener + a dialect label (for config.connect / reporting)", () => {
     const entry = postgresConnection({ schema: "./db", url: "" });
     expect(entry.driver).toBe("postgres");
     expect(typeof entry.client).toBe("function"); // lazy PgClient opener
-    expect(entry.args).toBeUndefined();
-    const argsSchema = {
-      "~standard": { validate: (v: unknown) => ({ value: v }) },
-    };
-    const withArgs = postgresConnection(() => ({ schema: "./db", url: "" }), {
-      args: argsSchema as never,
-    });
-    expect(withArgs.args).toBe(argsSchema); // forwarded for config.connect(name, { args }) validation
+    expect(typeof entry.label).toBe("function"); // pg display identity (url | pglite(memory))
+    // label reads the resolved params.url; empty/omitted -> the in-memory marker.
+    expect(entry.label?.({ params: { url: "" } } as never)).toBe(
+      "pglite(memory)",
+    );
+    expect(entry.label?.({ params: { url: "file:./data" } } as never)).toBe(
+      "file:./data",
+    );
   });
 
   test("initScaffold keeps schemic.config.ts, now with the named `schemic` export (+ default)", () => {

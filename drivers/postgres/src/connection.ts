@@ -10,7 +10,6 @@ import type {
   ConnectionInput,
   ResolveContext,
   ResolvedConfig,
-  StandardSchemaLike,
 } from "@schemic/core/driver";
 import { connectionEntry } from "@schemic/core/driver";
 // Type-only (never a runtime pull, so /connection stays engine-free); the client opener below LAZY-imports
@@ -106,57 +105,50 @@ export interface PostgresConnectionConfig extends ConnectionConfigBase {
   url?: string;
 }
 
-/**
- * Typed `postgresConnection(...)` factory — the only thing a config's `connections` map accepts for
- * this driver. Wraps {@link connectionEntry} with the Postgres connection shape. Pass a static config,
- * a resolver yielding one config, or a resolver yielding a keyed COLLECTION (each entry needs `key`).
- */
-/** Extract a Standard-Schema's OUTPUT type (Zod/valibot/etc. carry `~standard.types.output`); fall back
- * to the default `Record<string, string>` resolver-args shape when there's no args schema. */
-type ArgsOut<A> = A extends { "~standard": { types?: { output?: infer O } } }
-  ? O extends Record<string, unknown>
-    ? O
-    : Record<string, string>
-  : Record<string, string>;
-/** The resolved per-factory Args (a schema's output, else the string-map default). */
-type Resolved<A> = [A] extends [never] ? Record<string, string> : ArgsOut<A>;
-
 /** The factory-embedded client opener: LAZY-import `./client` + open a MANAGED `PgClient` from the
  * resolved config. Lazy so authoring a config from this engine-free module never pulls the engine. */
 const openPgClient = (config: ResolvedConfig): Promise<PgClient> =>
   import("./client").then((m) => m.clientFromResolved(config));
 
-/** Options for {@link postgresConnection}: a Standard-Schema validating this connection's resolver args. */
-export interface PostgresConnectionOpts<A extends StandardSchemaLike> {
-  /** Validates `config.connect(name, { args })`; the resolver's `ctx.args` is typed as its output. */
-  args?: A;
-}
+/** Postgres DISPLAY identity for a resolved config (bulk reporting / errors / logs) — the target `url`
+ * (`file:<dir>` or `postgres://…`), else `pglite(memory)` for an in-memory connection. */
+const pgLabel = (config: ResolvedConfig): string => {
+  const url = config.params.url;
+  return typeof url === "string" && url.length > 0 ? url : "pglite(memory)";
+};
 
-export function postgresConnection<A extends StandardSchemaLike = never>(
+type MaybePromise<T> = T | Promise<T>;
+
+/**
+ * Typed `postgresConnection(...)` factory — the only thing a config's `connections` map accepts for
+ * this driver. Wraps {@link connectionEntry} with the Postgres connection shape. Pass a static config,
+ * a resolver yielding one config, or a resolver yielding a keyed COLLECTION (each entry needs `key`).
+ *
+ * A PARAMETERIZED connection declares its args as the resolver's SECOND parameter — that type is
+ * inferred as `Args`, so `schemic.connect("<name>", args)` is typed + autocompleted per connection
+ * (no args schema to plumb; annotate the param and you're done).
+ */
+export function postgresConnection(
   config: PostgresConnectionConfig,
-  opts?: PostgresConnectionOpts<A>,
-): ConnectionEntry<PgClient, Resolved<A>>;
-export function postgresConnection<A extends StandardSchemaLike = never>(
+): ConnectionEntry<PgClient, undefined>;
+export function postgresConnection<Args = undefined>(
   resolver: (
-    ctx: ResolveContext & { args: Resolved<A> },
-  ) => PostgresConnectionConfig | Promise<PostgresConnectionConfig>,
-  opts?: PostgresConnectionOpts<A>,
-): ConnectionEntry<PgClient, Resolved<A>>;
-export function postgresConnection<A extends StandardSchemaLike = never>(
+    ctx: ResolveContext,
+    args: Args,
+  ) => MaybePromise<PostgresConnectionConfig>,
+): ConnectionEntry<PgClient, Args>;
+export function postgresConnection<Args = undefined>(
   resolver: (
-    ctx: ResolveContext & { args: Resolved<A> },
-  ) =>
-    | (PostgresConnectionConfig & { key: string })[]
-    | Promise<(PostgresConnectionConfig & { key: string })[]>,
-  opts?: PostgresConnectionOpts<A>,
-): ConnectionEntry<PgClient, Resolved<A>>;
-export function postgresConnection<A extends StandardSchemaLike = never>(
-  input: ConnectionInput<PostgresConnectionConfig, Resolved<A>>,
-  opts?: PostgresConnectionOpts<A>,
-): ConnectionEntry<PgClient, Resolved<A>> {
-  return connectionEntry<PostgresConnectionConfig, PgClient, Resolved<A>>(
+    ctx: ResolveContext,
+    args: Args,
+  ) => MaybePromise<(PostgresConnectionConfig & { key: string })[]>,
+): ConnectionEntry<PgClient, Args>;
+export function postgresConnection<Args = undefined>(
+  input: ConnectionInput<PostgresConnectionConfig, Args>,
+): ConnectionEntry<PgClient, Args> {
+  return connectionEntry<PostgresConnectionConfig, PgClient, Args>(
     "postgres",
     input,
-    { client: openPgClient, args: opts?.args },
+    { client: openPgClient, label: pgLabel },
   );
 }

@@ -161,7 +161,7 @@ round-trip (author `s.*` → lower → emit → introspect → diff = 0) · `[n/
 - [x] `connect(conn)` BYO — wraps a connection you own (sync); `close()` is a **NO-OP** (never close a user's connection)
 - [x] `db.select(table)` → the pre-bound, awaitable builder (`await db.select(u).where(...).return(...)`)
 - [x] `db.query(sql, params?)` — RAW SQL escape hatch (thenable; raw wire rows by default). `.as(table)` decodes each row through the table's row codec; `.as(schema)` through any Standard-Schema (`User.object.pick(...)`, a `z.*`, …). Replaces reaching into `db.conn`
-- [x] typed `config.connect(name)` — `postgresConnection(...)` embeds a lazy `client` opener + optional `args` Standard-Schema, typed as `ConnectionEntry<PgClient, ArgsOut>`, so `defineConfig(...).connect(name)` autocompletes names + infers the `PgClient` per entry
+- [x] typed `config.connect(name, args?)` — `postgresConnection(...)` embeds a lazy `client` opener + a dialect `label` (url | `pglite(memory)`, for bulk reporting), typed as `ConnectionEntry<PgClient, Args>`. Args are the resolver's typed SECOND parameter (connections v2 — no args schema to plumb; annotate the param and `Args` is inferred), so `defineConfig(...).connect(name, args)` autocompletes names + types args + infers the `PgClient` per entry. `client.connect(name, args?)` passes the same args through for a parameterized/bulk selection
 - [x] `AsyncDisposable` — `await using db = await connect()` closes a managed client at block exit; `[Symbol.asyncDispose] === close`
 - [x] dispose rule enforced at construction (private ctor; `managed`/`byo` statics): MANAGED close closes, BYO close is a no-op
 - [n/a] writes (`create/update/delete` split builder) + `db.call` + a scoped `db.session()` — P2 / later

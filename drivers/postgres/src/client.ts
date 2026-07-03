@@ -132,12 +132,14 @@ asyncDisposable(PgClient.prototype);
 
 /** Wrap an existing Postgres connection you own — dispose/close is a NO-OP (BYO). */
 export function connect(conn: PgConn): PgClient;
-/** Open the connection named in `schemic.config.ts` (default connection if omitted) — the client OWNS it. */
-export function connect(name?: string): Promise<PgClient>;
-/** Open a resolved connection with explicit options (config path, keyed-collection key, resolver args). */
+/** Open the connection named in `schemic.config.ts` (default connection if omitted) — the client OWNS it.
+ * For a PARAMETERIZED/bulk connection, pass the resolver's `args` to select exactly one config. */
+export function connect(name?: string, args?: unknown): Promise<PgClient>;
+/** Open a resolved connection with explicit options (config path, cwd, resolver args). */
 export function connect(opts: ResolveConnectionOptions): Promise<PgClient>;
 export function connect(
   arg?: PgConn | string | ResolveConnectionOptions,
+  args?: unknown,
 ): PgClient | Promise<PgClient> {
   // BYO: an already-built connection (duck-typed — has `query` + `close`).
   if (
@@ -150,9 +152,10 @@ export function connect(
   }
   // MANAGED: resolve from config -> driver.connect -> owned client. (The BYO PgConn is handled above,
   // so a remaining object here is ResolveConnectionOptions — the structural check isn't a type guard.)
+  // A `name` string carries its resolver `args` through (parameterized/bulk selection).
   const opts: ResolveConnectionOptions =
     typeof arg === "string"
-      ? { name: arg }
+      ? { name: arg, args }
       : ((arg as ResolveConnectionOptions | undefined) ?? {});
   return resolveConnection(opts).then((config) =>
     postgresDriver.connect(config).then((conn) => PgClient.managed(conn)),
