@@ -37,22 +37,51 @@ Managed `connect()` reuses the **same** resolver + `<driver>Connection` factorie
 so the config is the one place connection info lives. BYO stays a peer, not an afterthought — apps that
 already own a pool keep using it.
 
-### 2.2 The bound client — pre-bound, no `.run(externalDb)`
+**Disposable (`await using`).** The client implements `[Symbol.asyncDispose]` (TC39 explicit resource
+management; TypeScript downlevels the syntax + polyfills the symbol, so it works across Node 18+/Bun), so
+a scoped client auto-closes at block exit:
 ```ts
-const rows   = await db.select(User).where(u => u.age.gt(18)).return(u => ({ name: u.name }));
-const msg    = await db.call(greet, { name: "Ada" });
-const record = await db.create(User, { name: "Ada", email: "ada@x.com" }); // uses User.create schema
-await db.update(User, id, { name: "Ada L." });                            // uses User.update schema
+{
+  await using db = await connect();
+  await db.select(User).limit(10);
+}   // db closed automatically here
+```
+Dispose semantics differ by origin, and this is a **hard rule**: a **managed** client disposes by closing
+the connection *it opened*; a **BYO** client's dispose is a **no-op on the pool** — we never close a
+client the user owns. On top of the neutral disposable client, a driver may expose its own scoped,
+disposable sub-handle — SurrealDB `db.forkSession()` (fork the auth/session context), Postgres
+`db.session()` / a pooled-client checkout — each `await using`-friendly, releasing on dispose:
+```ts
+await using session = await db.forkSession();   // surreal; pg: db.session()
+```
+Neutral contract = a disposable client; the forked/scoped flavor is the driver's own (named per dialect).
+
+### 2.2 The bound client — pre-bound, split write builder (mirrors `select()`)
+Reads reuse the existing builder; **writes use a split builder** (`create(User).content(data)`) rather
+than a flat `create(User, data)` — it matches the `select()` chain, gives RETURN / CONTENT / MERGE / SET
+clauses somewhere to hang, and maps `.content` → the `User.create` schema, `.merge` → `User.update`.
+```ts
+const rows = await db.select(User).where(u => u.age.gt(18)).return(u => ({ name: u.name }));
+const msg  = await db.call(greet, { name: "Ada" });
+
+// writes — split builder, chainable clauses
+await db.create(User).content({ name: "Ada", email: "ada@x.com" });   // validates vs User.create
+await db.update(User, id).merge({ name: "Ada L." });                  // vs User.update (partial)
+await db.update(User, id).content(fullRow);                           // replace (vs User.create)
+await db.delete(User, id).return("before");
 await db.close();
 ```
-`db` owns the connection; the query/write surface hangs off it. The existing `select()`/`.call()` are
-reused verbatim — the client just binds the connection so `.run()` isn't threaded by hand.
+`.content` replaces / full-value (validated by `User.create`); `.merge` deep-merges / partial (by
+`User.update`); `.set(...)` explicit; `.return(...)` picks the returned projection. Surreal's
+CONTENT-vs-MERGE (replace vs recursive merge) lands on `.content`/`.merge` directly; postgres maps the
+same names to INSERT / partial-UPDATE. `db` owns the connection, so no `.run(externalDb)` threading.
 
 ## 3. Contract ownership (mirrors the query toolkit)
 
-- **core** — a neutral `OrmClient` contract in `@schemic/core` (the shape of `connect`, the bound
-  `select`/`call`/`create`/`update`/`close`), plus the managed-connect glue over the resolver engine.
-  This is the same split as `@schemic/core/query` (neutral toolkit) ← `@schemic/<driver>/query` (impl).
+- **core** — a neutral `OrmClient` contract in `@schemic/core`: the shape of `connect`, the bound
+  `select`/`call`, the split write builders (`create(T).content(...)` / `update(T,id).merge(...)` /
+  `delete(T,id)` + `.return(...)`), `close`, and `[Symbol.asyncDispose]`. Plus the managed-connect glue
+  over the resolver engine. Same split as `@schemic/core/query` (neutral toolkit) ← `@schemic/<driver>/query`.
 - **drivers** — each implements its bound client over its native connection type (surreal `Surreal`,
   pg `PgConn`/pool), composing the core contract. Lives at `@schemic/<driver>/query` (or a new
   `@schemic/<driver>/client` subpath — see open Q).
