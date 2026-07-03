@@ -14,25 +14,13 @@ import {
   type ResolveConnectionOptions,
   type ResolvedConfig,
   resolveConnection,
+  type StandardSchemaLike,
 } from "@schemic/core";
 import { type App, PgTableDef } from "./authoring";
 import type { PgConn } from "./connection";
 import { postgresDriver } from "./driver";
 import { type SelectQuery, select } from "./query";
 
-/** A Standard-Schema (a `z.*`, a table's `.object`/`.create`, `User.object.pick(...)`, …). */
-interface StandardSchemaLike {
-  "~standard": {
-    validate(
-      value: unknown,
-    ):
-      | { value: unknown }
-      | { issues: readonly { message: string }[] }
-      | Promise<
-          { value: unknown } | { issues: readonly { message: string }[] }
-        >;
-  };
-}
 /** The output type a Standard-Schema decodes to (Zod/valibot/etc. carry `~standard.types.output`). */
 type StandardOut<S> = S extends {
   "~standard": { types?: { output?: infer O } };

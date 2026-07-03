@@ -10,6 +10,7 @@ import type {
   ConnectionInput,
   ResolveContext,
   ResolvedConfig,
+  StandardSchemaLike,
 } from "@schemic/core/driver";
 import { connectionEntry } from "@schemic/core/driver";
 // Type-only (never a runtime pull, so /connection stays engine-free); the client opener below LAZY-imports
@@ -110,22 +111,6 @@ export interface PostgresConnectionConfig extends ConnectionConfigBase {
  * this driver. Wraps {@link connectionEntry} with the Postgres connection shape. Pass a static config,
  * a resolver yielding one config, or a resolver yielding a keyed COLLECTION (each entry needs `key`).
  */
-// Structural Standard-Schema (core doesn't re-export its `StandardSchemaLike` yet — flagged to core-dev;
-// this matches its shape, and a concrete Zod/valibot schema also carries `~standard.types.output` which
-// `ArgsOut` reads for the typed resolver args).
-interface StandardSchemaLike {
-  "~standard": {
-    validate(
-      value: unknown,
-    ):
-      | { value: unknown }
-      | { issues: readonly { message: string }[] }
-      | Promise<
-          { value: unknown } | { issues: readonly { message: string }[] }
-        >;
-  };
-}
-
 /** Extract a Standard-Schema's OUTPUT type (Zod/valibot/etc. carry `~standard.types.output`); fall back
  * to the default `Record<string, string>` resolver-args shape when there's no args schema. */
 type ArgsOut<A> = A extends { "~standard": { types?: { output?: infer O } } }
