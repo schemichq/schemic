@@ -1389,3 +1389,68 @@ describe("derived create/update input schemas (TableDef.create / .update)", () =
     void _u;
   });
 });
+
+describe("table presets (defineTable.preset + TableDef.use)", () => {
+  // a configurable preset (the gulybyte tenant + timestamps case) — a plain fn. Literal column names
+  // keep the merge typed (a dynamic name needs a `<K extends string>` generic to stay a literal key).
+  const tenant = () =>
+    defineTable.preset({
+      columns: {
+        tenant_id: s.uuid(),
+        createdAt: s.timestamptz().$default(sqlExpr("now()")),
+      },
+      indexes: [{ cols: ["tenant_id"] }],
+    });
+
+  test("defineTable.preset is the typed identity entry point", () => {
+    const p = tenant();
+    expect(Object.keys(p.columns ?? {})).toEqual(["tenant_id", "createdAt"]);
+    expect(p.indexes).toEqual([{ cols: ["tenant_id"] }]);
+  });
+
+  test(".use merges columns (into row/.create) + appends indexes + round-trips", async () => {
+    const t = defineTable("customer", { email: s.text() }).use(tenant());
+    // columns merged into the table type + row
+    expect(Object.keys(t.fields)).toEqual(["email", "tenant_id", "createdAt"]);
+    // createdAt is create-optional (its $default brands "create")
+    expect(Object.keys(t.create.shape)).toContain("createdAt");
+    const objs = postgresDriver.explode([t], []);
+    const out = emitKinds(registry, objs).join("\n");
+    expect(out).toContain('"tenant_id" uuid');
+    expect(out).toContain('"createdAt" timestamp with time zone');
+    expect(out).toContain('("tenant_id")'); // the appended index
+    const conn = (await postgresDriver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
+    try {
+      await postgresDriver.apply(conn, emitKinds(registry, objs));
+      const { up, down } = buildKindDiff(
+        registry,
+        await postgresDriver.introspectAll(conn),
+        objs,
+      );
+      expect({ up, down }).toEqual({ up: [], down: [] });
+    } finally {
+      await conn.close();
+    }
+  });
+
+  test(".use accepts multiple presets (columns from each merge)", () => {
+    const audit = defineTable.preset({ columns: { updatedBy: s.text() } });
+    const t = defineTable("doc", { title: s.text() }).use(tenant(), audit);
+    expect(Object.keys(t.fields)).toEqual([
+      "title",
+      "tenant_id",
+      "createdAt",
+      "updatedBy",
+    ]);
+  });
+
+  test("a column-name conflict throws at runtime (and is a compile error)", () => {
+    const dupe = defineTable.preset({ columns: { email: s.text() } });
+    expect(() =>
+      // @ts-expect-error — `email` conflicts with the table's column (compile error)
+      defineTable("c", { email: s.text() }).use(dupe),
+    ).toThrow(/preset column "email" conflicts/);
+  });
+});

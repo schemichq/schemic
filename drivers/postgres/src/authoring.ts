@@ -913,6 +913,60 @@ export interface PgTableConfig {
 type AnyPgField = PgField<any, any>;
 
 /**
+ * A reusable, configurable TABLE PRESET — the cross-driver primitive (same four-key shape as
+ * `@schemic/surrealdb`). Build one with {@link defineTable.preset}, usually as a plain configurable fn:
+ * `const timestamps = () => defineTable.preset({ columns: { createdAt: s.timestamptz().$default(sqlExpr("now()")), … } })`.
+ * Apply via {@link PgTableDef.use}: `columns` are TYPED-merged into the table (they appear in the row /
+ * `.create` / `.update`; a column-name conflict with the table or another preset is a COMPILE error);
+ * `indexes` append.
+ *
+ * The four key NAMES are shared cross-driver; the CONTENTS are dialect-native. On pg: `columns` +
+ * `indexes` here; `permissions` -> RLS policies and `events` -> triggers are a follow-up (they're
+ * separate-object kinds, so they need explode wiring — see COVERAGE). NOTE (pg security): a preset's
+ * `permissions` will map to pg RLS POLICIES combined by pg (PERMISSIVE = OR, so a permissive policy CAN
+ * WIDEN access — unlike surreal presets, which only narrow); use the restrictive flag to truly scope.
+ */
+export interface PgPreset<
+  C extends Record<string, AnyPgField> = Record<string, never>,
+> {
+  /** Columns merged into the table (typed; a name conflict is a compile error). */
+  columns?: C;
+  /** Indexes appended to the table's (cols may reference the preset's or the table's columns). */
+  indexes?: PgIndexConfig[];
+}
+
+/** A preset's columns type. */
+type ColsOf<P> = P extends PgPreset<infer C> ? C : Record<string, never>;
+/** Merge preset columns into `F` (reuses `.extend`'s `Omit<F,keyof C> & C`); a NAME conflict yields an
+ * ERROR object type so `.use` won't compile (no silent clobber). */
+type MergeCols<F, C> = [keyof F & keyof C] extends [never]
+  ? Omit<F, keyof C> & C
+  : {
+      [K in `preset column conflict: "${string & (keyof F & keyof C)}"`]: never;
+    };
+/** Fold `.use(...presets)`: merge each preset's columns into `F` left-to-right (conflicts error). */
+type UsePresets<
+  F,
+  P extends readonly PgPreset<Record<string, AnyPgField>>[],
+> = P extends readonly [
+  infer H extends PgPreset<Record<string, AnyPgField>>,
+  ...infer R extends readonly PgPreset<Record<string, AnyPgField>>[],
+]
+  ? UsePresets<MergeCols<F, ColsOf<H>>, R>
+  : F;
+/** Per-preset conflict guard for `.use(...)`'s ARGUMENT: a preset whose columns collide with the table's
+ * (`F`) maps to an error-message string, so `...presets: P & NoPresetConflict<F, P>` rejects it AT THE
+ * CALL (an object isn't assignable to a string) — a compile error exactly where the conflict is written. */
+type NoPresetConflict<
+  F,
+  P extends readonly PgPreset<Record<string, AnyPgField>>[],
+> = {
+  [I in keyof P]: [keyof F & keyof ColsOf<P[I]>] extends [never]
+    ? P[I]
+    : `preset column conflict: "${string & (keyof F & keyof ColsOf<P[I]>)}" already exists on this table`;
+};
+
+/**
  * A Postgres table definition — the `Authored` object the driver's `lower` reads. Structurally a
  * `{ name }` (the neutral `Authored` bound); also carries its `fields` (a `{ col: PgField }` map) and
  * table-level config. Chainable: `.primaryKey(...)`, `.check(expr)`, `.index([...])`.
@@ -1028,6 +1082,34 @@ export class PgTableDef<
   }
 
   /**
+   * Apply reusable {@link PgPreset}s (from `defineTable.preset`): their `columns` are typed-merged into
+   * the table (appearing in the row / `.create` / `.update`; a column-name conflict — with the table or
+   * another preset — is a COMPILE error) and their `indexes` append. Reuses `.extend`'s cast-free merge.
+   * `const tenant = () => defineTable.preset({ columns: { tenant_id: s.uuid() } }); defineTable("x", {...}).use(tenant())`.
+   */
+  use<P extends readonly PgPreset<Record<string, AnyPgField>>[]>(
+    ...presets: P & NoPresetConflict<F, P>
+  ): PgTableDef<Name, UsePresets<F, P>> {
+    let table: PgTableDef<Name, Record<string, AnyPgField>> = this;
+    for (const p of presets) {
+      if (p.columns) {
+        for (const k of Object.keys(p.columns))
+          if (k in table.fields)
+            throw new Error(
+              `postgres: preset column "${k}" conflicts with an existing column on table "${this.name}".`,
+            );
+        table = table.extend(p.columns); // reuse .extend's merge (preserves config)
+      }
+      if (p.indexes?.length)
+        table = new PgTableDef(table.name, table.fields, {
+          ...table.config,
+          indexes: [...(table.config.indexes ?? []), ...p.indexes],
+        });
+    }
+    return table as unknown as PgTableDef<Name, UsePresets<F, P>>;
+  }
+
+  /**
    * The CREATE-input schema (Standard-Schema, composable — `.partial/.extend/.refine/.or`): a `$generated`
    * column is dropped, a `$default`/`$identity`/`.optional()` column (or the implicit `id`) is optional,
    * the rest required. Derived from the `$`-method Flag brands. Runtime matches {@link CreateRawShape}.
@@ -1082,6 +1164,19 @@ export function defineTable<
 ): PgTableDef<Name, F> {
   const map = fields instanceof PgObjectField ? fields.fields : fields;
   return new PgTableDef(name, map, config ?? {});
+}
+
+export namespace defineTable {
+  /**
+   * Build a reusable, configurable TABLE PRESET (a {@link PgPreset}) — applied via `TableDef.use(...)`.
+   * Usually a plain fn so it's parameterizable: `const tenant = (col = "tenant_id") =>
+   * defineTable.preset({ columns: { [col]: s.uuid() } })`. Identity at runtime; it's the typed entry point.
+   */
+  export function preset<
+    C extends Record<string, AnyPgField> = Record<string, never>,
+  >(descriptor: PgPreset<C>): PgPreset<C> {
+    return descriptor;
+  }
 }
 
 // --- defineEnum: a native pg ENUM type (CREATE TYPE … AS ENUM) ----------------------------------
