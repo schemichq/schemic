@@ -6,6 +6,7 @@ export default defineConfig({
     connection: "src/connection.ts",
     driver: "src/driver.ts",
     query: "src/query.ts",
+    client: "src/client.ts",
   },
   outDir: "lib",
   format: ["esm"],

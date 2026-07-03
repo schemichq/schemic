@@ -119,11 +119,17 @@ interface State {
   projection?: ProjItem[];
 }
 
-export class SelectQuery<TD extends PgTableDef, Res> {
+export class SelectQuery<TD extends PgTableDef, Res>
+  implements PromiseLike<Res[]>
+{
   constructor(
     private readonly table: TD,
     private readonly state: State = {},
     private readonly decodeOn = true,
+    // Optionally BOUND to a connection (via the ORM client's `db.select(...)`, or `select(t, conn)`): a
+    // bound query EXECUTES on `await` / a no-arg `.run()`. Chaining preserves the binding. Absent -> the
+    // classic BYO builder (`select(t).run(db)`).
+    private readonly conn?: PgConn,
   ) {}
 
   private with(patch: Partial<State>): SelectQuery<TD, Res> {
@@ -131,6 +137,7 @@ export class SelectQuery<TD extends PgTableDef, Res> {
       this.table,
       { ...this.state, ...patch },
       this.decodeOn,
+      this.conn,
     );
   }
 
@@ -167,6 +174,7 @@ export class SelectQuery<TD extends PgTableDef, Res> {
       this.table,
       { ...this.state, projection },
       this.decodeOn,
+      this.conn,
     );
   }
 
@@ -176,6 +184,7 @@ export class SelectQuery<TD extends PgTableDef, Res> {
       this.table,
       this.state,
       false,
+      this.conn,
     );
   }
 
@@ -208,17 +217,38 @@ export class SelectQuery<TD extends PgTableDef, Res> {
     return rows.map((r) => this.table.decode(r) as Res);
   }
 
-  /** Execute against a live connection and decode (unless `.raw()`). */
-  async run(conn: PgConn): Promise<Res[]> {
+  /**
+   * Execute + decode (unless `.raw()`). Pass a connection explicitly, or omit it to use the one this
+   * query is BOUND to (from `db.select(...)` / `select(t, conn)`). Throws if neither is available.
+   */
+  async run(conn?: PgConn): Promise<Res[]> {
+    const c = conn ?? this.conn;
+    if (!c)
+      throw new Error(
+        "select(...).run() needs a connection — pass one (`.run(conn)`), or use a bound `db.select(...)`.",
+      );
     const { sql, params } = this.toSQL();
-    const { rows } = await conn.query(sql, params);
+    const { rows } = await c.query(sql, params);
     return this.decode(rows);
+  }
+
+  /** Thenable: awaiting a BOUND query runs it (`await db.select(t).where(...)`). Unbound -> rejects. */
+  // biome-ignore lint/suspicious/noThenProperty: intentional — a bound query is awaitable (drizzle-style, cross-driver-aligned)
+  then<R1 = Res[], R2 = never>(
+    onFulfilled?: ((value: Res[]) => R1 | PromiseLike<R1>) | null,
+    onRejected?: ((reason: unknown) => R2 | PromiseLike<R2>) | null,
+  ): PromiseLike<R1 | R2> {
+    return this.run().then(onFulfilled, onRejected);
   }
 }
 
-/** Start a single-table typed read. Bare result is `App<TD>[]` (decoded); `.return(...)` re-types it. */
+/**
+ * Start a single-table typed read. Bare result is `App<TD>[]` (decoded); `.return(...)` re-types it.
+ * Pass `conn` to BIND it (so `await select(t, conn)` runs); omit for the classic `select(t).run(db)`.
+ */
 export function select<TD extends PgTableDef>(
   table: TD,
+  conn?: PgConn,
 ): SelectQuery<TD, App<TD>> {
-  return new SelectQuery<TD, App<TD>>(table);
+  return new SelectQuery<TD, App<TD>>(table, {}, true, conn);
 }
