@@ -55,6 +55,13 @@
         "default": "./lib/query.js"
       }
     },
+    "./client": {
+      "bun": "./src/client.ts",
+      "import": {
+        "types": "./lib/client.d.ts",
+        "default": "./lib/client.js"
+      }
+    },
     "./package.json": "./package.json"
   },
   "scripts": {

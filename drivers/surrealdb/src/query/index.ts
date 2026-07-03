@@ -89,12 +89,19 @@ function lowerExpr(e: Expr, vars: Record<string, unknown>): string {
 
 // --- the builder --------------------------------------------------------------------------------
 
+/** The minimal connection the builder needs to execute — a `.query(sql, vars)`. Both a `Surreal`
+ *  client and a forked `SurrealSession` satisfy it, so a bound builder works against either. */
+export type Queryable = Pick<Surreal, "query">;
+
 interface State {
   where?: Expr;
   order?: { col: string; dir: "asc" | "desc" };
   limit?: number;
   proj?: { as: string; col: string }[]; // flat projection (undefined => SELECT *)
   decode: boolean;
+  /** A pre-bound connection (set by the ORM client) — makes the builder awaitable (`then`) and lets
+   *  `.run()` be called with no argument. Absent for the standalone `select(table).run(conn)` path. */
+  conn?: Queryable;
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: TableDef's Shape varies per call site.
@@ -180,20 +187,39 @@ class Select<TD extends TableDef<string, any>, Res> {
     return rows.map((r) => this.table.decode(r)) as Res[];
   }
 
-  async run(conn: Surreal): Promise<Res[]> {
+  /** Execute against `conn` (or the pre-bound connection, if this builder came from a client). */
+  async run(conn?: Queryable): Promise<Res[]> {
+    const c = conn ?? this.state.conn;
+    if (!c)
+      throw new Error(
+        "select() is not bound to a connection — pass one to `.run(conn)`, or use a bound client (`connect()`).",
+      );
     const { sql, vars } = this.toSQL();
-    const out = (await conn.query(sql, vars)) as unknown[];
+    const out = (await c.query(sql, vars)) as unknown[];
     const rows = (out[0] ?? []) as unknown[];
     return this.decodeRows(rows);
   }
+
+  /** PromiseLike: awaiting a **bound** builder runs it (drizzle-style `await db.select(User)…`). An
+   *  unbound builder rejects with the same guidance as {@link Select.run}. */
+  then<TResult1 = Res[], TResult2 = never>(
+    onfulfilled?: ((value: Res[]) => TResult1 | PromiseLike<TResult1>) | null,
+    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+  ): Promise<TResult1 | TResult2> {
+    return this.run().then(onfulfilled, onrejected);
+  }
 }
 
-/** Start a single-table SELECT. Bare result is the decoded row `App<TD>`; `.return(...)` re-types it. */
+/** Start a single-table SELECT. Bare result is the decoded row `App<TD>`; `.return(...)` re-types it.
+ *  Pass a `conn` to pre-bind it (the ORM client does this) — then the builder is awaitable and `.run()`
+ *  needs no argument; omit it for the standalone `select(table).run(conn)` path. */
 // biome-ignore lint/suspicious/noExplicitAny: TableDef's Shape varies per call site.
 export function select<TD extends TableDef<string, any>>(
   table: TD,
+  conn?: Queryable,
 ): Select<TD, App<TD>> {
-  return new Select<TD, App<TD>>(table, { decode: true });
+  return new Select<TD, App<TD>>(table, { decode: true, conn });
 }
 
 export type { Expr };
+export { Select };
