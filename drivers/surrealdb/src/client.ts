@@ -31,9 +31,10 @@ import {
 // biome-ignore lint/suspicious/noExplicitAny: TableDef's Shape varies per call site.
 type AnyTable = TableDef<string, any>;
 
-/** Something ONE statement result can be decoded through in {@link RawQuery.as}: a rows decoder
- *  (`User.array()`), a table (its `decode`, for single-row statements like `FROM ONLY`), or any
- *  Standard-Schema / Zod schema (its `parse` — e.g. `z.number()` for a `RETURN`). */
+/** Something ONE statement result can be decoded through in {@link RawQuery.as}: a rows schema
+ *  (`User.object.array()` — Zod's parse runs the codec decode channel), a table (its `decode`,
+ *  for single-row statements like `FROM ONLY`), or any Standard-Schema / Zod schema (its `parse`
+ *  — e.g. `z.number()` for a `RETURN`). */
 interface Decoder<T = unknown> {
   decode?(value: unknown): T;
   parse?(value: unknown): T;
@@ -81,10 +82,11 @@ export class RawQuery<R extends unknown[] = unknown[]>
   }
 
   /** Decode the per-statement results through a TUPLE of decoders — one per statement, mirroring
-   *  the result shape: `db.query("RETURN 1; SELECT …").as([z.number(), User.array()])` resolves
-   *  `[number, App<User>[]]`. Rows decode via `Table.array()` (the codec channel); scalars via any
-   *  Standard-Schema/Zod schema; a single-row statement (`FROM ONLY`) via the table itself. Throws
-   *  a teaching error when the decoder count doesn't match the statement count. */
+   *  the result shape: `db.query("RETURN 1; SELECT …").as([z.number(), User.object.array()])`
+   *  resolves `[number, Row[]]`. Rows decode via `Table.object.array()` (a real ZodArray whose
+   *  `parse` runs the codec channel); scalars via any Standard-Schema/Zod schema; a single-row
+   *  statement (`FROM ONLY`) via the table itself. Throws a teaching error when the decoder count
+   *  doesn't match the statement count. */
   as<const Ds extends readonly Decoder[]>(
     decoders: Ds,
   ): Promise<{ -readonly [K in keyof Ds]: DecodeOut<Ds[K]> }> {

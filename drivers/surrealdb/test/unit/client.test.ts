@@ -34,7 +34,7 @@ const _tagTyped = async (db: Client) => {
   // .as tuple typing mirrors the decoders positionally:
   const [dn, du] = await db
     .query("RETURN 1; SELECT * FROM orm_user")
-    .as([z.number(), User.array()]);
+    .as([z.number(), User.object.array()]);
   const _dn: number = dn;
   const _names: string[] = du.map((u) => u.name);
   void [_n, _s, _dn, _names];
@@ -125,13 +125,13 @@ describe.skipIf(!URL)("orm client (P1 reads)", () => {
     // .as([...]) mirrors the per-statement shape: one decoder per statement.
     const [typed] = await db
       .query("SELECT * FROM orm_user ORDER BY name")
-      .as([User.array()]);
+      .as([User.object.array()]);
     expect(typed.map((r) => r.name)).toEqual(["ada", "bob"]);
 
     // Mixed statements decode positionally (scalar via zod, rows via the table codec):
     const [n, users] = await db
       .query("RETURN 1; SELECT * FROM orm_user ORDER BY name")
-      .as([z.number(), User.array()]);
+      .as([z.number(), User.object.array()]);
     expect(n).toBe(1);
     expect(users.map((r) => r.name)).toEqual(["ada", "bob"]);
 
@@ -145,10 +145,10 @@ describe.skipIf(!URL)("orm client (P1 reads)", () => {
     await expect(
       db.query("RETURN 1; RETURN 2").as([z.number()]),
     ).rejects.toThrow(/one decoder per statement/);
-    // User.array() on a scalar statement fails loud, not garbage:
-    await expect(db.query("RETURN 1").as([User.array()])).rejects.toThrow(
-      /not an array/,
-    );
+    // A rows schema on a scalar statement fails loud (ZodError), not garbage:
+    await expect(
+      db.query("RETURN 1").as([User.object.array()]),
+    ).rejects.toThrow();
 
     await c.close();
   });
