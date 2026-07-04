@@ -40,37 +40,43 @@ interface Decoder<T> {
 
 /**
  * A raw SurrealQL query bound to a connection — the escape hatch for anything the typed builders don't
- * cover. Awaiting it yields the first statement's **raw** rows (no decode); `.as(schema)` opts into
- * decoding each row through a table or any Standard-Schema. Replaces reaching into `db.conn`.
+ * cover. Awaiting it is SDK-FAITHFUL: it resolves the PER-STATEMENT result array (one entry per
+ * statement, exactly what the SDK's `query()` returns — nothing is dropped). A typed `surql<[...]>`
+ * tag flows through: `db.query(surql<[number]>\`RETURN 1\`)` resolves `[number]`; for a plain string,
+ * type it explicitly — `db.query<[User[]]>("SELECT * FROM user")`. `.as(schema)` is the
+ * single-statement SELECT sugar: the sole statement's rows, each decoded.
  */
-export class RawQuery<Row = unknown> implements PromiseLike<Row[]> {
+export class RawQuery<R extends unknown[] = unknown[]>
+  implements PromiseLike<R>
+{
   constructor(
     private readonly conn: Queryable,
     private readonly sql: string | BoundQuery,
     private readonly params?: Record<string, unknown>,
   ) {}
 
-  private async rows(): Promise<unknown[]> {
-    const out = (
+  private async results(): Promise<unknown[]> {
+    return (
       typeof this.sql === "string"
         ? await this.conn.query(this.sql, this.params)
         : await this.conn.query(this.sql)
     ) as unknown[];
-    return (out[0] ?? []) as unknown[]; // the first statement's rows
   }
 
-  /** Await -> the first statement's raw rows (undecoded). */
-  then<R1 = Row[], R2 = never>(
-    onfulfilled?: ((value: Row[]) => R1 | PromiseLike<R1>) | null,
+  /** Await -> the per-statement result array (undecoded, SDK-faithful). */
+  then<R1 = R, R2 = never>(
+    onfulfilled?: ((value: R) => R1 | PromiseLike<R1>) | null,
     onrejected?: ((reason: unknown) => R2 | PromiseLike<R2>) | null,
   ): Promise<R1 | R2> {
-    return this.rows()
-      .then((r) => r as Row[])
+    return this.results()
+      .then((r) => r as R)
       .then(onfulfilled, onrejected);
   }
 
-  /** Decode each row through a table (`User`) or any Standard-Schema/Zod schema (`User.object`, a
-   *  `.pick(...)`, a composed schema). */
+  /** Decode a SINGLE-statement query's rows through a table (`User`) or any Standard-Schema/Zod
+   *  schema (`User.object`, a `.pick(...)`, a composed schema). Throws a teaching error on a
+   *  multi-statement query (which entry to decode would be ambiguous — await the query itself for
+   *  the per-statement array). A scalar result (e.g. `RETURN`) decodes as one element. */
   as<TD extends AnyTable>(table: TD): Promise<App<TD>[]>;
   as<T>(schema: Decoder<T>): Promise<T[]>;
   as<T>(schema: Decoder<T>): Promise<T[]> {
@@ -80,7 +86,20 @@ export class RawQuery<Row = unknown> implements PromiseLike<Row[]> {
         : typeof schema.parse === "function"
           ? schema.parse(row)
           : (row as T);
-    return this.rows().then((r) => r.map(decode));
+    return this.results().then((out) => {
+      if (out.length !== 1)
+        throw new Error(
+          `.as(schema) decodes a single-statement query, but this one has ${out.length} statement results — await the query itself for the per-statement array, then decode the entry you need.`,
+        );
+      const first = out[0];
+      const rows =
+        first === undefined || first === null
+          ? []
+          : Array.isArray(first)
+            ? first
+            : [first];
+      return rows.map(decode);
+    });
   }
 }
 
@@ -147,7 +166,15 @@ export class Client implements OrmClientBase {
     return remove(table, id, this.conn);
   }
 
-  /** Raw SurrealQL escape hatch: `await db.query(surql\`…\`)` -> raw rows; `.as(User)` to decode. */
+  /** Raw SurrealQL escape hatch — SDK-faithful: `await db.query(…)` -> the PER-STATEMENT result
+   *  array. A typed tag flows through (`db.query(surql<[number]>\`RETURN 1\`)` -> `[number]`); type
+   *  a plain string explicitly (`db.query<[User[]]>("SELECT …")`). `.as(User)` decodes a
+   *  single-statement SELECT's rows. */
+  query<R extends unknown[]>(sql: BoundQuery<R>): RawQuery<R>;
+  query<R extends unknown[] = unknown[]>(
+    sql: string,
+    params?: Record<string, unknown>,
+  ): RawQuery<R>;
   query(sql: string | BoundQuery, params?: Record<string, unknown>): RawQuery {
     return new RawQuery(this.conn, sql, params);
   }
@@ -208,7 +235,12 @@ export class Session implements OrmClientBase {
     return remove(table, id, this.session);
   }
 
-  /** Raw SurrealQL escape hatch, scoped to this session. */
+  /** Raw SurrealQL escape hatch, scoped to this session (SDK-faithful per-statement results). */
+  query<R extends unknown[]>(sql: BoundQuery<R>): RawQuery<R>;
+  query<R extends unknown[] = unknown[]>(
+    sql: string,
+    params?: Record<string, unknown>,
+  ): RawQuery<R>;
   query(sql: string | BoundQuery, params?: Record<string, unknown>): RawQuery {
     return new RawQuery(this.session, sql, params);
   }

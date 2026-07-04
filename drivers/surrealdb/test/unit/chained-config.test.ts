@@ -112,9 +112,9 @@ describe.skipIf(!URL)("chained cross-connection resolution (live)", () => {
     // With org -> single config, connectable.
     {
       await using db = await schemic.connect("tenant", { org: "acme" });
-      // RawQuery unwraps the FIRST statement's result — for RETURN that's the scalar itself.
+      // SDK-faithful: the per-statement result array (typed via the surql tag when used).
       const result = await db.query("RETURN 1");
-      expect(result as unknown).toBe(1);
+      expect(result).toEqual([1]);
     }
     {
       await using main = await schemic.connect("main");

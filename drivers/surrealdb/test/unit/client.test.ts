@@ -6,9 +6,9 @@
 import { describe, expect, test } from "bun:test";
 import { defineConfig } from "@schemic/core/config";
 import { Surreal } from "surrealdb";
-import { connect } from "../../src/client";
+import { type Client, connect } from "../../src/client";
 import { surrealConnection } from "../../src/connection";
-import { defineTable, s } from "../../src/index";
+import { defineTable, s, surql } from "../../src/index";
 import { select } from "../../src/query";
 
 const URL = process.env.SURREAL_URL;
@@ -24,6 +24,14 @@ async function conn(ns: string): Promise<Surreal> {
   );
   return c;
 }
+
+// Compile-time: a typed surql tag flows its per-statement tuple through db.query.
+const _tagTyped = async (db: Client) => {
+  const r = await db.query(surql<[number, string[]]>`RETURN 1; RETURN ['a']`);
+  const _n: number = r[0];
+  const _s: string[] = r[1];
+  void [_n, _s];
+};
 
 describe.skipIf(!URL)("orm client (P1 reads)", () => {
   test("connect(client) is BYO; bound select is awaitable (no .run) + chains", async () => {
@@ -95,9 +103,21 @@ describe.skipIf(!URL)("orm client (P1 reads)", () => {
     const c = await conn("orm_rawq");
     const db = connect(c);
 
-    const raw = await db.query("SELECT name, age FROM orm_user ORDER BY name");
-    expect(raw).toHaveLength(2);
-    expect((raw[0] as { name: string }).name).toBe("ada");
+    // SDK-faithful: one entry per statement; a single SELECT's rows are entry [0].
+    const out = await db.query<[{ name: string }[]]>(
+      "SELECT name, age FROM orm_user ORDER BY name",
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0]).toHaveLength(2);
+    expect(out[0][0].name).toBe("ada");
+
+    // Multi-statement: NOTHING is dropped.
+    const multi = await db.query("RETURN 1; RETURN 2");
+    expect(multi).toEqual([1, 2]);
+    // ...and .as() refuses the ambiguity with a teaching error:
+    await expect(db.query("RETURN 1; RETURN 2").as(User)).rejects.toThrow(
+      /single-statement/,
+    );
 
     // .as(table) -> full decode through the table codec:
     const typed = await db
