@@ -2703,6 +2703,20 @@ export class TableDef<Name extends string, S extends Shape> {
   decode(row: unknown): z.output<z.ZodObject<ZShape<S>>> {
     return z.decode(this.object, row as never);
   }
+  /** A per-STATEMENT rows decoder for the raw escape hatch: `db.query("SELECT …").as([User.array()])`
+   *  decodes that statement's rows through the table codec (wire -> app). For a single-value
+   *  statement (`FROM ONLY`, a write's RETURN row) pass the table itself instead. */
+  array(): { decode: (result: unknown) => z.output<z.ZodObject<ZShape<S>>>[] } {
+    return {
+      decode: (result: unknown) => {
+        if (!Array.isArray(result))
+          throw new Error(
+            `${this.name}.array() decodes a statement's ROWS, but the statement result is not an array — for a single-value statement pass the table (or a scalar schema) instead.`,
+          );
+        return result.map((r) => this.decode(r));
+      },
+    };
+  }
   /** DB wire row -> app object (async — for async refinements). */
   decodeAsync(row: unknown): Promise<z.output<z.ZodObject<ZShape<S>>>> {
     return z.decodeAsync(this.object, row as never);

@@ -6,6 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { defineConfig } from "@schemic/core/config";
 import { Surreal } from "surrealdb";
+import { z } from "zod";
 import { type Client, connect } from "../../src/client";
 import { surrealConnection } from "../../src/connection";
 import { defineTable, s, surql } from "../../src/index";
@@ -30,7 +31,13 @@ const _tagTyped = async (db: Client) => {
   const r = await db.query(surql<[number, string[]]>`RETURN 1; RETURN ['a']`);
   const _n: number = r[0];
   const _s: string[] = r[1];
-  void [_n, _s];
+  // .as tuple typing mirrors the decoders positionally:
+  const [dn, du] = await db
+    .query("RETURN 1; SELECT * FROM orm_user")
+    .as([z.number(), User.array()]);
+  const _dn: number = dn;
+  const _names: string[] = du.map((u) => u.name);
+  void [_n, _s, _dn, _names];
 };
 
 describe.skipIf(!URL)("orm client (P1 reads)", () => {
@@ -114,22 +121,34 @@ describe.skipIf(!URL)("orm client (P1 reads)", () => {
     // Multi-statement: NOTHING is dropped.
     const multi = await db.query("RETURN 1; RETURN 2");
     expect(multi).toEqual([1, 2]);
-    // ...and .as() refuses the ambiguity with a teaching error:
-    await expect(db.query("RETURN 1; RETURN 2").as(User)).rejects.toThrow(
-      /single-statement/,
-    );
 
-    // .as(table) -> full decode through the table codec:
-    const typed = await db
+    // .as([...]) mirrors the per-statement shape: one decoder per statement.
+    const [typed] = await db
       .query("SELECT * FROM orm_user ORDER BY name")
-      .as(User);
+      .as([User.array()]);
     expect(typed.map((r) => r.name)).toEqual(["ada", "bob"]);
 
-    // .as(zod schema) -> parse each row (User.object.pick(...)):
-    const picked = await db
+    // Mixed statements decode positionally (scalar via zod, rows via the table codec):
+    const [n, users] = await db
+      .query("RETURN 1; SELECT * FROM orm_user ORDER BY name")
+      .as([z.number(), User.array()]);
+    expect(n).toBe(1);
+    expect(users.map((r) => r.name)).toEqual(["ada", "bob"]);
+
+    // A zod schema decodes a statement's rows too (parse channel):
+    const [picked] = await db
       .query("SELECT name FROM orm_user ORDER BY name")
-      .as(User.object.pick({ name: true }));
+      .as([User.object.pick({ name: true }).array()]);
     expect(picked.map((r) => r.name)).toEqual(["ada", "bob"]);
+
+    // Decoder-count mismatch = teaching error, never silent picking:
+    await expect(
+      db.query("RETURN 1; RETURN 2").as([z.number()]),
+    ).rejects.toThrow(/one decoder per statement/);
+    // User.array() on a scalar statement fails loud, not garbage:
+    await expect(db.query("RETURN 1").as([User.array()])).rejects.toThrow(
+      /not an array/,
+    );
 
     await c.close();
   });

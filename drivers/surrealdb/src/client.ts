@@ -31,12 +31,19 @@ import {
 // biome-ignore lint/suspicious/noExplicitAny: TableDef's Shape varies per call site.
 type AnyTable = TableDef<string, any>;
 
-/** Something a raw row can be decoded through in {@link RawQuery.as}: a table (via its `decode`) or any
- *  Standard-Schema / Zod schema (via `parse`) — e.g. `User`, `User.object`, `User.object.pick({…})`. */
-interface Decoder<T> {
-  decode?(row: unknown): T;
-  parse?(row: unknown): T;
+/** Something ONE statement result can be decoded through in {@link RawQuery.as}: a rows decoder
+ *  (`User.array()`), a table (its `decode`, for single-row statements like `FROM ONLY`), or any
+ *  Standard-Schema / Zod schema (its `parse` — e.g. `z.number()` for a `RETURN`). */
+interface Decoder<T = unknown> {
+  decode?(value: unknown): T;
+  parse?(value: unknown): T;
 }
+/** A decoder's output type — reads `decode` first (the codec channel), then `parse`. */
+type DecodeOut<D> = D extends { decode(value: unknown): infer T }
+  ? T
+  : D extends { parse(value: unknown): infer T }
+    ? T
+    : unknown;
 
 /**
  * A raw SurrealQL query bound to a connection — the escape hatch for anything the typed builders don't
@@ -73,32 +80,28 @@ export class RawQuery<R extends unknown[] = unknown[]>
       .then(onfulfilled, onrejected);
   }
 
-  /** Decode a SINGLE-statement query's rows through a table (`User`) or any Standard-Schema/Zod
-   *  schema (`User.object`, a `.pick(...)`, a composed schema). Throws a teaching error on a
-   *  multi-statement query (which entry to decode would be ambiguous — await the query itself for
-   *  the per-statement array). A scalar result (e.g. `RETURN`) decodes as one element. */
-  as<TD extends AnyTable>(table: TD): Promise<App<TD>[]>;
-  as<T>(schema: Decoder<T>): Promise<T[]>;
-  as<T>(schema: Decoder<T>): Promise<T[]> {
-    const decode = (row: unknown): T =>
-      typeof schema.decode === "function"
-        ? schema.decode(row)
-        : typeof schema.parse === "function"
-          ? schema.parse(row)
-          : (row as T);
+  /** Decode the per-statement results through a TUPLE of decoders — one per statement, mirroring
+   *  the result shape: `db.query("RETURN 1; SELECT …").as([z.number(), User.array()])` resolves
+   *  `[number, App<User>[]]`. Rows decode via `Table.array()` (the codec channel); scalars via any
+   *  Standard-Schema/Zod schema; a single-row statement (`FROM ONLY`) via the table itself. Throws
+   *  a teaching error when the decoder count doesn't match the statement count. */
+  as<const Ds extends readonly Decoder[]>(
+    decoders: Ds,
+  ): Promise<{ -readonly [K in keyof Ds]: DecodeOut<Ds[K]> }> {
+    const apply = (d: Decoder, value: unknown): unknown =>
+      typeof d.decode === "function"
+        ? d.decode(value)
+        : typeof d.parse === "function"
+          ? d.parse(value)
+          : value;
     return this.results().then((out) => {
-      if (out.length !== 1)
+      if (out.length !== decoders.length)
         throw new Error(
-          `.as(schema) decodes a single-statement query, but this one has ${out.length} statement results — await the query itself for the per-statement array, then decode the entry you need.`,
+          `.as([...]) got ${decoders.length} decoder(s) for ${out.length} statement result(s) — provide exactly one decoder per statement.`,
         );
-      const first = out[0];
-      const rows =
-        first === undefined || first === null
-          ? []
-          : Array.isArray(first)
-            ? first
-            : [first];
-      return rows.map(decode);
+      return out.map((v, i) => apply(decoders[i] as Decoder, v)) as {
+        -readonly [K in keyof Ds]: DecodeOut<Ds[K]>;
+      };
     });
   }
 }
