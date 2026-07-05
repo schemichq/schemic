@@ -8,6 +8,22 @@ import { makeJiti } from "./config";
  * used for ordering. A driver casts this to its own concrete table builder in `lower`. (The runtime
  * object is the driver's real `TableDef`; the engine never names that type.)
  */
+
+/** Import one schema module, wrapping a crash with the FAILING FILE path (original as `cause`). */
+async function importSchemaModule(
+  jiti: ReturnType<typeof makeJiti>,
+  file: string,
+): Promise<unknown> {
+  try {
+    return await jiti.import(file);
+  } catch (err) {
+    throw new Error(
+      `failed to load schema module ${file}: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
+  }
+}
+
 export interface AnyTable extends Authored {
   readonly config: { readonly relation?: unknown };
 }
@@ -67,7 +83,10 @@ async function* tablesIn(
   jiti: ReturnType<typeof makeJiti>,
   file: string,
 ): AsyncGenerator<AnyTable> {
-  const mod = (await jiti.import(file)) as Record<string, unknown>;
+  const mod = (await importSchemaModule(jiti, file)) as Record<
+    string,
+    unknown
+  >;
   for (const value of Object.values(mod)) if (isTableDef(value)) yield value;
 }
 
@@ -90,7 +109,10 @@ export async function loadDefs(schemaPath: string): Promise<{
   const defs: AuthoredDef[] = [];
   const fileOf = new Map<AnyTable | AuthoredDef, string>();
   for (const file of schemaFiles(schemaPath)) {
-    const mod = (await jiti.import(file)) as Record<string, unknown>;
+    const mod = (await importSchemaModule(jiti, file)) as Record<
+    string,
+    unknown
+  >;
     for (const value of Object.values(mod)) {
       if (isTableDef(value)) {
         tables.set(value.name, value); // last def of a name wins
@@ -136,7 +158,7 @@ export async function scanLocalEntities(
   const out = new Map<string, LocalFileEntities>();
   for (const file of schemaFiles(schemaPath)) {
     const exports = Object.entries(
-      (await jiti.import(file)) as Record<string, unknown>,
+      (await importSchemaModule(jiti, file)) as Record<string, unknown>,
     );
     const entities: LocalFileEntities["entities"] = [];
     for (const [exportName, value] of exports) {

@@ -12,6 +12,9 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 ## [Unreleased]
 
 ### Added
+- **cli / core:** debuggable errors — `SCHEMIC_DEBUG=1` (or `--stack`) prints the full stack + the
+  `.cause` chain on any CLI failure (default output unchanged, now with a hint line), and a crashing
+  schema module always reports the FAILING FILE path (original error as `cause`).
 - **core:** typed cross-connection resolution — (A) a resolver's `ctx.connections.<name>` handle is
   now THENABLE to that sibling's FULL ORM client (`const main = await ctx.connections.main;
   main.select(...)`) while keeping direct `.query`; (B) the CHAINED config builder —
