@@ -47,6 +47,35 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
   becomes `export const schemic = defineConfig(...)` in `schemic.config.ts` (deterministic
   `import { schemic }` -> `schemic.connect()` auto-import, no file rename); a bare `schemic.ts` is
   also discovered (shape-guarded).
+- **surrealdb / postgres:** ORM P2 WRITES on the bound client — split builders
+  (`db.create(T).content(data)`, `db.update(T, id).merge(...)` / `.content(...)` / `.set(...)`,
+  `db.delete(T, id)` — pg exports `remove`), decoding through the codec channel fail-fast and
+  returning typed rows that CARRY their id.
+- **surrealdb / postgres:** query Phase 1 READS — richer WHERE operators under the shared cross-driver
+  op contract, pagination, and `one()` / `get()` / `count()` terminals on the select builder.
+- **surrealdb / postgres:** table PRESETS — `defineTable.preset(...)` reusable table fragments applied
+  via the chained single-arg `TableDef.use(a).use(b)` (ratified cross-driver form; columns + indexes).
+- **surrealdb:** TYPED FRAGMENTS (phases 0–3) — the query builder and raw `surql` compose BOTH ways:
+  eager marker resolution in the tag (`TableDef`/`FunctionDef`/`surql.$` paths splice as text, output
+  is always a plain `BoundQuery`); builders interpolate as subquery fragments with namespaced binds;
+  raw predicates drop into `.where(...)`; `` surql`…`.as<T>() `` retypes a fragment (the `[T]` rule);
+  contextual TYPED callbacks on authoring slots (events `(e) =>` with `e.after`/`e.before` typed to
+  the table shape, field clauses `(f) =>`, permissions `(p) =>` with `p.row`/`p.auth`, function bodies
+  with args typed by name); typed `Operand<T>` — `$param` refs and fragments are legal builder
+  operands (type mismatch = compile error); the `surql.fn` builtin catalog (live-verified vs 3.1.4) +
+  kind-mapped ref stdlib (`u.name.length().gt(3)`); `block()` typed statement builder with OBJECT
+  bindings (`.let({ n: v })`, `.for({ item: iter }, body)` — the var name is a real property, so
+  rename/find-refs work); `$parent` correlated subqueries; `Def.call(args)` typed named-arg function
+  calls that also accept refs + builders. Plus lazy record refs `s.recordId(() => User)` (kills
+  mutual-link import cycles) and auto-blocking of multi-statement event bodies.
+- **surrealdb:** the authoring index re-exports the SDK VALUE surface (`Surreal`, `RecordId`, `Table`,
+  `DateTime`, `Duration`, geometry types, …) so apps never import `surrealdb` directly —
+  single-instance by construction (the SDK's `#private` classes are nominal; dual copies break
+  `instanceof` and assignability).
+- **surrealdb:** `defineSingleton(name, shape, { id? })` — one-record tables: emits the LITERAL id
+  type (`DEFINE FIELD id … TYPE 'default'`, DB-enforced), id-optional client sugar (`db.get(Config)`;
+  create/update/delete target THE record), and the literal id survives lower/normalize so it emits,
+  diffs, and `pull` regenerates `defineSingleton`.
 
 ### Fixed
 - **core:** the DEFAULT migrations dir now follows the documented contract — RELATIVE TO THE SCHEMA
@@ -54,11 +83,28 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
   (`schema: "./src/database/schema"`) previously split state: `init` scaffolded the snapshot
   schema-relative while `gen` wrote migrations + a second snapshot at the root default. Standard
   scaffold layouts are unchanged; an explicit `migrations` override still resolves from the root.
+- **surrealdb:** `inline()` bind rewriting is boundary-aware — `$b1` no longer corrupts `$b10` with
+  10+ binds (latent).
+- **surrealdb:** `normalize` canonicalizes FORMATTING of function blocks / event exprs / field
+  clauses / permissions (quote-aware whitespace collapse + INFO-style punctuation spacing + strip
+  `;`-before-`}`) — any multi-line-authored surql body previously phantom-diffed forever against
+  INFO's single-line printing.
+- **postgres:** returned rows carry the implicit `id` (select + write `RETURNING`).
 
 ### Changed (BREAKING — alpha)
 - **surrealdb:** dropped the deprecated `$`-less field aliases `.unique()`/`.index()` — use
   `.$unique()`/`.$index()` (aligns with postgres, already `$`-only; table-level composite
   `.index(name, fields)` unchanged).
+- **surrealdb:** `db.query` is SDK-FAITHFUL — awaiting resolves the PER-STATEMENT result array (the
+  old first-statement unwrap silently dropped every result after statement #1); `surql<[T1, T2]>`
+  typing flows end-to-end, plain strings take `db.query<[User[]]>(...)`. Correspondingly `.as(...)`
+  takes a decoder TUPLE mirroring the statements — `.as([z.number(), User.object.array()])` resolves
+  `[number, App[]]` positionally; decoders are plain schemas (`TableDef.object` is the bridge into
+  Zod land — no bespoke rows decoder), and a decoder-count mismatch is a teaching error.
+- **surrealdb:** the `surrealdb` SDK moved from a regular dependency to a PEER dependency
+  (app-vs-driver version drift created dual SDK copies whose nominal `#private` classes are
+  incompatible), and `` surql`…`.as<T>() `` replaces the separate `surql.expr` tag (a second tag name
+  broke editor syntax highlighting).
 
 ## [0.1.0-alpha.24] - 2026-07-01
 
