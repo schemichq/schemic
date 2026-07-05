@@ -140,7 +140,24 @@ export {
   type SecretRef,
   secret,
 } from "@schemic/core/authoring";
-export type { BoundQuery } from "surrealdb";
+export type { RecordIdValue, SurrealSession } from "surrealdb";
+// The SDK surface apps need, re-exported so an app never has to depend on "surrealdb" directly —
+// importing it from HERE guarantees a SINGLE package instance (the SDK's #private classes are
+// nominally typed: two copies -> incompatible BoundQuery/RecordId types + instanceof misses).
+// Works for npm installs (the peer dep is that same single copy) AND bun-link dev setups.
+export {
+  BoundQuery,
+  DateTime,
+  Decimal,
+  Duration,
+  Geometry,
+  RecordId,
+  RecordIdRange,
+  StringRecordId,
+  Surreal,
+  Table,
+  Uuid,
+} from "surrealdb";
 export type {
   AnalyzerConfig,
   App,
