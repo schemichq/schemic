@@ -2,6 +2,13 @@
 // surql tag (TableDef/Table/FunctionDef/surql.$ splice as TEXT; everything else binds), the
 // surql.record/table/$/expr helpers, event THEN auto-blocking (multi-statement bodies wrap { ...; }
 // matching INFO's canonical spelling), and lazy record refs s.recordId(() => Table).
+import { setDefaultTimeout } from "bun:test";
+
+// The workspace gate runs every package's suite IN PARALLEL — PGlite's CPU burst can slow live
+// connects/DDL far past bun's 30s default, timing out beforeAll/afterAll hooks (reported as
+// "(unnamed)" tests). Live work gets a generous ceiling; isolated runs are unaffected.
+setDefaultTimeout(120_000);
+
 import { describe, expect, test } from "bun:test";
 import { RecordId } from "surrealdb";
 import { emitTable } from "../../src/ddl";

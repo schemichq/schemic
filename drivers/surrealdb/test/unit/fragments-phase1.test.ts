@@ -2,6 +2,13 @@
 // predicates inside `where` (with interpolatable FieldRefs), chainable Expr combinators
 // (.and/.or/.not — no standalone import), and Def.call(args) — the one-object call: a typed
 // BoundQuery<[R]> fragment that is also runnable (.run/.then) and client-bindable (db.call).
+import { setDefaultTimeout } from "bun:test";
+
+// The workspace gate runs every package's suite IN PARALLEL — PGlite's CPU burst can slow live
+// connects/DDL far past bun's 30s default, timing out beforeAll/afterAll hooks (reported as
+// "(unnamed)" tests). Live work gets a generous ceiling; isolated runs are unaffected.
+setDefaultTimeout(120_000);
+
 import { describe, expect, test } from "bun:test";
 import { BoundQuery } from "surrealdb";
 import {

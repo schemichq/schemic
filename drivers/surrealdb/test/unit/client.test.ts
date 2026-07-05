@@ -2,6 +2,12 @@
 // other live tests). Covers the novel mechanics: BYO wrapping, the pre-bound + awaitable `select`
 // (no `.run(db)`), the dispose rule (BYO close = no-op), forkSession, and backward-compat of the
 // standalone `select(table).run(conn)` path.
+import { setDefaultTimeout } from "bun:test";
+
+// The workspace gate runs every package's suite IN PARALLEL — PGlite's CPU burst can slow live
+// connects/DDL far past bun's 30s default, timing out beforeAll/afterAll hooks (reported as
+// "(unnamed)" tests). Live work gets a generous ceiling; isolated runs are unaffected.
+setDefaultTimeout(120_000);
 
 import { describe, expect, test } from "bun:test";
 import { defineConfig } from "@schemic/core/config";

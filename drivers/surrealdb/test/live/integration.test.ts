@@ -1,3 +1,10 @@
+import { setDefaultTimeout } from "bun:test";
+
+// The workspace gate runs every package's suite IN PARALLEL — PGlite's CPU burst can slow live
+// connects/DDL far past bun's 30s default, timing out beforeAll/afterAll hooks (reported as
+// "(unnamed)" tests). Live work gets a generous ceiling; isolated runs are unaffected.
+setDefaultTimeout(120_000);
+
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { RecordId, surql } from "surrealdb";
 import { z } from "zod";
