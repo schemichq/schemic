@@ -95,6 +95,8 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
   `;`-before-`}`) — any multi-line-authored surql body previously phantom-diffed forever against
   INFO's single-line printing; also folds `s"..."` -> `'...'` on function blocks/events (inlined
   strings phantom-diffed).
+- **surrealdb:** an empty `block()` no longer emits invalid `{ ; }` — it renders the valid no-op
+  `{ }` (live-verified).
 - **postgres:** returned rows carry the implicit `id` (select + write `RETURNING`).
 
 ### Changed (BREAKING — alpha)
