@@ -16,6 +16,24 @@ function freePort(): Promise<number> {
   });
 }
 
+/** Race a promise against a timeout (the loser is abandoned — callers close/retry). */
+function withTimeout<T>(p: Promise<T>, ms: number, msg: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(msg)), ms);
+    t.unref?.();
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      },
+    );
+  });
+}
+
 /** Whether the local `surreal` CLI is runnable (used to pick the `auto` check engine). */
 export function surrealBinaryAvailable(bin = "surreal"): boolean {
   try {
@@ -44,7 +62,8 @@ async function waitUntilReady(
   child: ChildProcess,
   stderr: () => string,
 ): Promise<void> {
-  const deadline = Date.now() + 15_000;
+  const deadline = Date.now() + 30_000;
+  const attempts: string[] = [];
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
       throw new Error(
@@ -53,16 +72,29 @@ async function waitUntilReady(
     }
     const db = new Surreal();
     try {
-      await db.connect(url, { reconnect: false });
-      await db.signin({ username, password });
+      // RACE each attempt against a short timeout: a HANGING connect (seen under the land gate)
+      // would otherwise never settle and silently blow past the deadline loop — the hook then eats
+      // its full timeout with zero diagnostics. A timed-out attempt just retries.
+      await withTimeout(
+        (async () => {
+          await db.connect(url, { reconnect: false });
+          await db.signin({ username, password });
+        })(),
+        2_000,
+        "connect attempt timed out (2s)",
+      );
       await db.close();
       return;
-    } catch {
+    } catch (e) {
+      attempts.push((e as Error).message);
       await db.close().catch(() => {});
       await sleep(100);
     }
   }
-  throw new Error("surreal did not become ready within 15s");
+  const tail = stderr().split("\n").filter(Boolean).slice(-3).join(" | ");
+  throw new Error(
+    `surreal did not become ready within 30s at ${url} — last attempts: ${attempts.slice(-3).join("; ")}${tail ? ` — server stderr: ${tail}` : ""}`,
+  );
 }
 
 /**
