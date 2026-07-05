@@ -216,3 +216,20 @@ describe.skipIf(!URL)("phase-1 live", () => {
     await c.close();
   });
 });
+
+describe("surql``.as<T>() — typed fragment retype (replaces surql.expr)", () => {
+  test("type-only: same runtime object, still a BoundQuery (composable)", () => {
+    const frag = surql`age >= ${18}`;
+    const typed = frag.as<boolean>();
+    expect(typed as unknown).toBe(frag as unknown); // the SAME object — .as is a cast
+    expect(typed).toBeInstanceOf(BoundQuery);
+    const outer = surql`SELECT * FROM p1_user WHERE ${typed}`;
+    expect(outer.query).toContain("WHERE age >= $bind__");
+  });
+});
+
+// Type-level: .as<T> produces BoundQuery<[T]> (the [T] rule).
+const _asTyped = surql`age >= 18`.as<boolean>();
+type _asRule = Expect<
+  Equal<typeof _asTyped extends BoundQuery<[boolean]> ? true : false, true>
+>;

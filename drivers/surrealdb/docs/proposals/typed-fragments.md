@@ -15,7 +15,7 @@ with a sibling's or the outer template's).
 **Typing rule (the `[T]` rule).** `surql<R>`'s generic keeps its one meaning: *the per-statement
 result tuple*. SurrealDB runs a bare expression as a one-statement query, so an expression of type
 `T` IS a query of type `[T]`: `Frag<T> = BoundQuery<[T]>`. Sinks read the single entry —
-`.where(...)` accepts `Frag<boolean>`. `surql.expr<T>` is sugar for `surql<[T]>` (ratified).
+`.where(...)` accepts `Frag<boolean>`. `surql``.as<T>()` retypes a fragment (ratified — a separate `surql.expr` tag broke editor syntax highlighting).
 Untyped `surql` = `Frag<unknown>`, accepted everywhere (gradual typing; no ceremony tax).
 
 **Eager resolution (no markers, no guard).** Our `surql` tag resolves every known value at
@@ -40,7 +40,7 @@ its def) instead of relying on the `fn::` text scan. BREAKING(alpha): the old ru
 `Def.call(db, args)` becomes `Def.call(args).run(db)`.
 
 ### `surql.*` helpers (context-FREE surface)
-- `surql.expr<T>\`…\`` — typed fragment sugar (see the `[T]` rule).
+- `surql\`…\`.as<T>()` — typed-fragment retype (see the `[T]` rule).
 - `surql.record(Table, idFrag)` — `type::record(<name>, <id>)`, typed table ref.
 - `surql.table(Table)` — the escaped table name.
 - `surql.$.<path>` — param path proxy (`$after.email`) — UNTYPED here; typing comes from slot
@@ -97,7 +97,7 @@ Plain `Expr` forms stay (untyped quick path). `$auth` typing: `defineAccess(...)
 
 ## Phases
 0. Auto-block; lazy refs; `surql.record/table/$`; eager resolution in the tag. (in progress)
-1. Fragments: `[T]` rule + `surql.expr`; builders interpolatable (bind namespacing); raw leaves in
+1. Fragments: `[T]` rule + `.as<T>()`; builders interpolatable (bind namespacing); raw leaves in
    `where`; `Expr.and/.or/.not`; `Def.call(...)` fragment+runnable (BREAKING alpha).
 2. Typed contextual callbacks (events, field clauses, permissions, function bodies);
    `.subject(User)`.

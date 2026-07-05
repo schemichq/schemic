@@ -1,7 +1,7 @@
 {
   "name": "@schemic/surrealdb",
   "version": "0.1.0-alpha.24",
-  "description": "SurrealDB driver + authoring for Schemic — s.* schema definition, SurrealQL DDL, introspection, migrations.",
+  "description": "SurrealDB driver + authoring for Schemic \u2014 s.* schema definition, SurrealQL DDL, introspection, migrations.",
   "license": "MIT",
   "author": "Vertio Solutions",
   "homepage": "https://surreal.schemic.dev",
@@ -72,12 +72,12 @@
     "lint": "biome check ."
   },
   "dependencies": {
-    "@schemic/core": "workspace:*",
-    "surrealdb": "^2.0.3"
+    "@schemic/core": "workspace:*"
   },
   "peerDependencies": {
     "@surrealdb/node": "*",
-    "zod": "^4.3.5"
+    "zod": "^4.3.5",
+    "surrealdb": "^2.0.3"
   },
   "peerDependenciesMeta": {
     "@surrealdb/node": {

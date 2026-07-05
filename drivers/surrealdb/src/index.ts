@@ -10,12 +10,7 @@
  *   - `@schemic/surrealdb/query`      — the opt-in typed query builder.
  */
 
-import {
-  type BoundQuery,
-  escapeIdent,
-  surql as sdkSurql,
-  Table,
-} from "surrealdb";
+import { BoundQuery, escapeIdent, surql as sdkSurql, Table } from "surrealdb";
 import {
   FunctionDef,
   isParamRef,
@@ -54,10 +49,20 @@ function markerFragment(v: unknown): BoundQuery | undefined {
   return typeof make === "function" ? (make.call(v) as BoundQuery) : undefined;
 }
 
+/** The tag's output: a `BoundQuery` plus `.as<T>()` — retype as a typed expression fragment
+ *  (the `[T]` rule: an expression of type `T` IS a one-statement query `[T]`). Type-only. */
+export class Surql<R extends unknown[] = unknown[]> extends BoundQuery<R> {
+  /** Retype this fragment as an expression of type `T` — `surql\`age >= 18\`.as<boolean>()`.
+   *  Purely a type-level cast; the runtime object is unchanged. */
+  as<T>(): Surql<[T]> {
+    return this as unknown as Surql<[T]>;
+  }
+}
+
 function surqlTag<R extends unknown[] = unknown[]>(
   strings: TemplateStringsArray,
   ...values: unknown[]
-): BoundQuery<R> {
+): Surql<R> {
   // Fold marker values into the string parts; everything else binds via the SDK tag as before
   // (a nested BoundQuery composes natively).
   const parts: string[] = [strings[0] as string];
@@ -75,7 +80,8 @@ function surqlTag<R extends unknown[] = unknown[]>(
   const tsa = Object.assign(parts.slice(), {
     raw: parts.slice(),
   }) as unknown as TemplateStringsArray;
-  return sdkSurql(tsa, ...rest) as BoundQuery<R>;
+  const q = sdkSurql(tsa, ...rest);
+  return new Surql<R>(q.query, { ...q.bindings });
 }
 
 /** Build the `surql.$` proxy: each property access extends the path (`surql.$.after.email`). */
@@ -101,20 +107,14 @@ function paramProxy(path: readonly string[]): ParamRef {
  * `$param` value; a nested `BoundQuery` composes.
  *
  * Helpers on the tag:
- *  - `surql.expr<T>\`…\`` — a TYPED fragment: an expression of type `T` is a one-statement query
- *    `[T]` (the `[T]` rule), so sinks like `where` can require `BoundQuery<[boolean]>`.
+ *  - `surql\`…\`.as<T>()` — retype as a TYPED expression fragment (an expression of type `T` is a
+ *    one-statement query `[T]` — the `[T]` rule), so sinks like `where` can take `Frag<boolean>`.
  *  - `surql.record(Table, idFrag)` — `type::record(<table>, <id>)` with a typed table ref.
  *  - `surql.table(Table)` — the escaped table name as a fragment.
  *  - `surql.$` — the param-path proxy (`surql.$.after.email` -> `$after.email`). UNTYPED here;
  *    typed variants come from slot callbacks (see the typed-fragments proposal).
  */
 export const surql: typeof surqlTag & {
-  /** A TYPED expression fragment — sugar for `surql<[T]>` (an expression of type `T` IS a
-   *  one-statement query of type `[T]`). */
-  expr: <T>(
-    strings: TemplateStringsArray,
-    ...values: unknown[]
-  ) => BoundQuery<[T]>;
   /** `type::record(<table>, <id>)` — a record id built from a typed table ref + an id fragment. */
   record: (table: { name: string }, id: BoundQuery) => BoundQuery<[unknown]>;
   /** The escaped table name as a fragment. */
@@ -122,10 +122,6 @@ export const surql: typeof surqlTag & {
   /** The param-path proxy: `surql.$.after.email` splices `$after.email`. */
   $: Record<string, ParamRef & Record<string, ParamRef>>;
 } = Object.assign(surqlTag, {
-  expr: surqlTag as <T>(
-    strings: TemplateStringsArray,
-    ...values: unknown[]
-  ) => BoundQuery<[T]>,
   record: (table: { name: string }, id: BoundQuery): BoundQuery<[unknown]> =>
     surqlTag`type::record(${new Table(table.name)}, ${id})`,
   table: (table: { name: string }): BoundQuery<[unknown]> =>
