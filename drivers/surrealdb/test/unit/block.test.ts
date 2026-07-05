@@ -16,7 +16,7 @@ const Post = defineTable("blk_post", {
 describe("lowering", () => {
   test("let + if + return: `{ LET $n = ...; IF ... { ... }; RETURN ...; }`", () => {
     const q = block()
-      .let("n", select(Post).count())
+      .let({ n: select(Post).count() })
       .if((sv) => sv.n.gt(100), surql`RETURN 'big'`)
       .return((sv) => sv.n)
       .toQuery();
@@ -28,7 +28,7 @@ describe("lowering", () => {
 
   test("typed let vars: a count() var is a NUMBER ref — .gt/.plus work; kind flows", () => {
     const q = block()
-      .let("n", select(Post).count())
+      .let({ n: select(Post).count() })
       .return((sv) => sv.n.plus(1))
       .toQuery();
     expect(q.query).toMatch(/RETURN \$n \+ \$sub__\d+_r\d+; \}$/);
@@ -36,7 +36,7 @@ describe("lowering", () => {
 
   test("literal lets bind; string vars get the string family", () => {
     const q = block()
-      .let("greeting", "hello")
+      .let({ greeting: "hello" })
       .return((sv) => sv.greeting.uppercase())
       .toQuery();
     expect(q.query).toMatch(
@@ -47,10 +47,9 @@ describe("lowering", () => {
 
   test("for loops: FOR $item IN <iterable> { body } with a typed loop var", () => {
     const q = block()
-      .let("names", ["a", "b"])
+      .let({ names: ["a", "b"] })
       .for(
-        "name",
-        (sv) => sv.names,
+        (sv) => ({ name: sv.names }),
         (sv) => surql`CREATE ${Post} SET title = ${sv.name.uppercase()}`,
       )
       .toQuery();
@@ -77,7 +76,7 @@ describe("lowering", () => {
 
   test("if/else with nested block()s", () => {
     const q = block()
-      .let("n", 5)
+      .let({ n: 5 })
       .if(
         (sv) => sv.n.gte(10),
         block().return(surql`'big'`),
@@ -90,8 +89,8 @@ describe("lowering", () => {
   });
 
   test("reserved/invalid let names are rejected with guidance", () => {
-    expect(() => block().let("b0", 1)).toThrow(/reserved/);
-    expect(() => block().let("no spaces", 1)).toThrow(/identifier/);
+    expect(() => block().let({ b0: 1 })).toThrow(/reserved/);
+    expect(() => block().let({ "no spaces": 1 })).toThrow(/identifier/);
   });
 });
 
@@ -104,10 +103,10 @@ describe("composition", () => {
   test("typed: the block's RETURN types the fragment (Frag<R> flows to .let)", () => {
     // n: number (count) -> RETURN s.n -> Block<..., number>; nesting keeps the type.
     const inner = block()
-      .let("n", select(Post).count())
+      .let({ n: select(Post).count() })
       .return((sv) => sv.n);
     const outer = block()
-      .let("m", inner)
+      .let({ m: inner })
       .return((sv) => sv.m.plus(1));
     expect(outer.toQuery().query).toContain("LET $m = { LET $n =");
   });
@@ -119,7 +118,7 @@ describe("authoring slots take blocks directly (Fragmentable)", () => {
       when: (e) => e.event.eq("CREATE"),
       then: (e) =>
         block()
-          .let("who", e.after.author)
+          .let({ who: e.after.author })
           .do(surql`UPDATE ${Post} SET views += 1 WHERE author = $who`),
     });
     const ddl = emitTable(T)
@@ -136,7 +135,7 @@ describe("authoring slots take blocks directly (Fragmentable)", () => {
       .returns(s.number())
       .body((a) =>
         block()
-          .let("n", select(Post).count())
+          .let({ n: select(Post).count() })
           .return((sv) => surql`${sv.n} + ${a.by}`),
       );
     const { ddl } = emitDefStatement(F);
@@ -169,12 +168,11 @@ describe.skipIf(!URL)("block live", () => {
       when: (e) => e.event.eq("CREATE"),
       then: (e) =>
         block()
-          .let(
-            "existing",
-            select(Tally)
+          .let({
+            existing: select(Tally)
               .where((t) => t.author.eq(e.after.author))
               .one(),
-          )
+          })
           .if(
             (sv) => sv.existing.isNone(),
             surql`CREATE ${Tally} SET author = $after.author, total = 1`,
@@ -186,7 +184,7 @@ describe.skipIf(!URL)("block live", () => {
       .returns(s.number())
       .body((a) =>
         block()
-          .let("n", select(Post).count())
+          .let({ n: select(Post).count() })
           .return((sv) => surql`${sv.n} + ${a.by}`),
       );
 
@@ -230,4 +228,40 @@ describe.skipIf(!URL)("block live", () => {
     );
     await c.close();
   }, 60_000);
+});
+
+describe("object bindings — refactor safety extras", () => {
+  test("multi-key .let emits several LETs in order", () => {
+    const q = block()
+      .let({ a: 1, b: "x" })
+      .return((sv) => surql`${sv.a} + ${sv.b.length()}`)
+      .toQuery();
+    expect(q.query).toMatch(
+      /^\{ LET \$a = \$sub__\d+_b0; LET \$b = \$sub__\d+_b1; RETURN \$a \+ string::len\(\$b\); \}$/,
+    );
+  });
+
+  test(".let with an empty object throws with guidance", () => {
+    expect(() => block().let({})).toThrow(/at least one var/);
+  });
+
+  test(".for with more than one binding key throws", () => {
+    expect(() =>
+      block().for(
+        { a: [1], b: [2] } as Record<string, number[]>,
+        surql`RETURN 1`,
+      ),
+    ).toThrow(/exactly ONE loop binding/);
+  });
+
+  test("callback .let sees earlier vars: (s) => ({ next: s.n.plus(1) })", () => {
+    const q = block()
+      .let({ n: 1 })
+      .let((sv) => ({ next: sv.n.plus(1) }))
+      .return((sv) => sv.next)
+      .toQuery();
+    expect(q.query).toMatch(
+      /LET \$next = \$n \+ \$sub__\d+_r\d+; RETURN \$next; \}$/,
+    );
+  });
 });

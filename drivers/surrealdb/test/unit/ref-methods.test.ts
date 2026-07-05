@@ -157,7 +157,7 @@ describe("typing + guards", () => {
     const { block } = await import("../../src/query");
     expect(() =>
       block()
-        .let("x", surql`$something`)
+        .let({ x: surql`$something` })
         .return((sv) => (sv.x as unknown as { length(): unknown }).length()),
     ).toThrow(/surql\.fn/);
   });

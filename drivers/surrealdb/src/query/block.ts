@@ -6,9 +6,12 @@
  *
  * ```ts
  * block()
- *   .let("n", select(Post).where((p) => p.author.eq(e.after.id)).count())
+ *   .let({ n: select(Post).where((p) => p.author.eq(e.after.id)).count() })
  *   .if((s) => s.n.gt(100), NotifyPowerUser.call({ user: e.after.id }))
  * ```
+ *
+ * Bindings are OBJECTS (`.let({ n: … })`, `.for({ item: … }, body)`) — the var name is a real
+ * property, so TypeScript rename/go-to-reference connects the declaration to every `s.n` usage.
  *
  * A block is a fragment like every builder (`toQuery()` / interpolation), typed by its `RETURN`
  * (`Frag<R>` — the `[T]` rule).
@@ -190,23 +193,41 @@ export class Block<V extends Record<string, unknown>, R> {
     return hasTopLevelSemi(bare) ? `{ ${bare}; }` : `{ ${bare} }`;
   }
 
-  /** `LET $name = <value>` — the var joins the chain TYPED: later callbacks get `s.<name>` as a
-   *  ref of the value's kind. Value: a literal (bound), a builder/block/fragment (spliced), or a
-   *  callback of the vars so far. */
-  let<N extends string, X>(
-    name: N,
-    value: X | ((s: BlockRefs<V>) => X),
-  ): Block<V & Record<N, ValueOf<X>>, R> {
+  /** Validate a `$param` binding name (object key) — shared by `.let`/`.for`. */
+  private static checkName(method: string, name: string): void {
     if (!VAR_NAME.test(name) || /^(?:b|r)\d+$/.test(name))
       throw new Error(
-        `block().let(): "${name}" is not a usable $param name (identifier required; "b<n>"/"r<n>" are reserved for generated binds).`,
+        `block().${method}(): "${name}" is not a usable $param name (identifier required; "b<n>"/"r<n>" are reserved for generated binds).`,
       );
-    const v = this.resolve(value);
-    const { kind, elem } = kindOfValue(v);
-    return this.next<V & Record<N, ValueOf<X>>, R>(
-      (ctx) => `LET $${name} = ${stripOuterParens(operandText(v, ctx))}`,
-      { name, kind, elem },
-    );
+  }
+
+  /** `LET $<key> = <value>` per entry — the binding is an OBJECT (`.let({ n: … })`), so the var
+   *  name is a real property: renaming `n` renames every `s.n` usage (refactor/go-to-reference
+   *  safe). Each var joins the chain TYPED: later callbacks get `s.<key>` as a ref of the
+   *  value's kind. Values: literals (bound), builders/blocks/fragments (spliced), or a callback
+   *  of the vars so far (`.let((s) => ({ next: s.n.plus(1) }))`). Several keys emit several
+   *  `LET`s in order; keys of the SAME call can't see each other — chain another `.let` for
+   *  that. */
+  let<O extends Record<string, unknown>>(
+    vars: O | ((s: BlockRefs<V>) => O),
+  ): Block<V & { [K in keyof O]: ValueOf<O[K]> }, R> {
+    const resolved = this.resolve(vars as never) as Record<string, unknown>;
+    const entries = Object.entries(resolved);
+    if (!entries.length)
+      throw new Error(
+        "block().let() got an empty object — bind at least one var: .let({ name: value }).",
+      );
+    // biome-ignore lint/suspicious/noExplicitAny: accumulating across per-key next() steps.
+    let out: Block<any, R> = this;
+    for (const [name, v] of entries) {
+      Block.checkName("let", name);
+      const { kind, elem } = kindOfValue(v);
+      out = out.next(
+        (ctx) => `LET $${name} = ${stripOuterParens(operandText(v, ctx))}`,
+        { name, kind, elem },
+      );
+    }
+    return out as Block<V & { [K in keyof O]: ValueOf<O[K]> }, R>;
   }
 
   /** An arbitrary statement — a fragment, a builder, or a callback returning one
@@ -238,31 +259,36 @@ export class Block<V extends Record<string, unknown>, R> {
     });
   }
 
-  /** `FOR $name IN <iterable> { <body> }` — the loop var is typed to the iterable's element
-   *  inside the body callback. */
-  for<N extends string, X>(
-    name: N,
-    iterable: X | ((s: BlockRefs<V>) => X),
+  /** `FOR $<key> IN <iterable> { <body> }` — the loop binding is a ONE-KEY object
+   *  (`.for({ item: iterable }, (s) => …s.item…)`), same refactor-safe shape as `.let`; the
+   *  loop var is typed to the iterable's element inside the body callback. */
+  for<O extends Record<string, unknown>>(
+    binding: O | ((s: BlockRefs<V>) => O),
     body:
       | BoundQuery
       | ToQuery
-      | ((s: BlockRefs<V & Record<N, ElemOf<X>>>) => BoundQuery | ToQuery),
+      | ((
+          s: BlockRefs<V & { [K in keyof O]: ElemOf<O[K]> }>,
+        ) => BoundQuery | ToQuery),
   ): Block<V, R> {
-    if (!VAR_NAME.test(name) || /^(?:b|r)\d+$/.test(name))
+    const resolved = this.resolve(binding as never) as Record<string, unknown>;
+    const entries = Object.entries(resolved);
+    if (entries.length !== 1)
       throw new Error(
-        `block().for(): "${name}" is not a usable $param name (identifier required; "b<n>"/"r<n>" are reserved for generated binds).`,
+        `block().for() takes exactly ONE loop binding — .for({ item: iterable }, body); got ${entries.length} keys.`,
       );
-    const iter = this.resolve(iterable);
+    const [name, iter] = entries[0] as [string, unknown];
+    Block.checkName("for", name);
     const { kind, elem } = kindOfValue(iter);
     const elemKind: RefKind = kind === "array" ? (elem ?? "other") : "other";
     // The body sees the loop var too — a one-off child block scope carries it.
-    const inner = new Block<V & Record<N, ElemOf<X>>, never>(
+    const inner = new Block<V & { [K in keyof O]: ElemOf<O[K]> }, never>(
       [],
       [...this.meta, { name, kind: elemKind }],
     );
     return this.next<V, R>(
       (ctx) =>
-        `FOR $${name} IN ${operandText(iter, ctx)} ${inner.bodyText(body as Body<V & Record<N, ElemOf<X>>>, ctx)}`,
+        `FOR $${name} IN ${operandText(iter, ctx)} ${inner.bodyText(body as Body<V & { [K in keyof O]: ElemOf<O[K]> }>, ctx)}`,
     );
   }
 

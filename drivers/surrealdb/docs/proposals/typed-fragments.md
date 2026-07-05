@@ -78,7 +78,7 @@ Plain `Expr` forms stay (untyped quick path). `$auth` typing: `defineAccess(...)
 - **Statement parity — `block()`** with LET vars typed through the chain:
   ```ts
   block()
-    .let("n", select(Post).where((p) => p.author.eq(e.after.id)).count())
+    .let({ n: select(Post).where((p) => p.author.eq(e.after.id)).count() })
     .if((s) => s.n.gt(100), () => NotifyPowerUser.call({ user: e.after.id }))
   ```
   `s.n: Frag<number>` inferred from the let. LET/IF/FOR/RETURN/THROW all take this shape
