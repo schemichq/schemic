@@ -15,6 +15,7 @@ import {
   FunctionDef,
   isParamRef,
   ParamRef,
+  paramProxy,
   RecordIdField,
   TableDef,
 } from "./pure";
@@ -82,17 +83,6 @@ function surqlTag<R extends unknown[] = unknown[]>(
   }) as unknown as TemplateStringsArray;
   const q = sdkSurql(tsa, ...rest);
   return new Surql<R>(q.query, { ...q.bindings });
-}
-
-/** Build the `surql.$` proxy: each property access extends the path (`surql.$.after.email`). */
-function paramProxy(path: readonly string[]): ParamRef {
-  return new Proxy(new ParamRef(path), {
-    get(target, key) {
-      if (typeof key === "string" && !(key in target) && key !== "then")
-        return paramProxy([...path, key]);
-      return (target as unknown as Record<string | symbol, unknown>)[key];
-    },
-  });
 }
 
 /**

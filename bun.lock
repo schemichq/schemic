@@ -33,7 +33,6 @@
       "version": "0.1.0-alpha.24",
       "dependencies": {
         "@schemic/core": "workspace:*",
-        "surrealdb": "^2.0.3",
       },
       "devDependencies": {
         "@biomejs/biome": "^2.3.11",
@@ -46,6 +45,7 @@
       },
       "peerDependencies": {
         "@surrealdb/node": "*",
+        "surrealdb": "^2.0.3",
         "zod": "^4.3.5",
       },
       "optionalPeers": [

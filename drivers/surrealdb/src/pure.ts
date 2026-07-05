@@ -761,17 +761,17 @@ export class SField<
   // SurrealQL DDL metadata. $default/$defaultAlways mark the field create-optional;
   // $readonly marks it non-updatable (see Create<>/Update<>). The default accepts a
   // plain value (rendered as a literal) or a `surql` expression.
-  $default(value: z.output<S> | BoundQuery): SField<S, Flags | "create"> {
+  $default(value: z.output<S> | FieldExpr): SField<S, Flags | "create"> {
     return new SField(this.schema, {
       ...this.surreal,
-      default: toExpr(value),
+      default: toExpr(resolveFieldExpr(value)),
       defaultAlways: false,
     });
   }
-  $defaultAlways(value: z.output<S> | BoundQuery): SField<S, Flags | "create"> {
+  $defaultAlways(value: z.output<S> | FieldExpr): SField<S, Flags | "create"> {
     return new SField(this.schema, {
       ...this.surreal,
-      default: toExpr(value),
+      default: toExpr(resolveFieldExpr(value)),
       defaultAlways: true,
     });
   }
@@ -786,18 +786,24 @@ export class SField<
    * There is no separate update option — every field is already optional in `Update<>`.
    */
   $value<O extends boolean = false>(
-    expr: BoundQuery,
+    expr: FieldExpr,
     // biome-ignore lint/correctness/noUnusedFunctionParameters: drives the O generic (type-level only)
     opts?: { optional?: O },
   ): SField<S, O extends true ? Flags | "create" : Flags> {
-    return new SField(this.schema, { ...this.surreal, value: expr });
+    return new SField(this.schema, {
+      ...this.surreal,
+      value: resolveFieldExpr(expr),
+    });
   }
   /**
    * `COMPUTED <expr>` — a derived, read-only column computed from other fields. Never written, so
    * it's create-OPTIONAL: `s.string().$computed(surql\`string::concat(first, " ", last)\`)`.
    */
-  $computed(expr: BoundQuery): SField<S, Flags | "create"> {
-    return new SField(this.schema, { ...this.surreal, computed: expr });
+  $computed(expr: FieldExpr): SField<S, Flags | "create"> {
+    return new SField(this.schema, {
+      ...this.surreal,
+      computed: resolveFieldExpr(expr),
+    });
   }
   /**
    * Add an `ASSERT` fragment (fragments AND-combine into one clause):
@@ -805,8 +811,8 @@ export class SField<
    *   - `.$assert()` (no args) derives fragments from the field's existing Zod checks
    *     (formats, string length/regex, number bounds) — best-effort; unknowns are skipped.
    */
-  $assert(expr?: BoundQuery): SField<S, Flags> {
-    const frags = expr ? [expr] : deriveAsserts(this.schema);
+  $assert(expr?: FieldExpr): SField<S, Flags> {
+    const frags = expr ? [resolveFieldExpr(expr)] : deriveAsserts(this.schema);
     return this.pushAsserts(frags);
   }
 
@@ -2913,8 +2919,10 @@ export class TableDef<Name extends string, S extends Shape> {
     return this.withConfig({ comment });
   }
   /** Set table-level `PERMISSIONS` (folded into the single `DEFINE TABLE` head). */
-  permissions(spec: TablePermissions) {
-    return this.withConfig({ permissions: spec });
+  permissions(spec: TablePermissions | ((p: PermCtx<S>) => TablePermissions)) {
+    return this.withConfig({
+      permissions: typeof spec === "function" ? spec(permCtx<S>()) : spec,
+    });
   }
   /** `CHANGEFEED <dur> [INCLUDE ORIGINAL]` — track row changes for `SHOW CHANGES`. */
   changefeed(expiry: string, opts: { includeOriginal?: boolean } = {}) {
@@ -2969,17 +2977,17 @@ export class TableDef<Name extends string, S extends Shape> {
   event(
     name: string,
     spec: {
-      when?: Expr;
-      then: Expr | Expr[];
+      when?: EventExpr<S>;
+      then: EventThen<S>;
       async?: EventAsync;
       comment?: string;
     },
   ) {
     const event: TableEvent = {
       name,
-      when: spec.when,
+      when: spec.when === undefined ? undefined : resolveEventExpr(spec.when),
       // biome-ignore lint/suspicious/noThenProperty: `then` is the SurrealQL THEN clause (a string/BoundQuery), not a PromiseLike.
-      then: spec.then,
+      then: resolveEventExpr(spec.then),
       async: spec.async,
       comment: spec.comment,
     };
@@ -3549,12 +3557,12 @@ export class EventDef {
  * (preferred — no name repetition) or a table name string. See {@link TableDef.event} for the
  * inline, chainable form.
  */
-export function defineEvent(
-  table: TableDef<string, Shape> | string,
+export function defineEvent<T extends TableDef<string, Shape> | string>(
+  table: T,
   name: string,
   spec: {
-    when?: Expr;
-    then: Expr | Expr[];
+    when?: EventExpr<T extends TableDef<string, infer S> ? S : Shape>;
+    then: EventThen<T extends TableDef<string, infer S> ? S : Shape>;
     async?: EventAsync;
     comment?: string;
   },
@@ -3563,8 +3571,8 @@ export function defineEvent(
   return new EventDef(
     tableName,
     name,
-    spec.when,
-    spec.then,
+    spec.when === undefined ? undefined : resolveEventExpr(spec.when),
+    resolveEventExpr(spec.then),
     spec.async,
     spec.comment,
   );
@@ -3600,6 +3608,123 @@ export class ParamRef {
     return `$${param}${rest.map((p) => `.${escapeIdent(p)}`).join("")}`;
   }
 }
+/** Deep `$param.path` proxy: each property access extends the path (`surql.$.after.email`). */
+export function paramProxy(path: readonly string[]): ParamRef {
+  return new Proxy(new ParamRef(path), {
+    get(target, key) {
+      if (typeof key === "string" && !(key in target) && key !== "then")
+        return paramProxy([...path, key]);
+      return (target as unknown as Record<string | symbol, unknown>)[key];
+    },
+  });
+}
+
+/** A BARE column-path reference (permissions exprs use bare field names, not `$this.…`) —
+ *  splices via the query layer's colref brand (`Symbol.for`, no import needed). */
+function colProxy(path: readonly string[]): unknown {
+  const target = { [Symbol.for("schemic.surrealdb.colref")]: path.join(".") };
+  return new Proxy(target, {
+    get(t, key) {
+      if (typeof key === "string" && !(key in t) && key !== "then")
+        return colProxy([...path, key]);
+      return (t as Record<string | symbol, unknown>)[key];
+    },
+  });
+}
+
+/** Typed row refs under a `$param`: top-level keys from the table shape, each a {@link ParamRef}
+ *  (`e.after.email` -> `$after.email`); deeper paths stay proxied (untyped). Collapses to a loose
+ *  string-keyed map for shape-agnostic `TableDef<string, Shape|any>` (variance guard). */
+export type RowRefs<S extends Shape> = string extends keyof S
+  ? Record<string, ParamRef>
+  : { readonly [K in keyof S]: ParamRef };
+/** Typed BARE column refs (permissions): `p.row.author` -> `author`. Same variance guard. */
+export type ColRefs<S extends Shape> = string extends keyof S
+  ? Record<string, unknown>
+  : { readonly [K in keyof S]: unknown };
+
+/** The typed context an EVENT callback receives — exactly the params SurrealDB defines there. */
+export interface EventCtx<S extends Shape> {
+  /** The row after the change (`$after.<field>` refs, typed to the table). */
+  after: RowRefs<S>;
+  /** The row before the change. */
+  before: RowRefs<S>;
+  /** `$value` — the changed value. */
+  value: ParamRef;
+  /** `$event` — typed comparisons: `e.event.eq("CREATE")` (canonical single-quote spelling). */
+  event: {
+    eq(kind: "CREATE" | "UPDATE" | "DELETE"): Expr;
+    neq(kind: "CREATE" | "UPDATE" | "DELETE"): Expr;
+  };
+}
+function eventCtx<S extends Shape>(): EventCtx<S> {
+  return {
+    after: paramProxy(["after"]) as RowRefs<S>,
+    before: paramProxy(["before"]) as RowRefs<S>,
+    value: paramProxy(["value"]),
+    event: {
+      eq: (k) => `$event = '${k}'`,
+      neq: (k) => `$event != '${k}'`,
+    },
+  };
+}
+/** An event clause: a plain `Expr` (string/`surql`), or a CALLBACK receiving the typed ctx. */
+export type EventExpr<S extends Shape> = Expr | ((e: EventCtx<S>) => Expr);
+export type EventThen<S extends Shape> =
+  | Expr
+  | Expr[]
+  | ((e: EventCtx<S>) => Expr | Expr[]);
+function resolveEventExpr<S extends Shape, R>(
+  v: R | ((e: EventCtx<S>) => R),
+): R {
+  return typeof v === "function"
+    ? (v as (e: EventCtx<S>) => R)(eventCtx<S>())
+    : v;
+}
+
+/** The typed context a FIELD-clause callback receives (`$default`/`$value`/`$computed`/`$assert`). */
+export interface FieldCtx {
+  /** `$value` — the incoming value for this field. */
+  value: ParamRef;
+  /** `$this.<path>` — the record (sibling fields). UNTYPED paths: a field does not know its
+   *  table at authoring time (define clauses needing typed siblings on the table instead). */
+  this: ParamRef & Record<string, ParamRef>;
+}
+const fieldCtx = (): FieldCtx => ({
+  value: paramProxy(["value"]),
+  this: paramProxy(["this"]) as FieldCtx["this"],
+});
+/** A field clause: a `surql` expression, or a CALLBACK receiving `{ value, this }`. */
+export type FieldExpr = BoundQuery | ((f: FieldCtx) => BoundQuery);
+function resolveFieldExpr(v: FieldExpr): BoundQuery;
+function resolveFieldExpr<T>(v: T | FieldExpr): T | BoundQuery;
+function resolveFieldExpr(v: unknown): unknown {
+  return typeof v === "function"
+    ? (v as (f: FieldCtx) => unknown)(fieldCtx())
+    : v;
+}
+
+/** The typed context a PERMISSIONS callback receives. */
+export interface PermCtx<S extends Shape> {
+  /** BARE column refs (permissions exprs reference fields directly): `p.row.author` -> `author`. */
+  row: ColRefs<S>;
+  /** `$auth.<path>` — the authenticated record. UNTYPED paths for now: see `.subject(User)` on a
+   *  record access (authoring metadata; a type-level registry across modules is not expressible). */
+  auth: ParamRef & Record<string, ParamRef>;
+  /** `$session.<path>`. */
+  session: ParamRef & Record<string, ParamRef>;
+  /** `$token.<path>`. */
+  token: ParamRef & Record<string, ParamRef>;
+}
+function permCtx<S extends Shape>(): PermCtx<S> {
+  return {
+    row: colProxy([]) as ColRefs<S>,
+    auth: paramProxy(["auth"]) as PermCtx<S>["auth"],
+    session: paramProxy(["session"]) as PermCtx<S>["session"],
+    token: paramProxy(["token"]) as PermCtx<S>["token"],
+  };
+}
+
 /** Cross-realm ParamRef check (instanceof breaks across dual package instances). */
 export function isParamRef(v: unknown): v is ParamRef {
   return (
@@ -3698,13 +3823,27 @@ export class FunctionDef<A extends Shape = Shape, R = unknown> {
   returns<RF extends AnyField>(type: RF): FunctionDef<A, App<RF>> {
     return this.withConfig<App<RF>>({ returns: type });
   }
-  /** The function body — a `surql\`…\`` block (braces optional) or a raw string. */
-  body(body: Expr): FunctionDef<A, R> {
+  /** The function body — a `surql\`…\`` block (braces optional), a raw string, or a CALLBACK
+   *  receiving the def's own args as TYPED refs (`.body((a) => surql\`RETURN ${a.email}\`)` —
+   *  an arg-name typo is a compile error). */
+  body(
+    body: Expr | ((args: { [K in keyof A]: ParamRef }) => Expr),
+  ): FunctionDef<A, R> {
+    if (typeof body === "function") {
+      const refs = Object.fromEntries(
+        Object.keys(this.args).map((k) => [k, paramProxy([k])]),
+      ) as { [K in keyof A]: ParamRef };
+      return this.withConfig({ body: body(refs) });
+    }
     return this.withConfig({ body });
   }
   /** `PERMISSIONS`: `FULL` (true, the default), `NONE` (false), or a `surql` condition. */
-  permissions(p: boolean | Expr): FunctionDef<A, R> {
-    return this.withConfig({ permissions: p });
+  permissions(
+    p: boolean | Expr | ((ctx: Omit<PermCtx<Shape>, "row">) => boolean | Expr),
+  ): FunctionDef<A, R> {
+    return this.withConfig({
+      permissions: typeof p === "function" ? p(permCtx<Shape>()) : p,
+    });
   }
   comment(comment: string): FunctionDef<A, R> {
     return this.withConfig({ comment });
@@ -3846,6 +3985,8 @@ interface AccessConfig {
   /** RECORD-only: `WITH REFRESH` — issue refresh tokens alongside the session token. */
   refresh?: boolean;
   duration?: AccessDuration;
+  /** RECORD-only authoring METADATA: the subject table (SIGNUP/SIGNIN records). Emits nothing. */
+  subject?: string;
   /** `COMMENT @string` — a human description stored with the access. */
   comment?: string;
 }
@@ -3887,6 +4028,14 @@ export abstract class AccessDef {
 export class RecordAccessDef extends AccessDef {
   protected clone(c: Partial<AccessConfig>): this {
     return new RecordAccessDef(this.name, { ...this.config, ...c }) as this;
+  }
+  /** Declare the access's SUBJECT table — the table its SIGNUP/SIGNIN records live in. Authoring
+   *  METADATA only (emits nothing): documents intent and feeds future tooling (\$auth typing is not
+   *  expressible type-level across modules — see the typed-fragments proposal). */
+  subject(table: TableDef<string, Shape> | string): this {
+    return this.clone({
+      subject: typeof table === "string" ? table : table.name,
+    });
   }
   /** `SIGNUP { … }` — a `surql\`…\`` block (braces optional) run on sign-up. */
   signup(body: Expr): this {
