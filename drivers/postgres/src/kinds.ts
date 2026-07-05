@@ -85,6 +85,8 @@ export interface PgTablePortable extends PortableObject {
   fields: PortableField[];
   primaryKey?: string[];
   checks?: string[];
+  /** SINGLETON table: the fixed `id` literal (see `defineSingleton`); drives the DB-enforced id emit. */
+  singleton?: string;
 }
 
 /** The `index` kind's portable form (a secondary/unique index over one table's columns). */
@@ -148,6 +150,7 @@ const createInput = (t: PgTablePortable) => ({
   fields: t.fields,
   ...(t.primaryKey ? { primaryKey: t.primaryKey } : {}),
   ...(t.checks ? { checks: t.checks } : {}),
+  ...(t.singleton !== undefined ? { singleton: t.singleton } : {}),
 });
 
 /**
@@ -221,6 +224,7 @@ const tableEngine: KindEngine<PgTablePortable, PgTablePortable> = {
       fields: t.fields,
       ...(t.primaryKey ? { primaryKey: t.primaryKey } : {}),
       ...(t.checks ? { checks: t.checks } : {}),
+      ...(t.singleton !== undefined ? { singleton: t.singleton } : {}),
     }),
     ...commentLines(t),
   ],
@@ -237,6 +241,9 @@ const tableEngine: KindEngine<PgTablePortable, PgTablePortable> = {
         name: t.name,
         fields: t.fields.map((f) => canonField(f, t.name)),
         ...(t.primaryKey ? { primaryKey: t.primaryKey } : {}),
+        // a SINGLETON canonicalizes to the bare `id text PRIMARY KEY` (default/check dropped) — the
+        // EXACT implicit-id line introspect reconstructs, so a singleton never phantom-diffs.
+        ...(t.singleton !== undefined ? { singleton: t.singleton } : {}),
       },
       // drop the implicit id's DB default (like all defaults) so it never counts as drift -> no phantom
       { forCanonical: true },
@@ -695,6 +702,7 @@ export function splitTable(t: PgTable): PortableObject[] {
       ? { primaryKey: t.primaryKey }
       : {}),
     ...(t.checks && t.checks.length > 0 ? { checks: t.checks } : {}),
+    ...(t.singleton !== undefined ? { singleton: t.singleton } : {}),
   };
   out.push(table);
 

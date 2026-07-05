@@ -12,6 +12,12 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 ## [Unreleased]
 
 ### Added
+- **postgres:** `defineSingleton(name, shape?, { id? })` — a DB-ENFORCED one-record table (app config,
+  feature flags, …), mirroring `@schemic/surrealdb`. The `id` is fixed to one literal (default
+  `"default"`), emitted `id text PRIMARY KEY DEFAULT '<id>' CHECK (id = '<id>')` so exactly one row is
+  possible; `create` fills the id automatically. `App["id"]` is the id LITERAL (`SingletonIdOf<T>`
+  marker). Round-trips with zero phantom-diff (the DEFAULT/CHECK drop to the bare implicit-id line in
+  the canonical form).
 - **core / surrealdb / postgres:** table COMPOSITION + derived schemas (cross-driver convention, from
   real usage): `defineTable(name, s.object())`, a public native `s.object().fields` map (inverse of
   `.shape`), `TableDef.extend(shape | s.object())` typed cast-free column mixins, and derived

@@ -902,6 +902,9 @@ export interface PgTableConfig {
   checks?: string[];
   indexes?: PgIndexConfig[];
   foreignKeys?: PgForeignKeyConfig[];
+  /** SINGLETON table marker (see {@link defineSingleton}): the fixed `id` literal. Drives the
+   *  DB-enforced one-record `id` column emit; not a user-set field on a normal table. */
+  singleton?: string;
 }
 
 // The element bound for a table's field map. Uses `any` deliberately: `PgField` is invariant in its
@@ -1167,6 +1170,48 @@ export namespace defineTable {
   >(descriptor: PgPreset<C>): PgPreset<C> {
     return descriptor;
   }
+}
+
+/**
+ * A ONE-RECORD table (app config, feature flags, …) — DB-ENFORCED: the `id` column is fixed to a single
+ * literal (default `"default"`), emitted as `id text PRIMARY KEY DEFAULT '<id>' CHECK (id = '<id>')`, so
+ * the primary key + check make exactly one row possible. `App["id"]` is the id's string LITERAL — the
+ * compile-time singleton marker (read back by {@link SingletonIdOf}) that drives the id-optional client
+ * sugar. Mirrors `@schemic/surrealdb`'s `defineSingleton`. The `id` key is reserved (managed here).
+ *
+ * ```ts
+ * export const appConfig = defineSingleton("app_config", { theme: s.text(), maxUsers: s.integer() });
+ * // -> one row; `id` is always "default"
+ * ```
+ */
+export function defineSingleton<
+  Name extends string,
+  F extends Record<string, AnyPgField> = Record<string, never>,
+  Id extends string = "default",
+>(
+  name: Name,
+  fields?: F | PgObjectField<F>,
+  opts?: { id?: Id },
+): PgTableDef<
+  Name,
+  Omit<F, "id"> & { id: PgField<z.ZodLiteral<Id>, "readonly"> }
+> {
+  const id = (opts?.id ?? "default") as Id;
+  if (!/^[A-Za-z0-9_]+$/.test(id))
+    throw new Error(
+      `defineSingleton("${name}"): the fixed id key "${id}" must be a plain identifier (letters/digits/underscore).`,
+    );
+  const map = fields instanceof PgObjectField ? fields.fields : (fields ?? {});
+  // The `id` field is a literal-typed text column — the type marker; its DB-enforced PK/DEFAULT/CHECK
+  // are emitted from `config.singleton` (see `createTableDdl`), so the field itself carries no PK flag.
+  const idField = s.literal(id) as unknown as PgField<
+    z.ZodLiteral<Id>,
+    "readonly"
+  >;
+  const merged = { ...map, id: idField } as Omit<F, "id"> & {
+    id: PgField<z.ZodLiteral<Id>, "readonly">;
+  };
+  return new PgTableDef(name, merged, { singleton: id });
 }
 
 // --- defineEnum: a native pg ENUM type (CREATE TYPE … AS ENUM) ----------------------------------
@@ -1596,3 +1641,16 @@ export type CreateInput<T extends PgTableDef> = Prettify<
 export type UpdateInput<T extends PgTableDef> = Prettify<
   z.output<z.ZodObject<UpdateRawShape<T["fields"]>>>
 >;
+
+/** The fixed id LITERAL of a SINGLETON table (from {@link defineSingleton}), or `never` for a normal
+ *  table (whose `id` is absent/broad). Drives the id-optional client sugar (`db.get(Config)` etc.). */
+export type SingletonIdOf<T extends PgTableDef> =
+  App<T> extends {
+    id: infer V;
+  }
+    ? [string] extends [V]
+      ? never
+      : V extends string
+        ? V
+        : never
+    : never;

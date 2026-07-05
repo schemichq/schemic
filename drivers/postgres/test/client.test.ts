@@ -3,8 +3,9 @@
 // standalone `select(t).run(conn)` still works (the binding is additive).
 
 import { describe, expect, test } from "bun:test";
-import { emitKinds } from "@schemic/core";
-import { defineTable, s } from "../src";
+import { buildKindDiff, emitKinds } from "@schemic/core";
+import { defineSingleton, defineTable, s } from "../src";
+import type { SingletonIdOf } from "../src/authoring";
 import { connect, PgClient } from "../src/client";
 import type { PgConn } from "../src/connection";
 import { postgresDriver } from "../src/driver";
@@ -295,5 +296,95 @@ describe("postgres ORM client (P2 writes)", () => {
     } finally {
       await conn.close();
     }
+  });
+});
+
+describe("defineSingleton — DB-enforced one-record tables", () => {
+  const appConfig = defineSingleton("app_config", {
+    theme: s.text(),
+    maxUsers: s.integer(),
+  });
+
+  // type marker: SingletonIdOf reads the fixed id literal; a normal table -> never
+  type _sglId = SingletonIdOf<typeof appConfig>;
+  const _idIsDefault: _sglId = "default"; // compiles: the literal is "default"
+  const normal = defineTable("u", { id: s.text().$primaryKey(), n: s.text() });
+  // @ts-expect-error — a normal table has no singleton id (never)
+  const _notSingleton: SingletonIdOf<typeof normal> = "default";
+  void _idIsDefault;
+  void _notSingleton;
+
+  test("emits a DB-enforced one-record table (PK + DEFAULT + CHECK on the literal id)", () => {
+    const [ddl] = emitKinds(
+      registry,
+      postgresDriver.explode([appConfig], []),
+    ) as string[];
+    expect(ddl).toContain(
+      `"id" text PRIMARY KEY DEFAULT 'default' CHECK ("id" = 'default')`,
+    );
+  });
+
+  test("round-trips with NO phantom diff (canonical = bare implicit id)", async () => {
+    const objs = postgresDriver.explode([appConfig], []);
+    const conn = (await postgresDriver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
+    try {
+      await postgresDriver.apply(conn, emitKinds(registry, objs));
+      const live = await postgresDriver.introspectAll(conn);
+      const { up, down } = buildKindDiff(registry, live, objs);
+      expect({ up, down }).toEqual({ up: [], down: [] });
+    } finally {
+      await conn.close();
+    }
+  });
+
+  test("create fills the id automatically; the row carries id='default'; single-record enforced", async () => {
+    const objs = postgresDriver.explode([appConfig], []);
+    const conn = (await postgresDriver.connect({
+      params: { url: "" },
+    } as never)) as PgConn;
+    try {
+      await postgresDriver.apply(conn, emitKinds(registry, objs));
+      const db = connect(conn);
+      const created = await db
+        .create(appConfig)
+        .content({ theme: "dark", maxUsers: 5 });
+      expect(created).toEqual({ id: "default", theme: "dark", maxUsers: 5 });
+      // a second row (any id) is rejected — PK + CHECK make exactly one record possible
+      await expect(
+        conn.query(
+          `INSERT INTO "app_config" ("id","theme","maxUsers") VALUES ('other','x',1);`,
+        ),
+      ).rejects.toThrow();
+      await expect(
+        conn.query(
+          `INSERT INTO "app_config" ("theme","maxUsers") VALUES ('x',1);`,
+        ),
+      ).rejects.toThrow();
+    } finally {
+      await conn.close();
+    }
+  });
+
+  test("a non-identifier id key throws", () => {
+    expect(() =>
+      defineSingleton("bad", { x: s.text() }, { id: "no spaces" }),
+    ).toThrow(/plain identifier/);
+  });
+
+  test("a custom id literal is honored", () => {
+    const flags = defineSingleton(
+      "flags",
+      { on: s.boolean() },
+      { id: "singleton" },
+    );
+    const [ddl] = emitKinds(
+      registry,
+      postgresDriver.explode([flags], []),
+    ) as string[];
+    expect(ddl).toContain(
+      `"id" text PRIMARY KEY DEFAULT 'singleton' CHECK ("id" = 'singleton')`,
+    );
   });
 });

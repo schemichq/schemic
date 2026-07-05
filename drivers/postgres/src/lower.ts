@@ -162,6 +162,8 @@ export function lowerTable(def: PgTableDef): PgTable {
 
   const table: PgTable = { name: def.name, fields, indexes };
   if (pkCols.length > 0) table.primaryKey = pkCols;
+  if (def.config.singleton !== undefined)
+    table.singleton = def.config.singleton;
   if (def.config.checks && def.config.checks.length > 0)
     table.checks = def.config.checks;
   if (def.config.foreignKeys && def.config.foreignKeys.length > 0)

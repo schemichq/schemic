@@ -41,6 +41,10 @@ export interface PgTable {
   primaryKey?: string[];
   checks?: string[];
   foreignKeys?: PgForeignKey[];
+  /** SINGLETON table: the fixed `id` literal — the `id` column is DB-enforced to this one value (see
+   *  `defineSingleton`). Emitted as `id text PRIMARY KEY DEFAULT '<id>' CHECK (id = '<id>')`; drops to
+   *  the bare `id text PRIMARY KEY` in the canonical form (like the implicit id) so it never phantom-diffs. */
+  singleton?: string;
 }
 
 /** Just what `createTableDdl` needs (a `PgTable` is a structural superset). */
@@ -243,12 +247,23 @@ export function createTableDdl(
   const fields = pgEmitFields(t);
   const custom = !!(t.primaryKey && t.primaryKey.length > 0);
   const cols: string[] = [];
-  if (!custom)
+  if (t.singleton !== undefined) {
+    // SINGLETON: the `id` is DB-enforced to one literal (one record). Inline PK + DEFAULT + CHECK in
+    // emit; the DEFAULT/CHECK drop in the canonical form so it reduces to the exact bare implicit-id
+    // line — identical to what introspect reconstructs (implicit-id skip), so it never phantom-diffs.
+    const lit = `'${t.singleton}'`;
+    cols.push(
+      `${escId("id")} text PRIMARY KEY${opts?.forCanonical ? "" : ` DEFAULT ${lit} CHECK (${escId("id")} = ${lit})`}`,
+    );
+  } else if (!custom)
     cols.push(
       // implicit id (mirrors Surreal) — DB-side auto-gen default, dropped from the canonical form.
       `${escId("id")} text PRIMARY KEY${opts?.forCanonical ? "" : ` DEFAULT ${IMPLICIT_ID_DEFAULT}`}`,
     );
-  for (const f of fields) cols.push(fieldColumnDdl(f));
+  // The singleton's `id` field is handled inline above — keep it out of the column loop.
+  for (const f of fields)
+    if (t.singleton === undefined || f.name !== "id")
+      cols.push(fieldColumnDdl(f));
   if (custom) cols.push(`PRIMARY KEY (${t.primaryKey?.map(escId).join(", ")})`);
   for (const c of t.checks ?? []) cols.push(`CHECK (${c})`);
   return `CREATE TABLE ${escId(t.name)} (\n  ${cols.join(",\n  ")}\n);`;
