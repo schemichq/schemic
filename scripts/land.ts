@@ -123,7 +123,17 @@ if (!flag("--no-test")) {
     // is gitignored, so this doesn't dirty the tree.
     run("bun", ["run", "--filter", "*", "build"]);
     run("bun", ["run", "--filter", "*", "typecheck"]);
-    run("bun", ["run", "--filter", "*", "test"]);
+    // Tests run SEQUENTIALLY per package: --filter '*' runs them in parallel, and CPU contention
+    // (PGlite's ~2min suite alongside surreal's live-server e2e boots) starves the e2e beforeAll
+    // hooks into timeouts — repeated false gate failures. Sequential costs wall-clock, never truth.
+    for (const dir of [
+      "packages/core",
+      "packages/cli",
+      "drivers/surrealdb",
+      "drivers/postgres",
+    ]) {
+      run("bun", ["run", "--cwd", dir, "test"]);
+    }
   } catch {
     console.error("gate FAILED — rolling main back, nothing pushed.");
     gitIO("reset", "--hard", main);
