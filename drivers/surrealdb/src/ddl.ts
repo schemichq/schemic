@@ -436,6 +436,55 @@ export function braceBody(e: Expr): string {
   return s.startsWith("{") ? s : `{ ${s} }`;
 }
 
+/**
+ * Render one event `THEN` entry, AUTO-BLOCKING multi-statement bodies: authors write statements,
+ * schemic owns the grammar. A bare entry with a top-level `;` becomes `{ …; }`; whitespace collapses
+ * to single spaces (quote-aware) — matching INFO's canonical spelling for blocks (single line,
+ * trailing `;` kept), so authored and introspected structs compare equal. A single statement stays
+ * bare (a trailing `;` is stripped — INFO returns single `THEN`s without one).
+ */
+export function blockThen(e: Expr): string {
+  const raw = eventClause(e);
+  // One pass: collapse whitespace runs OUTSIDE strings to a single space; record top-level `;`.
+  let out = "";
+  let depth = 0;
+  let quote: '"' | "'" | null = null;
+  let pendingSpace = false;
+  const topSemis: number[] = []; // indices into `out`
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i] as string;
+    if (quote) {
+      out += c;
+      if (c === "\\" && i + 1 < raw.length) {
+        out += raw[i + 1];
+        i++;
+      } else if (c === quote) quote = null;
+      continue;
+    }
+    if (/\s/.test(c)) {
+      pendingSpace = out.length > 0;
+      continue;
+    }
+    if (pendingSpace) {
+      out += " ";
+      pendingSpace = false;
+    }
+    if (c === '"' || c === "'") quote = c;
+    else if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") depth--;
+    else if (c === ";" && depth === 0) topSemis.push(out.length);
+    out += c;
+  }
+  out = out.trim();
+  if (out.startsWith("{") && out.endsWith("}")) return out; // author-braced — already canonical
+  // Strip trailing `;` (a lone one doesn't make a statement LIST).
+  while (out.endsWith(";")) {
+    topSemis.pop();
+    out = out.slice(0, -1).trimEnd();
+  }
+  return topSemis.length > 0 ? `{ ${out}; }` : out;
+}
+
 /** `DEFINE EVENT <name> ON TABLE <table> [WHEN <when>] THEN <then>`. Multiple `then`s run in order. */
 /** SurrealDB's materialized ASYNC defaults (v3.1.x/3.2): a bare `ASYNC` stores `RETRY 1` + `MAXDEPTH 3`.
  *  Stripped from canonical output so an authored `ASYNC` and an introspected `ASYNC RETRY 1 MAXDEPTH 3`
@@ -468,7 +517,7 @@ function emitEvent(
     parts.push(renderAsync(a.retry, a.maxDepth));
   }
   if (ev.when !== undefined) parts.push(`WHEN ${eventClause(ev.when)}`);
-  const thens = (Array.isArray(ev.then) ? ev.then : [ev.then]).map(eventClause);
+  const thens = (Array.isArray(ev.then) ? ev.then : [ev.then]).map(blockThen);
   // One `THEN` rides bare; several are parenthesized so the comma list parses unambiguously.
   parts.push(
     `THEN ${thens.length === 1 ? thens[0] : thens.map((t) => `(${t})`).join(", ")}`,

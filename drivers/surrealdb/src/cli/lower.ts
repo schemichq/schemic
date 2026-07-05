@@ -11,6 +11,7 @@
 import { BoundQuery, escapeIdent } from "surrealdb";
 import {
   assertExpr,
+  blockThen,
   braceBody,
   eventClause,
   type FieldInfo,
@@ -211,9 +212,10 @@ function lowerField(
   }
 }
 
-/** Lower a table/relation event to a `StructEvent` (one or several `THEN` exprs, bare). */
+/** Lower a table/relation event to a `StructEvent` (one or several `THEN` exprs, bare; a
+ *  multi-statement entry auto-blocks `{ …; }` — matching `emitEvent` + INFO's canonical form). */
 function lowerEvent(table: string, ev: TableEvent): StructEvent {
-  const thens = (Array.isArray(ev.then) ? ev.then : [ev.then]).map(eventClause);
+  const thens = (Array.isArray(ev.then) ? ev.then : [ev.then]).map(blockThen);
   // biome-ignore lint/suspicious/noThenProperty: `then` mirrors SurrealQL's event THEN clause.
   const out: StructEvent = { name: ev.name, what: table, then: thens };
   if (ev.when !== undefined) out.when = eventClause(ev.when);

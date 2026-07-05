@@ -1292,12 +1292,27 @@ function recordIdSchema<
 }
 
 /** A `record<…>` field: table restriction (+ optional id-value type) and construction helpers. */
+/** A lazy table reference — `() => User` — resolved to its name at first use (post-module-eval),
+ *  so mutually-linked tables in separate modules never hit an import-cycle TDZ. */
+type LazyTableRef = () => { name: string };
+
+/** Resolve a mixed entries list (names + lazy refs) to table names. Called lazily: from the
+ *  `tables` getter, the `z.lazy` runtime schema, and DDL type inference — all post-eval. */
+function resolveTableNames<T extends string>(
+  entries: readonly (T | LazyTableRef)[],
+): T[] {
+  return entries.map((e) => (typeof e === "function" ? (e().name as T) : e));
+}
+
 export class RecordIdField<
   T extends string,
   V extends RecordIdValue = RecordIdValue,
 > extends SField<z.ZodType<RecordId<T, V>, RecordId<T, V>>> {
+  /** The raw entries (names and/or lazy refs) — kept unresolved so laziness survives `rebuild`. */
+  private readonly entries: readonly (T | LazyTableRef)[];
+
   constructor(
-    readonly tables: T[],
+    tables: readonly (T | LazyTableRef)[],
     readonly valueType?: z.ZodType<V>,
     surreal: SurrealMeta = {},
     // The `this`-returning Zod passthroughs (refine/check/…) wrap the schema and rebuild via the hook
@@ -1305,7 +1320,24 @@ export class RecordIdField<
     // schema. Defaults to the record schema for the normal `s.recordId(...)` construction.
     schemaOverride?: z.ZodType<RecordId<T, V>, RecordId<T, V>>,
   ) {
-    super(schemaOverride ?? recordIdSchema<T, V>(tables, valueType), surreal);
+    // Eager path (names only) keeps the schema + its registry entry immediate; a lazy ref defers
+    // schema construction via z.lazy (inferField unwraps it), so the thunk runs post-module-eval.
+    const hasLazy = tables.some((t) => typeof t === "function");
+    super(
+      schemaOverride ??
+        (hasLazy
+          ? (z.lazy(() =>
+              recordIdSchema<T, V>(resolveTableNames(tables), valueType),
+            ) as unknown as z.ZodType<RecordId<T, V>, RecordId<T, V>>)
+          : recordIdSchema<T, V>(tables as T[], valueType)),
+      surreal,
+    );
+    this.entries = tables;
+  }
+
+  /** The restricted table names — lazy refs resolve here (post-module-eval). */
+  get tables(): T[] {
+    return resolveTableNames(this.entries);
   }
 
   // The base `this`-returning wrappers (refine/superRefine/check/…) construct via `rebuild`. SField's
@@ -1317,7 +1349,7 @@ export class RecordIdField<
     native: SurrealMeta,
   ): SField<S2, F2> {
     return new RecordIdField<T, V>(
-      this.tables,
+      this.entries,
       this.valueType,
       native,
       schema as unknown as z.ZodType<RecordId<T, V>, RecordId<T, V>>,
@@ -1326,7 +1358,7 @@ export class RecordIdField<
 
   /** Restrict the id value's type — reflected as `RecordId<T, V>` and validated at runtime. */
   type<V2 extends RecordIdValue>(schema: z.ZodType<V2>): RecordIdField<T, V2> {
-    return new RecordIdField<T, V2>(this.tables, schema, this.surreal);
+    return new RecordIdField<T, V2>(this.entries, schema, this.surreal);
   }
 
   /** Build a RecordId. Single-table: `for(id)`; multi-table: `for(table, id)`. */
@@ -1687,21 +1719,25 @@ export const s = {
       native(z.instanceof(Geometry), kind ? `geometry<${kind}>` : "geometry"),
     ),
   /**
-   * A `record<…>` link. Pass a table name, the imported `TableDef`/`RelationDef`, or an array for a
-   * multi-table union — `s.recordId(User)`, `s.recordId([User, Service])` — so a table's name is
-   * only ever written in its own definition. (For a single-table link `User.record()` is preferred:
-   * it also carries the id value type; `User.record().or(Post.record())` composes a union.)
+   * A `record<…>` link. Pass a table name, the imported `TableDef`/`RelationDef`, a LAZY ref
+   * (`() => User` — resolved post-module-eval, so mutually-linked tables in separate modules never
+   * import-cycle), or an array mixing any of those for a multi-table union — `s.recordId(User)`,
+   * `s.recordId(() => User)`, `s.recordId([User, () => Service])`. (For a single-table link
+   * `User.record()` is preferred: it also carries the id value type.)
    *
    * Called with NO argument — `s.recordId()` — it emits a bare `record` (a link to ANY table), since a
    * record id's table is optional in SurrealDB.
    */
-  recordId: <T extends string | AnyTable = string>(
+  recordId: <T extends string | AnyTable | (() => AnyTable) = string>(
     table?: T | readonly T[],
-  ): RecordIdField<T extends string ? T : NamesOf<T>> =>
-    new RecordIdField(
+  ): RecordIdField<RecordRefName<T>> =>
+    new RecordIdField<RecordRefName<T>>(
       (table === undefined ? [] : Array.isArray(table) ? table : [table]).map(
-        (t) => (typeof t === "string" ? t : t.name),
-      ) as (T extends string ? T : NamesOf<T>)[],
+        (t) =>
+          typeof t === "string" || typeof t === "function"
+            ? t
+            : (t as AnyTable).name,
+      ) as (RecordRefName<T> | (() => AnyTable))[],
     ),
   /**
    * A nested object whose fields keep their surreal metadata + native types. The returned
@@ -3327,6 +3363,13 @@ type NameOf<T> = T extends string
       : never;
 /** The endpoint name(s) a {@link TableRef} carries — drives the typed `in`/`out` record links. */
 type NamesOf<T> = T extends readonly (infer E)[] ? NameOf<E> : NameOf<T>;
+/** The table name an `s.recordId(...)` entry restricts to: a literal name, a `TableDef`/`Table`,
+ *  or a LAZY `() => TableDef` (typed via the thunk's return, resolved post-module-eval). */
+type RecordRefName<T> = T extends string
+  ? T
+  : T extends () => infer TD
+    ? NamesOf<TD>
+    : NamesOf<T>;
 
 /** A relation's full shape: the edge fields plus the `in`/`out` record endpoints. */
 type RelationShape<
