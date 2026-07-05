@@ -1091,6 +1091,17 @@ export function emitStatements(
       clauses,
     },
   ];
+  // SINGLETON: the id is NOT implicit — its literal type is the whole point (the DB enforces
+  // the one fixed record id): `DEFINE FIELD id ON config TYPE 'default'`.
+  if (t.config.singleton !== undefined) {
+    out.push({
+      kind: "field",
+      name: "id",
+      table: t.name,
+      ddl: `DEFINE FIELD ${existsPrefix(opts)}id ON TABLE ${escapeIdent(t.name)} TYPE '${t.config.singleton}';`,
+      clauses: { TYPE: `TYPE '${t.config.singleton}'` },
+    });
+  }
   // A view's rows are computed from its query — it has no DEFINE FIELD statements.
   if (!t.config.view)
     for (const [name, field] of Object.entries(t.fields)) {

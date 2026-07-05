@@ -34,6 +34,11 @@ live parity suites (`test/parity/{struct,live,canonical}-parity.test.ts`) and th
 - [x] `DROP`-marked tables — `.drop(true)`
 - [x] `TYPE RELATION … ENFORCED` — `defineRelation().enforced()` (round-trips: introspect + canonical + pull)
 - [x] `DEFINE TABLE … AS SELECT …` (pre-computed/materialized view tables) — `defineView(name, surql\`SELECT …\`)`
+- [x] SINGLETON tables (one fixed record, DB-enforced via the LITERAL id type
+      `DEFINE FIELD id ON <t> TYPE '<key>'`, SurrealDB >= 3.1) — `defineSingleton(name, shape, { id? })`;
+      id-optional client sugar (`db.get(Config)` / `db.create(Config)` / `db.update(Config)`), pull
+      regenerates `defineSingleton`. Richer id clauses (DEFAULT/ASSERT on id, surrealdb#7382, 3.2.0)
+      not yet authored.
 - [ ] `ALTER TABLE` / table-level `CHANGEFEED` drop semantics beyond redefine
 
 > The **full `DEFINE TABLE` head round-trips** (push + pull) — every permutation is exercised live in

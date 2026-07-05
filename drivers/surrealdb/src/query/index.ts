@@ -13,7 +13,7 @@
 import type { FieldRefBase } from "@schemic/core/query";
 import { BoundQuery, escapeIdent, RecordId, type Surreal } from "surrealdb";
 import { z } from "zod";
-import type { App, TableDef, Wire } from "../pure";
+import type { App, SingletonIdOf, TableDef, Wire } from "../pure";
 import {
   type Expr,
   type FieldRefOps,
@@ -64,9 +64,36 @@ type AnyTableDef = TableDef<string, any>;
 export type TargetId<TD extends AnyTableDef> = App<TD>["id"] | string;
 
 /** INTERNAL (shared with `./write`): normalize a target to a `RecordId` (a plain string is the
- *  STRING id part — no numeric coercion). */
-export const thingOf = (table: AnyTableDef, id: unknown): RecordId =>
-  id instanceof RecordId ? id : new RecordId(table.name, id as string);
+ *  STRING id part — no numeric coercion). An OMITTED id resolves a SINGLETON table's fixed key. */
+export const thingOf = (table: AnyTableDef, id: unknown): RecordId => {
+  if (id === undefined) {
+    const key = table.singletonId;
+    if (key === undefined)
+      throw new Error(
+        `${table.name} needs a record id — only a defineSingleton() table can omit it.`,
+      );
+    return new RecordId(table.name, key);
+  }
+  return id instanceof RecordId ? id : new RecordId(table.name, id as string);
+};
+
+/** The id argument tuple: REQUIRED for normal tables, optional for SINGLETONS (their fixed key
+ *  fills in) — `get(Config)` vs `get(User, id)`, enforced at compile time. */
+export type IdArgs<TD extends AnyTableDef, Rest extends unknown[]> = [
+  SingletonIdOf<TD>,
+] extends [never]
+  ? [id: TargetId<TD>, ...Rest]
+  : [id?: TargetId<TD>, ...Rest];
+
+/** INTERNAL (shared with `./write`): split a `[id?, conn?]` rest tuple at runtime. */
+export function splitIdArgs(
+  rest: readonly unknown[],
+): [unknown, Queryable | undefined] {
+  const [a, b] = rest;
+  if (a === undefined || typeof a === "string" || a instanceof RecordId)
+    return [a, b as Queryable | undefined];
+  return [undefined, a as Queryable | undefined];
+}
 
 // --- projections ----------------------------------------------------------------------------------
 
@@ -445,9 +472,9 @@ export function select<TD extends AnyTableDef>(
  *  an id, `get` fetches it back. */
 export function get<TD extends AnyTableDef>(
   table: TD,
-  id: TargetId<TD>,
-  conn?: Queryable,
+  ...rest: IdArgs<TD, [conn?: Queryable]>
 ): SelectOne<App<TD>> {
+  const [id, conn] = splitIdArgs(rest);
   return new Select<TD, App<TD>>(table, {
     decode: true,
     conn,

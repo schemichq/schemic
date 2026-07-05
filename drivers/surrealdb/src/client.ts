@@ -30,6 +30,7 @@ import {
   type Select,
   type SelectOne,
   select,
+  type IdArgs,
   type TargetId,
   type UpdateQuery,
   update,
@@ -150,8 +151,11 @@ export class Client implements OrmClientBase {
 
   /** Fetch ONE record by id — `await db.get(User, id)` resolves to the decoded row or `undefined`
    *  (the read half of id-chaining: `create` hands you an id, `get` fetches it back). */
-  get<TD extends AnyTable>(table: TD, id: TargetId<TD>): SelectOne<App<TD>> {
-    return get(table, id, this.conn);
+  get<TD extends AnyTable>(
+    table: TD,
+    ...rest: IdArgs<TD, []>
+  ): SelectOne<App<TD>> {
+    return get(table, ...([rest[0], this.conn] as unknown as IdArgs<TD, [Queryable?]>));
   }
 
   /** A connection-bound CREATE — `await db.create(User).content({ … })` returns the created row
@@ -164,18 +168,18 @@ export class Client implements OrmClientBase {
    *  via `User.update`) / `.content(row)` (replace) / `.set(patch)`. Returns the updated row. */
   update<TD extends AnyTable>(
     table: TD,
-    id: TargetId<TD>,
+    ...rest: IdArgs<TD, []>
   ): UpdateQuery<TD, App<TD>> {
-    return update(table, id, this.conn);
+    return update(table, ...([rest[0], this.conn] as unknown as IdArgs<TD, [Queryable?]>));
   }
 
   /** A connection-bound single-record DELETE — `await db.delete(User, id)`; `.return("before")`
    *  hands back the deleted row. */
   delete<TD extends AnyTable>(
     table: TD,
-    id: TargetId<TD>,
+    ...rest: IdArgs<TD, []>
   ): DeleteQuery<TD, undefined> {
-    return remove(table, id, this.conn);
+    return remove(table, ...([rest[0], this.conn] as unknown as IdArgs<TD, [Queryable?]>));
   }
 
   /** A connection-bound function CALL — `await db.call(SendMail, { email, code })` runs
@@ -234,8 +238,11 @@ export class Session implements OrmClientBase {
   }
 
   /** Fetch ONE record by id, scoped to this session. */
-  get<TD extends AnyTable>(table: TD, id: TargetId<TD>): SelectOne<App<TD>> {
-    return get(table, id, this.session);
+  get<TD extends AnyTable>(
+    table: TD,
+    ...rest: IdArgs<TD, []>
+  ): SelectOne<App<TD>> {
+    return get(table, ...([rest[0], this.session] as unknown as IdArgs<TD, [Queryable?]>));
   }
 
   /** A session-bound CREATE (runs under this session's auth context). */
@@ -246,17 +253,17 @@ export class Session implements OrmClientBase {
   /** A session-bound single-record UPDATE. */
   update<TD extends AnyTable>(
     table: TD,
-    id: TargetId<TD>,
+    ...rest: IdArgs<TD, []>
   ): UpdateQuery<TD, App<TD>> {
-    return update(table, id, this.session);
+    return update(table, ...([rest[0], this.session] as unknown as IdArgs<TD, [Queryable?]>));
   }
 
   /** A session-bound single-record DELETE. */
   delete<TD extends AnyTable>(
     table: TD,
-    id: TargetId<TD>,
+    ...rest: IdArgs<TD, []>
   ): DeleteQuery<TD, undefined> {
-    return remove(table, id, this.session);
+    return remove(table, ...([rest[0], this.session] as unknown as IdArgs<TD, [Queryable?]>));
   }
 
   /** A session-bound function CALL (runs under this session's auth context). */

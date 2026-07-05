@@ -543,16 +543,31 @@ function renderTableConst(
     .map(([k, node]) => `  ${ident(k)}: ${renderField(node, "  ", ctx)},`)
     .join("\n");
 
+  // A LITERAL-typed id (`'default'`) marks a SINGLETON table — regenerate defineSingleton.
+  const idField = t.fields.find((f) => f.name === "id");
+  const singletonId = idField
+    ? /^'(.*)'$/.exec(idField.kind)?.[1]
+    : undefined;
+
   const name = ctx.constOf(t.name);
-  const factory = isRelation ? "defineRelation" : "defineTable";
+  const factory = isRelation
+    ? "defineRelation"
+    : singletonId !== undefined
+      ? "defineSingleton"
+      : "defineTable";
   // A `record<self>` field needs the callback shape so `self` is in scope.
   const head = ctx.usesSelf
     ? `export const ${name} = ${factory}(${JSON.stringify(t.name)}, (self) => ({`
     : `export const ${name} = ${factory}(${JSON.stringify(t.name)}, {`;
-  const open = ctx.usesSelf ? "}))" : "})";
+  const shapeClose = ctx.usesSelf ? "})" : "}";
+  // A non-default singleton key rides the opts argument.
+  const open =
+    singletonId !== undefined && singletonId !== "default"
+      ? `${shapeClose}, { id: ${JSON.stringify(singletonId)} })`
+      : `${shapeClose})`;
 
   const body: string[] = [head];
-  if (!isRelation) body.push(`  id: s.string(),`);
+  if (!isRelation && singletonId === undefined) body.push(`  id: s.string(),`);
   body.push(fieldLines);
 
   let close = open;

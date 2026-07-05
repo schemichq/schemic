@@ -234,6 +234,9 @@ export function fromTableDef(t: TableDef<string, Shape>): StructTable {
 
   const fields: StructField[] = [];
   const indexes: StructIndex[] = [];
+  // SINGLETON: the id field is REAL (a literal type the DB enforces), not implicit.
+  if (cfg.singleton !== undefined)
+    fields.push({ name: "id", kind: `'${cfg.singleton}'`, table: t.name });
   for (const [name, field] of Object.entries(t.fields)) {
     if (implicit.has(name)) continue;
     const f = field as SField;

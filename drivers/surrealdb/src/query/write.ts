@@ -25,11 +25,13 @@ import { isParamRef } from "../pure";
 import {
   type FieldRefOps,
   FRAGMENT,
+  type IdArgs,
   type Operand,
   type Queryable,
   type Row,
   refCol,
   refsFor,
+  splitIdArgs,
   type TargetId,
   thingOf,
   toFragment,
@@ -147,6 +149,8 @@ export class CreateQuery<
     ret: Ret = "after",
     decode = true,
     conn?: Queryable,
+    /** A fixed CREATE target — a SINGLETON table creates ITS record (`CREATE config:default`). */
+    private readonly target?: RecordId,
   ) {
     super(table, ret, decode, conn);
   }
@@ -163,6 +167,7 @@ export class CreateQuery<
       this.ret,
       this.decode,
       this.conn,
+      this.target,
     );
   }
 
@@ -186,6 +191,7 @@ export class CreateQuery<
       ret,
       this.decode,
       this.conn,
+      this.target,
     );
   }
 
@@ -197,6 +203,7 @@ export class CreateQuery<
       this.ret,
       false,
       this.conn,
+      this.target,
     );
   }
 
@@ -205,6 +212,11 @@ export class CreateQuery<
       throw new Error(
         "create() has no row yet — call `.content(data)` before running it.",
       );
+    if (this.target)
+      return {
+        sql: `CREATE $__thing CONTENT $__content ${retClause(this.ret)}`,
+        vars: { __thing: this.target, __content: this.payload },
+      };
     return {
       sql: `CREATE ${escapeIdent(this.table.name)} CONTENT $__content ${retClause(this.ret)}`,
       vars: { __content: this.payload },
@@ -459,16 +471,27 @@ export function create<TD extends AnyTableDef>(
   table: TD,
   conn?: Queryable,
 ): CreateQuery<TD, App<TD>> {
-  return new CreateQuery<TD, App<TD>>(table, undefined, "after", true, conn);
+  // A SINGLETON creates ITS one record (`CREATE config:default`) — a bare CREATE would mint a
+  // random id, which the literal id type rejects.
+  const target =
+    table.singletonId !== undefined ? thingOf(table, undefined) : undefined;
+  return new CreateQuery<TD, App<TD>>(
+    table,
+    undefined,
+    "after",
+    true,
+    conn,
+    target,
+  );
 }
 
 /** Start an `UPDATE` of one record — `update(User, id).merge({ … })`. `id` is the app-typed
  *  `RecordId` or its plain string id part. Returns the updated row (decoded `App<TD>`). */
 export function update<TD extends AnyTableDef>(
   table: TD,
-  id: TargetId<TD>,
-  conn?: Queryable,
+  ...rest: IdArgs<TD, [conn?: Queryable]>
 ): UpdateQuery<TD, App<TD>> {
+  const [id, conn] = splitIdArgs(rest);
   return new UpdateQuery<TD, App<TD>>(
     table,
     thingOf(table, id),
@@ -485,9 +508,9 @@ export function update<TD extends AnyTableDef>(
  *  default; `.return("before")` hands back the deleted row. */
 export function remove<TD extends AnyTableDef>(
   table: TD,
-  id: TargetId<TD>,
-  conn?: Queryable,
+  ...rest: IdArgs<TD, [conn?: Queryable]>
 ): DeleteQuery<TD, undefined> {
+  const [id, conn] = splitIdArgs(rest);
   return new DeleteQuery<TD, undefined>(
     table,
     thingOf(table, id),

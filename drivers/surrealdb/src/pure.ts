@@ -2098,6 +2098,9 @@ export interface TableConfig {
    * query (forced `TYPE ANY SCHEMALESS`, no authored fields). See {@link defineView}.
    */
   view?: Expr;
+  /** SINGLETON table: the one fixed record-id key (see {@link defineSingleton}) — emitted as the
+   *  literal id type `DEFINE FIELD id ON <t> TYPE '<id>'`, which the DB enforces. */
+  singleton?: string;
 }
 
 /** A table index definition (single- or multi-field, or a row-count index). */
@@ -2899,6 +2902,12 @@ export class TableDef<Name extends string, S extends Shape> {
     return z.object(shape) as unknown as z.ZodObject<UpdateZShape<S>>;
   }
 
+  /** The fixed record-id key of a SINGLETON table (see {@link defineSingleton}); `undefined` for
+   *  normal tables. Survives every chaining/preset step (it lives in the table config). */
+  get singletonId(): string | undefined {
+    return this.config.singleton;
+  }
+
   // --- DDL config (chainable, immutable) ---
   private withConfig(config: Partial<TableConfig>): TableDef<Name, S> {
     return new TableDef(this.name, this.fields, { ...this.config, ...config });
@@ -3345,6 +3354,81 @@ export function defineTable<Name extends string, S extends Shape = {}>(
     {
       schemafull: true,
     },
+  );
+}
+
+/** A singleton table's shape: the smart id's VALUE type is the fixed key's string LITERAL —
+ *  that's the compile-time singleton marker (it rides the shape, so it survives `.use(preset)`
+ *  and every other chain), read back by {@link SingletonIdOf}. */
+type WithSingletonId<
+  Name extends string,
+  S extends Shape,
+  Id extends string,
+> = Omit<S, "id"> & { id: RecordIdField<Name, Id> };
+
+/** The fixed record-id key of a SINGLETON table (a string literal), or `never` for a normal
+ *  table (whose id value type is broad). Drives the id-optional client/query overloads. */
+export type SingletonIdOf<TD> = TD extends TableDef<string, infer S>
+  ? S extends { id: RecordIdField<string, infer V> }
+    ? string extends V
+      ? never
+      : V extends string
+        ? V
+        : never
+    : never
+  : never;
+
+/**
+ * Define a SINGLETON table — a table meant to hold exactly ONE record (system-wide config,
+ * feature flags, …). The record's id is FIXED (`<name>:<id>`, default key `default`) and the
+ * DATABASE enforces it: the emitted `DEFINE FIELD id ON <name> TYPE '<id>'` (a literal id type,
+ * SurrealDB >= 3.1) rejects any other id at write time.
+ *
+ * ```ts
+ * export const Config = defineSingleton("config", {
+ *   maintenance: s.boolean().$default(surql`false`),
+ *   motd: s.string().optional(),
+ * });
+ * // db.get(Config)                    — no id argument (config:default)
+ * // db.create(Config).content({...})  — CREATEs the one record
+ * // db.update(Config).merge({...})    — updates it
+ * ```
+ *
+ * The fixed key types through the shape (the id field's value type is the string literal), so
+ * the id-optional overloads survive presets and chaining.
+ */
+// biome-ignore lint/complexity/noBannedTypes: `{}` is the empty default shape, like defineTable.
+export function defineSingleton<
+  Name extends string,
+  S extends Shape = {},
+  Id extends string = "default",
+>(
+  name: Name,
+  shape?: (S & RejectNoDdl<S>) | ((self: RecordIdField<Name>) => S),
+  opts: { /** The fixed record-id key (default `"default"`). */ id?: Id } = {},
+): TableDef<Name, WithSingletonId<Name, S, Id>> {
+  const id = opts.id ?? "default";
+  if (!/^[A-Za-z0-9_]+$/.test(id))
+    throw new Error(
+      `defineSingleton("${name}"): the fixed id key "${id}" must be a plain identifier (letters/digits/underscore).`,
+    );
+  const resolved =
+    shape === undefined
+      ? ({} as S)
+      : typeof shape === "function"
+        ? shape(new RecordIdField([name]))
+        : shape;
+  const fields = applySmartId(name, resolved);
+  // The smart id's VALUE schema is the literal key — decode/encode stay the plain smart-id
+  // codec; the literal is the type-level marker + what the emitted DDL enforces.
+  fields.id = new RecordIdField(
+    [name],
+    z.literal(id) as unknown as z.ZodType<RecordIdValue>,
+  );
+  return new TableDef(
+    name,
+    fields as unknown as Fields<WithSingletonId<Name, S, Id>>,
+    { schemafull: true, singleton: id },
   );
 }
 /**
