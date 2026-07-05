@@ -12,7 +12,14 @@ import {
 } from "@schemic/core";
 import { type BoundQuery, Surreal, type SurrealSession } from "surrealdb";
 import { surrealDriver } from "./driver";
-import type { App, TableDef } from "./pure";
+import type {
+  App,
+  CallArgsIn,
+  CallQuery,
+  FunctionDef,
+  Shape,
+  TableDef,
+} from "./pure";
 import {
   type CreateQuery,
   create,
@@ -171,6 +178,18 @@ export class Client implements OrmClientBase {
     return remove(table, id, this.conn);
   }
 
+  /** A connection-bound function CALL — `await db.call(SendMail, { email, code })` runs
+   *  `fn::send_mail(...)` and decodes via the def's `.returns(R)`. Args: literals (encoded+bound),
+   *  fragments, or `surql.$` refs. */
+  call<A extends Shape, R>(
+    def: FunctionDef<A, R>,
+    ...rest: Record<string, never> extends CallArgsIn<A>
+      ? [args?: CallArgsIn<A>]
+      : [args: CallArgsIn<A>]
+  ): CallQuery<R> {
+    return def.call(...(rest as [CallArgsIn<A>])).bind(this.conn);
+  }
+
   /** Raw SurrealQL escape hatch — SDK-faithful: `await db.query(…)` -> the PER-STATEMENT result
    *  array. A typed tag flows through (`db.query(surql<[number]>\`RETURN 1\`)` -> `[number]`); type
    *  a plain string explicitly (`db.query<[User[]]>("SELECT …")`). `.as(User)` decodes a
@@ -238,6 +257,16 @@ export class Session implements OrmClientBase {
     id: TargetId<TD>,
   ): DeleteQuery<TD, undefined> {
     return remove(table, id, this.session);
+  }
+
+  /** A session-bound function CALL (runs under this session's auth context). */
+  call<A extends Shape, R>(
+    def: FunctionDef<A, R>,
+    ...rest: Record<string, never> extends CallArgsIn<A>
+      ? [args?: CallArgsIn<A>]
+      : [args: CallArgsIn<A>]
+  ): CallQuery<R> {
+    return def.call(...(rest as [CallArgsIn<A>])).bind(this.session);
   }
 
   /** Raw SurrealQL escape hatch, scoped to this session (SDK-faithful per-statement results). */

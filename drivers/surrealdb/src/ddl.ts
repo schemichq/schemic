@@ -24,7 +24,10 @@ import {
 export function inline(query: BoundQuery): string {
   let out = query.query;
   for (const [name, value] of Object.entries(query.bindings ?? {})) {
-    out = out.replaceAll(`$${name}`, toSurqlString(value));
+    // Boundary-aware: `$b1` must not rewrite the prefix of `$b10`.
+    out = out.replace(new RegExp(`\\$${name}(?![A-Za-z0-9_])`, "g"), () =>
+      toSurqlString(value),
+    );
   }
   return out.trim();
 }

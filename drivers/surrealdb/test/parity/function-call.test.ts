@@ -20,11 +20,10 @@ const Stamp = defineFunction("t_stamp")
 const Echo = defineFunction("t_echo", { x: s.string() }).body(surql`RETURN $x`);
 
 // --- type-level assertions -----------------------------------------------------------------------
-type Eq<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B
-  ? 1
-  : 2
-  ? true
-  : false;
+type Eq<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
+    ? true
+    : false;
 type Expect<T extends true> = T;
 type _result = Expect<Eq<Awaited<ReturnType<typeof Add.call>>, number>>; // .returns(s.int()) -> number
 type _decoded = Expect<Eq<Awaited<ReturnType<typeof Stamp.call>>, Date>>; // datetime codec -> Date
@@ -77,14 +76,14 @@ afterAll(async () => {
 
 live("defineFunction(...).call()", () => {
   test("typed args, decoded result (int)", async () => {
-    expect(await Add.call(db!, { a: 2, b: 3 })).toBe(5);
+    expect(await Add.call({ a: 2, b: 3 }).run(db!)).toBe(5);
   });
 
   test("no-arg call; datetime return decodes to a real Date", async () => {
-    expect(await Stamp.call(db!)).toBeInstanceOf(Date);
+    expect(await Stamp.call().run(db!)).toBeInstanceOf(Date);
   });
 
   test("no .returns() -> raw value (unknown)", async () => {
-    expect(await Echo.call(db!, { x: "hi" })).toBe("hi");
+    expect(await Echo.call({ x: "hi" }).run(db!)).toBe("hi");
   });
 });

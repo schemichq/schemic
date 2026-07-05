@@ -16,33 +16,42 @@ import {
   surql as sdkSurql,
   Table,
 } from "surrealdb";
-import { FunctionDef, RecordIdField, TableDef } from "./pure";
+import {
+  FunctionDef,
+  isParamRef,
+  ParamRef,
+  RecordIdField,
+  TableDef,
+} from "./pure";
 
 // --- the surql tag: EAGER marker resolution + fragment helpers ----------------------------------
 // (Design: docs/proposals/typed-fragments.md. Schema references resolve to TEXT at template
 // construction, so the output is always a PLAIN BoundQuery — it runs identically through db.query,
 // the raw SDK, and the DDL emitter. No marker ever reaches the wire.)
 
-/** A `$param.path` reference built via {@link surql.$} — splices as text (`$after.email`), never
- *  binds. This is what disambiguates a PARAM REF from a string LITERAL in helper arg positions. */
-class ParamRef {
-  constructor(readonly path: readonly string[]) {}
-  /** The spliced text: `$after.email` (segments after the param name are escaped). */
-  toText(): string {
-    const [param, ...rest] = this.path;
-    return `$${param}${rest.map((p) => `.${escapeIdent(p)}`).join("")}`;
-  }
-}
+// Fragment brands (Symbol.for -> cross-instance safe): a value carrying FRAGMENT produces a
+// BoundQuery when asked (query builders); one carrying COLREF splices as an escaped column path
+// (query-layer FieldRefs). Symbol-keyed so this authoring index never imports the query layer.
+const FRAGMENT = Symbol.for("schemic.surrealdb.fragment");
+const COLREF = Symbol.for("schemic.surrealdb.colref");
 
 /** Resolve a known schema reference to its spliced TEXT, or `undefined` to bind it as a value. */
 function markerText(v: unknown): string | undefined {
   if (v instanceof TableDef) return escapeIdent(v.name);
   if (v instanceof Table) return escapeIdent(v.name);
   if (v instanceof FunctionDef) return `fn::${v.name}`;
-  if (v instanceof ParamRef) return v.toText();
+  if (isParamRef(v)) return v.toText();
   if (v instanceof RecordIdField && v.tables.length === 1)
     return escapeIdent(v.tables[0] as string);
+  const col = (v as Record<symbol, unknown> | null)?.[COLREF];
+  if (typeof col === "string") return escapeIdent(col);
   return undefined;
+}
+
+/** A query builder interpolates as its lowered `(subquery)` fragment (bindings ride along). */
+function markerFragment(v: unknown): BoundQuery | undefined {
+  const make = (v as Record<symbol, unknown> | null)?.[FRAGMENT];
+  return typeof make === "function" ? (make.call(v) as BoundQuery) : undefined;
 }
 
 function surqlTag<R extends unknown[] = unknown[]>(
@@ -55,12 +64,13 @@ function surqlTag<R extends unknown[] = unknown[]>(
   const rest: unknown[] = [];
   for (let i = 0; i < values.length; i++) {
     const text = markerText(values[i]);
-    if (text !== undefined)
+    if (text !== undefined) {
       parts[parts.length - 1] += text + (strings[i + 1] as string);
-    else {
-      rest.push(values[i]);
-      parts.push(strings[i + 1] as string);
+      continue;
     }
+    const frag = markerFragment(values[i]);
+    rest.push(frag ?? values[i]);
+    parts.push(strings[i + 1] as string);
   }
   const tsa = Object.assign(parts.slice(), {
     raw: parts.slice(),
@@ -140,6 +150,8 @@ export type {
   App,
   AsymmetricJwtAlgorithm,
   CallArgs,
+  CallArgsIn,
+  CallArgValue,
   Create,
   DiskannOptions,
   EventAsync,
@@ -172,6 +184,7 @@ export {
   AccessDef,
   AnalyzerDef,
   BearerAccessDef,
+  CallQuery,
   DatabaseAccessDef,
   defineAccess,
   defineAnalyzer,
@@ -183,9 +196,11 @@ export {
   EventDef,
   FunctionDef,
   formatForAssert,
+  isParamRef,
   JwtAccessDef,
   NamespaceAccessDef,
   objectFieldsRegistry,
+  ParamRef,
   RecordAccessDef,
   RecordIdField,
   RelationDef,

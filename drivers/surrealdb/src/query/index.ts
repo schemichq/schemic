@@ -15,7 +15,7 @@ import {
   type Project,
   type ProjectionField,
 } from "@schemic/core/query";
-import { escapeIdent, RecordId, type Surreal } from "surrealdb";
+import { BoundQuery, escapeIdent, RecordId, type Surreal } from "surrealdb";
 import type { App, TableDef, Wire } from "../pure";
 
 // --- the field-ref surface (driver-owned: operators + the column it carries) --------------------
@@ -33,7 +33,7 @@ type BinOp =
   | "CONTAINS"
   | "CONTAINSANY"
   | "CONTAINSALL";
-type Expr =
+type ExprNode =
   | {
       readonly kind: "cmp";
       readonly col: string;
@@ -46,8 +46,42 @@ type Expr =
       readonly col: string;
       readonly value: string;
     }
-  | { readonly kind: "none"; readonly col: string; readonly not: boolean }
-  | { readonly kind: "and" | "or"; readonly parts: readonly Expr[] };
+  | { readonly kind: "none"; readonly col: string; readonly negated: boolean }
+  | { readonly kind: "and" | "or"; readonly parts: readonly Expr[] }
+  | { readonly kind: "not"; readonly part: Expr }
+  | { readonly kind: "raw"; readonly q: BoundQuery };
+
+/** Chainable boolean combinators — every predicate carries them, so `u.age.gte(18).and(...)`
+ *  needs no standalone import. A raw `surql` fragment (`Frag<boolean>`) is accepted anywhere an
+ *  `Expr` is. */
+interface ExprOps {
+  and(...more: (Expr | BoundQuery)[]): Expr;
+  or(...more: (Expr | BoundQuery)[]): Expr;
+  not(): Expr;
+}
+type Expr = ExprNode & ExprOps;
+
+/** A raw predicate leaf: `where` (and every combinator) accepts a `surql` fragment directly. */
+export type Predicate = Expr | BoundQuery;
+
+const exprProto: ExprOps = {
+  and(this: Expr, ...more: Predicate[]): Expr {
+    return mkExpr({ kind: "and", parts: [this, ...more.map(toExpr)] });
+  },
+  or(this: Expr, ...more: Predicate[]): Expr {
+    return mkExpr({ kind: "or", parts: [this, ...more.map(toExpr)] });
+  },
+  not(this: Expr): Expr {
+    return mkExpr({ kind: "not", part: this });
+  },
+};
+function mkExpr(node: ExprNode): Expr {
+  return Object.assign(Object.create(exprProto), node) as Expr;
+}
+/** Coerce a raw `surql` fragment into an Expr leaf (an Expr passes through). */
+function toExpr(p: Predicate): Expr {
+  return p instanceof BoundQuery ? mkExpr({ kind: "raw", q: p }) : p;
+}
 
 /** The operators every column carries (comparisons, set membership, NONE checks). */
 export interface FieldRefOps<T> extends FieldRefBase<T> {
@@ -102,8 +136,10 @@ export type Row<TD extends TableDef<string, any>> = {
   [K in keyof App<TD>]-?: FieldRef<App<TD>[K]>;
 };
 
-export const and = (...parts: Expr[]): Expr => ({ kind: "and", parts });
-export const or = (...parts: Expr[]): Expr => ({ kind: "or", parts });
+export const and = (...parts: Predicate[]): Expr =>
+  mkExpr({ kind: "and", parts: parts.map(toExpr) });
+export const or = (...parts: Predicate[]): Expr =>
+  mkExpr({ kind: "or", parts: parts.map(toExpr) });
 
 /** Runtime field ref — carries its column name; phantom `FieldRefBase` member is type-only. */
 interface RuntimeRef {
@@ -112,12 +148,16 @@ interface RuntimeRef {
 function makeRef(col: string): FieldRef<unknown> {
   const cmp =
     (op: BinOp) =>
-    (value: unknown): Expr => ({ kind: "cmp", col, op, value });
+    (value: unknown): Expr =>
+      mkExpr({ kind: "cmp", col, op, value });
   const strfn =
     (fn: "string::starts_with" | "string::ends_with") =>
-    (value: string): Expr => ({ kind: "strfn", fn, col, value });
+    (value: string): Expr =>
+      mkExpr({ kind: "strfn", fn, col, value });
   return brandRef({
     __col: col,
+    // Interpolation brand: `surql\`${u.email} CONTAINS '@corp'\`` splices the escaped column.
+    [Symbol.for("schemic.surrealdb.colref")]: col,
     eq: cmp("="),
     neq: cmp("!="),
     lt: cmp("<"),
@@ -131,8 +171,8 @@ function makeRef(col: string): FieldRef<unknown> {
     containsAll: cmp("CONTAINSALL"),
     startsWith: strfn("string::starts_with"),
     endsWith: strfn("string::ends_with"),
-    isNone: (): Expr => ({ kind: "none", col, not: false }),
-    isNotNone: (): Expr => ({ kind: "none", col, not: true }),
+    isNone: (): Expr => mkExpr({ kind: "none", col, negated: false }),
+    isNotNone: (): Expr => mkExpr({ kind: "none", col, negated: true }),
   }) as FieldRef<unknown>;
 }
 const colOf = (ref: unknown): string => (ref as RuntimeRef).__col;
@@ -167,6 +207,27 @@ interface Lowered {
   readonly vars: Record<string, unknown>;
 }
 
+/** Merge a raw fragment's bindings into the builder's vars, renaming on collision (boundary-aware
+ *  rewrite in the fragment text — `$b1` must not touch `$b10`). SDK-tagged fragments use globally
+ *  countered names, so renames only fire for hand-built BoundQuery bindings. */
+function mergeRaw(q: BoundQuery, vars: Record<string, unknown>): string {
+  let text = q.query;
+  for (const [name, value] of Object.entries(q.bindings ?? {})) {
+    let use = name;
+    if (use in vars) {
+      let n = 2;
+      while (`${name}_${n}` in vars) n++;
+      use = `${name}_${n}`;
+      text = text.replace(
+        new RegExp(`\\$${name}(?![A-Za-z0-9_])`, "g"),
+        `$${use}`,
+      );
+    }
+    vars[use] = value;
+  }
+  return text;
+}
+
 function lowerExpr(e: Expr, vars: Record<string, unknown>): string {
   if (e.kind === "cmp") {
     const bind = `b${Object.keys(vars).length}`;
@@ -179,7 +240,9 @@ function lowerExpr(e: Expr, vars: Record<string, unknown>): string {
     return `${e.fn}(${escapeIdent(e.col)}, $${bind})`;
   }
   if (e.kind === "none")
-    return `${escapeIdent(e.col)} ${e.not ? "!=" : "="} NONE`;
+    return `${escapeIdent(e.col)} ${e.negated ? "!=" : "="} NONE`;
+  if (e.kind === "raw") return `(${mergeRaw(e.q, vars)})`;
+  if (e.kind === "not") return `!(${lowerExpr(e.part, vars)})`;
   const joined = e.parts
     .map((p) => lowerExpr(p, vars))
     .join(e.kind === "and" ? " AND " : " OR ");
@@ -191,6 +254,33 @@ function lowerExpr(e: Expr, vars: Record<string, unknown>): string {
 /** The minimal connection the builder needs to execute — a `.query(sql, vars)`. Both a `Surreal`
  *  client and a forked `SurrealSession` satisfy it, so a bound builder works against either. */
 export type Queryable = Pick<Surreal, "query">;
+
+/** The fragment brand the `surql` tag reads (Symbol.for -> shared without importing this module):
+ *  a builder carrying it interpolates as its lowered `(subquery)` with bindings merged. */
+export const FRAGMENT: unique symbol = Symbol.for(
+  "schemic.surrealdb.fragment",
+) as never;
+
+let subCounter = 0;
+/** Lower a builder to an interpolatable fragment: parenthesize the sql and NAMESPACE its binds
+ *  (`$b0` -> `$sub__<n>_b0`, boundary-aware) so several builder fragments compose in one template
+ *  without colliding (the SDK throws on duplicate bind names rather than renaming). */
+export function toFragment(
+  lowered: { sql: string; vars: Record<string, unknown> },
+  wrap = (sql: string) => `(${sql})`,
+): BoundQuery {
+  const prefix = `sub__${++subCounter}_`;
+  let text = lowered.sql;
+  const binds: Record<string, unknown> = {};
+  for (const [name, value] of Object.entries(lowered.vars)) {
+    text = text.replace(
+      new RegExp(`\\$${name}(?![A-Za-z0-9_])`, "g"),
+      `$${prefix}${name}`,
+    );
+    binds[`${prefix}${name}`] = value;
+  }
+  return new BoundQuery(wrap(text), binds);
+}
 
 interface State {
   where?: Expr;
@@ -220,8 +310,8 @@ class Select<TD extends TableDef<string, any>, Res> {
     return new Select<TD, R>(this.table, { ...this.state, ...patch });
   }
 
-  where(fn: (row: Row<TD>) => Expr): Select<TD, Res> {
-    return this.next<Res>({ where: fn(this.row) });
+  where(fn: (row: Row<TD>) => Predicate): Select<TD, Res> {
+    return this.next<Res>({ where: toExpr(fn(this.row)) });
   }
 
   orderBy(
@@ -266,6 +356,11 @@ class Select<TD extends TableDef<string, any>, Res> {
    *  don't. Awaitable when bound; `.run(conn)` standalone. */
   count(): CountQuery {
     return new CountQuery(this.table.name, this.state.where, this.state.conn);
+  }
+
+  /** Interpolate this builder into a `surql` template — it splices as `(SELECT ...)`. */
+  [FRAGMENT](): BoundQuery {
+    return toFragment(this.toSQL());
   }
 
   /** The SurrealQL + named binds this builder lowers to. */
@@ -339,6 +434,11 @@ export class SelectOne<Res> {
   // biome-ignore lint/suspicious/noExplicitAny: the wrapped Select's table shape is irrelevant here.
   constructor(private readonly sel: Select<any, Res>) {}
 
+  /** Interpolates as the FIRST ROW of the `(SELECT ... LIMIT 1)` subquery. */
+  [FRAGMENT](): BoundQuery {
+    return toFragment(this.sel.toSQL(), (sql) => `(${sql})[0]`);
+  }
+
   /** The SurrealQL + named binds the wrapped select lowers to. */
   toSQL(): Lowered {
     return this.sel.toSQL();
@@ -366,6 +466,11 @@ export class CountQuery {
     private readonly where: Expr | undefined,
     private readonly conn?: Queryable,
   ) {}
+
+  /** Interpolates as the SCALAR count: `((SELECT count() ... GROUP ALL)[0].count || 0)`. */
+  [FRAGMENT](): BoundQuery {
+    return toFragment(this.toSQL(), (sql) => `((${sql})[0].count || 0)`);
+  }
 
   toSQL(): Lowered {
     const vars: Record<string, unknown> = {};

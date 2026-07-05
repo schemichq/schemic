@@ -9,6 +9,7 @@ import {
   DateTime,
   Decimal,
   Duration,
+  escapeIdent,
   FileRef,
   Geometry,
   RecordId,
@@ -3583,6 +3584,96 @@ interface FunctionConfig {
  *  (`{ a: s.int(), b: s.int() }` -> `{ a: number, b: number }`). */
 export type CallArgs<A extends Shape> = { [K in keyof A]: App<A[K]> };
 
+const PARAM_REF_BRAND: unique symbol = Symbol.for(
+  "schemic.surrealdb.paramref",
+) as never;
+
+/** A `$param.path` reference (built via `surql.$`) — splices as text (`$after.email`), never
+ *  binds. Branded with a `Symbol.for` key so cross-instance checks survive package splits. */
+export class ParamRef {
+  /** Cross-realm brand: `Symbol.for("schemic.surrealdb.paramref")`. */
+  readonly [PARAM_REF_BRAND] = true;
+  constructor(readonly path: readonly string[]) {}
+  /** The spliced text: `$after.email` (segments after the param name are escaped). */
+  toText(): string {
+    const [param, ...rest] = this.path;
+    return `$${param}${rest.map((p) => `.${escapeIdent(p)}`).join("")}`;
+  }
+}
+/** Cross-realm ParamRef check (instanceof breaks across dual package instances). */
+export function isParamRef(v: unknown): v is ParamRef {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    (v as Record<symbol, unknown>)[PARAM_REF_BRAND] === true
+  );
+}
+/** One argument to `Def.call(...)`: the app-typed literal (encoded + bound), a fragment
+ *  (`BoundQuery` — spliced with its bindings merged), or a `surql.$` param ref (spliced as text). */
+export type CallArgValue<T> = T | BoundQuery | ParamRef;
+export type CallArgsIn<A extends Shape> = {
+  [K in keyof A]: CallArgValue<App<A[K]>>;
+};
+
+let callBindCounter = 0;
+
+/**
+ * A prepared `fn::<name>(…)` CALL — one object, three uses:
+ *  1. a FRAGMENT: it IS a `BoundQuery<[R]>`, so it interpolates into `surql` templates and
+ *     authoring positions (event bodies, `$computed`, …) with its bindings merged;
+ *  2. STANDALONE: `await Def.call({...}).run(conn)`;
+ *  3. BOUND: `await db.call(Def, {...})` (the client pre-binds its connection).
+ * The result decodes through the def's `.returns(R)` schema (real `App` types).
+ */
+export class CallQuery<R = unknown> extends BoundQuery<[R]> {
+  constructor(
+    query: string,
+    bindings: Record<string, unknown>,
+    private readonly returnsSchema: z.ZodType,
+    private readonly fnName: string,
+    private readonly conn?: {
+      query(sql: string, vars?: Record<string, unknown>): Promise<unknown>;
+    },
+  ) {
+    super(query, bindings);
+  }
+
+  /** Pre-bind a connection (the ORM client does this) — makes the call awaitable. */
+  bind(conn: {
+    query(sql: string, vars?: Record<string, unknown>): Promise<unknown>;
+  }): CallQuery<R> {
+    return new CallQuery<R>(
+      this.query,
+      { ...this.bindings },
+      this.returnsSchema,
+      this.fnName,
+      conn,
+    );
+  }
+
+  /** Execute against `conn` (or the pre-bound connection) and decode via `.returns(R)`. */
+  async run(conn?: {
+    query(sql: string, vars?: Record<string, unknown>): Promise<unknown>;
+  }): Promise<R> {
+    const c = conn ?? this.conn;
+    if (!c)
+      throw new Error(
+        `fn::${this.fnName} call is not bound to a connection — pass one to \`.run(conn)\`, or use a bound client (\`db.call(...)\`).`,
+      );
+    const out = (await c.query(this.query, {
+      ...this.bindings,
+    })) as unknown[];
+    return z.decode(this.returnsSchema, out[0] as never) as R;
+  }
+
+  then<T1 = R, T2 = never>(
+    onfulfilled?: ((value: R) => T1 | PromiseLike<T1>) | null,
+    onrejected?: ((reason: unknown) => T2 | PromiseLike<T2>) | null,
+  ): Promise<T1 | T2> {
+    return this.run().then(onfulfilled, onrejected);
+  }
+}
+
 /**
  * A custom function — `DEFINE FUNCTION fn::<name>(<args>) [-> <returns>] { <body> }`. Built with a
  * chainable, immutable API (like {@link TableDef}): `defineFunction(name, args).returns(…).body(…)`.
@@ -3619,39 +3710,43 @@ export class FunctionDef<A extends Shape = Shape, R = unknown> {
     return this.withConfig({ comment });
   }
   /**
-   * Invoke the function on a live connection — DB-functions-as-code. Args are passed by name (matching
-   * the schema params) and **encoded** to wire via the param schemas; the raw result is **decoded**
-   * through `.returns(R)` (so you get real `App` types — `Date`/`RecordId`/…). Without a declared
-   * `.returns()`, the result type is `unknown`. The `args` object is optional for a no-param function.
-   *
-   * The query layer is opt-in, so its machinery is loaded lazily here — calling `.call()` keeps the
-   * authoring index's static graph free of `@schemic/core/query` and the driver.
+   * Prepare a `fn::<name>(…)` CALL — one object, three uses (BREAKING vs the old `.call(db, args)`:
+   * run it with `.run(conn)` or the bound `db.call(Def, args)`):
+   *  1. a FRAGMENT — the returned {@link CallQuery} IS a `BoundQuery<[R]>`, so it interpolates into
+   *     `surql` templates and authoring positions with its bindings merged;
+   *  2. STANDALONE — `await Def.call({...}).run(conn)`;
+   *  3. BOUND — `await db.call(Def, {...})`.
+   * Args are NAMED and typed from the def's arg shape. A literal is **encoded** to wire via its
+   * param schema and bound; a `BoundQuery` fragment splices with its bindings merged; a `surql.$`
+   * param ref splices as text. Results **decode** through `.returns(R)` (real `App` types).
    */
-  async call(
-    db: Surreal,
-    ...rest: Record<string, never> extends CallArgs<A>
-      ? [args?: CallArgs<A>]
-      : [args: CallArgs<A>]
-  ): Promise<R> {
-    const appArgs = (rest[0] ?? {}) as Record<string, unknown>;
-    const encoded: Record<string, unknown> = {};
-    for (const [key, field] of Object.entries(this.args))
-      encoded[key] = field.encode(appArgs[key] as never);
-    const [{ callFunction }, { surrealDriver }] = await Promise.all([
-      import("@schemic/core/query"),
-      import("./driver/surreal"),
-    ]);
-    const callable = surrealDriver.callable;
-    if (!callable)
-      throw new Error("the surrealdb driver has no `callable` capability.");
-    const returns = this.config.returns?.schema ?? z.unknown();
-    return callFunction(
-      callable,
-      db,
+  call(
+    ...rest: Record<string, never> extends CallArgsIn<A>
+      ? [args?: CallArgsIn<A>]
+      : [args: CallArgsIn<A>]
+  ): CallQuery<R> {
+    const given = (rest[0] ?? {}) as Record<string, unknown>;
+    const parts: string[] = [];
+    const bindings: Record<string, unknown> = {};
+    for (const [key, field] of Object.entries(this.args)) {
+      const v = given[key];
+      if (v instanceof BoundQuery) {
+        parts.push(`(${v.query})`);
+        Object.assign(bindings, v.bindings);
+      } else if (isParamRef(v)) {
+        parts.push(v.toText());
+      } else {
+        const name = `call__${++callBindCounter}_${key}`;
+        bindings[name] = field.encode(v as never);
+        parts.push(`$${name}`);
+      }
+    }
+    return new CallQuery<R>(
+      `fn::${this.name}(${parts.join(", ")})`,
+      bindings,
+      this.config.returns?.schema ?? z.unknown(),
       this.name,
-      encoded,
-      returns,
-    ) as Promise<R>;
+    );
   }
 }
 

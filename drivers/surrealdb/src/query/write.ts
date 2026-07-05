@@ -19,16 +19,18 @@ import {
   type Project,
   type ProjectionField,
 } from "@schemic/core/query";
-import { escapeIdent, type RecordId } from "surrealdb";
+import { type BoundQuery, escapeIdent, type RecordId } from "surrealdb";
 import type { App, Create, TableDef, Update, Wire } from "../pure";
 import {
   type FieldRefOps,
+  FRAGMENT,
   type Queryable,
   type Row,
   refCol,
   refsFor,
   type TargetId,
   thingOf,
+  toFragment,
 } from "./index";
 
 export type { TargetId } from "./index";
@@ -60,6 +62,12 @@ const retClause = (ret: Ret): string =>
 
 /** Shared execute/decode/thenable core of the three write builders. */
 abstract class WriteQuery<TD extends AnyTableDef, Res> {
+  /** Interpolate this write into a `surql` template — it splices as `(CREATE/UPDATE/DELETE ...)`. */
+  [FRAGMENT](): BoundQuery {
+    const { sql, vars } = this.toSQL();
+    return toFragment({ sql, vars });
+  }
+
   protected constructor(
     protected readonly table: TD,
     protected readonly ret: Ret,
