@@ -10,7 +10,7 @@
  */
 
 import { brandRef, type FieldRefBase } from "@schemic/core/query";
-import { BoundQuery } from "surrealdb";
+import { BoundQuery, escapeIdent, type RecordId } from "surrealdb";
 import { type RefMethodSpec, refMethods } from "../fn";
 import type { App, ParamRef, TableDef } from "../pure";
 import {
@@ -72,7 +72,19 @@ export type Expr = ExprNode & ExprOps;
 /** A raw predicate leaf: `where` (and every combinator) accepts a `surql` fragment directly. */
 export type Predicate = Expr | BoundQuery;
 
-const exprProto: ExprOps = {
+/** The Expr brand (`Symbol.for` — readable across layers without importing this module). */
+const EXPR_BRAND: unique symbol = Symbol.for("schemic.surrealdb.expr") as never;
+/** Is this a builder predicate Expr? (`block().return((s) => s.res.id.isNotNone())`). */
+export function isExpr(v: unknown): v is Expr {
+  return (
+    v !== null &&
+    typeof v === "object" &&
+    (v as Record<symbol, unknown>)[EXPR_BRAND] === true
+  );
+}
+
+const exprProto: ExprOps & { [EXPR_BRAND]: true } = {
+  [EXPR_BRAND]: true,
   and(this: Expr, ...more: Predicate[]): Expr {
     return mkExpr({ kind: "and", parts: [this, ...more.map(toExpr)] });
   },
@@ -222,7 +234,23 @@ export type FieldRef<T> = FieldRefOps<T> &
         ([NonNullable<T>] extends [Date] ? DateRefOps : unknown) &
         ([NonNullable<T>] extends [readonly (infer E)[]]
           ? ArrayRefOps<E>
-          : unknown));
+          : unknown) &
+        // PLAIN objects expose their properties as child refs (`sv.res.id.isNotNone()`,
+        // `u.meta.tags`); leaf/value classes (RecordId, dates, bytes, …) don't.
+        ([NonNullable<T>] extends [
+          | string
+          | number
+          | boolean
+          | bigint
+          | Date
+          | readonly unknown[]
+          | RecordId
+          | Uint8Array,
+        ]
+          ? unknown
+          : [NonNullable<T>] extends [object]
+            ? { [K in keyof NonNullable<T>]-?: FieldRef<NonNullable<T>[K]> }
+            : unknown));
 
 // --- the runtime ref ------------------------------------------------------------------------------
 
@@ -325,7 +353,23 @@ export function mkRef(state: RefState): FieldRef<unknown> {
       };
     }
   }
-  return brandRef(impl) as unknown as FieldRef<unknown>;
+  const ref = brandRef(impl);
+  // PROPERTY PATHS: an unknown string key on a PLAIN ref (no derived wrap) is a child ref —
+  // `sv.res.id` renders `$res.id`, `u.meta.tags` renders `meta.tags`. Names already on the ref
+  // (ops, stdlib, `then`) are reserved and shadow same-named columns (escape hatch: surql
+  // fragments). Derived expressions (`.length()`, arithmetic) have no property paths.
+  if (state.wrap) return ref as unknown as FieldRef<unknown>;
+  return new Proxy(ref as Record<string | symbol, unknown>, {
+    get(t, key, recv) {
+      if (typeof key !== "string" || key in t || key === "then")
+        return Reflect.get(t, key, recv);
+      const root =
+        "col" in state.root
+          ? { col: `${state.root.col}.${key}`, row: state.root.row }
+          : { text: `${state.root.text}.${escapeIdent(key)}` };
+      return mkRef({ root, kind: "other" });
+    },
+  }) as unknown as FieldRef<unknown>;
 }
 
 // --- refs for a table row -------------------------------------------------------------------------

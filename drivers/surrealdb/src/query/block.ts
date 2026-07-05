@@ -23,6 +23,7 @@ import type { ParamRef } from "../pure";
 import {
   type Expr,
   type FieldRef,
+  isExpr,
   lowerExpr,
   mkRef,
   type Predicate,
@@ -67,8 +68,11 @@ interface ToQuery {
 }
 
 /** The app-value type a `LET` binds: builders unwrap to their result, typed fragments to their
- *  `[T]`, refs/`$param`s to their carried type; a literal is itself. */
-export type ValueOf<X> = X extends CountQuery
+ *  `[T]`, refs/`$param`s to their carried type, a predicate Expr to boolean; a literal is
+ *  itself. */
+export type ValueOf<X> = X extends Expr
+  ? boolean
+  : X extends CountQuery
   ? number
   : X extends SelectOne<infer R>
     ? R | undefined
@@ -140,6 +144,15 @@ function kindOfValue(v: unknown): { kind: RefKind; elem?: RefKind } {
 }
 
 const VAR_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** Render a VALUE slot (`LET =` / `RETURN` / `THROW`): a predicate Expr lowers as a boolean
+ *  expression (`RETURN $res.id != NONE`); everything else goes through operand lowering.
+ *  Redundant whole-wrap parens are stripped (canonical printer parity). */
+function valueText(v: unknown, ctx: Ctx): string {
+  return stripOuterParens(
+    isExpr(v) ? lowerExpr(v, ctx) : operandText(v, ctx),
+  );
+}
 
 export class Block<V extends Record<string, unknown>, R> {
   /** INTERNAL — start with {@link block}. */
@@ -223,7 +236,7 @@ export class Block<V extends Record<string, unknown>, R> {
       Block.checkName("let", name);
       const { kind, elem } = kindOfValue(v);
       out = out.next(
-        (ctx) => `LET $${name} = ${stripOuterParens(operandText(v, ctx))}`,
+        (ctx) => `LET $${name} = ${valueText(v, ctx)}`,
         { name, kind, elem },
       );
     }
@@ -296,7 +309,7 @@ export class Block<V extends Record<string, unknown>, R> {
   return<X>(value: X | ((s: BlockRefs<V>) => X)): Block<V, ValueOf<X>> {
     const v = this.resolve(value);
     return this.next<V, ValueOf<X>>(
-      (ctx) => `RETURN ${stripOuterParens(operandText(v, ctx))}`,
+      (ctx) => `RETURN ${valueText(v, ctx)}`,
       undefined,
       kindOfValue(v),
     );

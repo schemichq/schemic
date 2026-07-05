@@ -146,9 +146,71 @@ export function operandText(v: unknown, ctx: Ctx): string {
   if (v instanceof BoundQuery) return `(${mergeRaw(v, ctx.vars)})`;
   const frag = fragOf(v);
   if (frag) return mergeRaw(frag, ctx.vars);
+  if ((v as Record<symbol, unknown> | null)?.[EXPR_BRAND] === true)
+    throw new Error(
+      "a predicate Expr can't be used as a plain value here — use it in `where`/`if`, or wrap it: block().return((s) => expr).",
+    );
+  if (hasRefDeep(v)) return renderData(v, ctx);
   const bind = `b${Object.keys(ctx.vars).length}`;
   ctx.vars[bind] = v;
   return `$${bind}`;
+}
+
+/** The Expr brand (`Symbol.for` — checked here without importing the expr layer). */
+const EXPR_BRAND = Symbol.for("schemic.surrealdb.expr");
+
+/** A PLAIN data object (proto Object/null) — class instances (RecordId, Date, Uint8Array,
+ *  Duration, …) are leaf VALUES and always bind. */
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  if (v === null || typeof v !== "object") return false;
+  const proto = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === null;
+}
+
+/** Does this plain object/array carry a ref/fragment ANYWHERE? If so it renders as a SurrealQL
+ *  literal with each value spliced (`{ to: [$email], html: $html }`); pure data binds WHOLE. */
+export function hasRefDeep(v: unknown, depth = 0): boolean {
+  if (depth > 16) return false;
+  if (
+    isParamRef(v) ||
+    refState(v) !== undefined ||
+    v instanceof BoundQuery ||
+    typeof (v as Record<symbol, unknown> | null)?.[FRAGMENT] === "function"
+  )
+    return true;
+  if (Array.isArray(v)) return v.some((e) => hasRefDeep(e, depth + 1));
+  if (isPlainObject(v))
+    return Object.values(v).some((e) => hasRefDeep(e, depth + 1));
+  return false;
+}
+
+const OBJ_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/** Render a ref-carrying plain object/array as a SurrealQL literal: refs/fragments splice,
+ *  leaf values bind individually. */
+export function renderData(v: unknown, ctx: Ctx): string {
+  if (Array.isArray(v)) {
+    return `[${v.map((e) => renderData(e, ctx)).join(", ")}]`;
+  }
+  if (
+    isPlainObject(v) &&
+    !isParamRef(v) &&
+    refState(v) === undefined &&
+    typeof (v as Record<symbol, unknown>)[FRAGMENT] !== "function"
+  ) {
+    const entries = Object.entries(v).map(
+      ([k, val]) =>
+        `${OBJ_KEY.test(k) ? k : JSON.stringify(k)}: ${renderData(val, ctx)}`,
+    );
+    return `{ ${entries.join(", ")} }`;
+  }
+  // Leaf: like operand lowering, but fragments splice BARE — object/array positions are
+  // delimiter-safe (`,`/`}`), and the printer would strip the parens anyway (DDL drift).
+  if (isParamRef(v)) return v.toText();
+  const rs = refState(v);
+  if (rs) return renderRef(rs, ctx);
+  const frag = v instanceof BoundQuery ? v : fragOf(v);
+  if (frag) return mergeRaw(frag, ctx.vars);
+  return operandText(v, ctx);
 }
 
 /** Value-position statements that must KEEP their parens (a bare subquery in `LET`/`RETURN`
@@ -207,6 +269,7 @@ export function argRenderer(v: unknown): (ctx: Ctx) => string {
   const frag = (v as Record<symbol, unknown> | null)?.[FRAGMENT];
   if (typeof frag === "function")
     return (ctx) => mergeRaw(frag.call(v) as BoundQuery, ctx.vars);
+  if (hasRefDeep(v)) return (ctx) => renderData(v, ctx);
   const name = `r${++argCounter}`;
   return (ctx) => {
     ctx.vars[name] = v;

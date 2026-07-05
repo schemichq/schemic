@@ -11,6 +11,7 @@
  */
 
 import { BoundQuery, escapeIdent, surql as sdkSurql, Table } from "surrealdb";
+import { Surql } from "./frag";
 import { fn } from "./fn";
 import {
   FunctionDef,
@@ -51,15 +52,8 @@ function markerFragment(v: unknown): BoundQuery | undefined {
   return typeof make === "function" ? (make.call(v) as BoundQuery) : undefined;
 }
 
-/** The tag's output: a `BoundQuery` plus `.as<T>()` — retype as a typed expression fragment
- *  (the `[T]` rule: an expression of type `T` IS a one-statement query `[T]`). Type-only. */
-export class Surql<R extends unknown[] = unknown[]> extends BoundQuery<R> {
-  /** Retype this fragment as an expression of type `T` — `surql\`age >= 18\`.as<boolean>()`.
-   *  Purely a type-level cast; the runtime object is unchanged. */
-  as<T>(): Surql<[T]> {
-    return this as unknown as Surql<[T]>;
-  }
-}
+// `Surql` (the tag output type with `.as<T>()`) lives in ./frag — shared with the fn catalog.
+export { Surql } from "./frag";
 
 function surqlTag<R extends unknown[] = unknown[]>(
   strings: TemplateStringsArray,

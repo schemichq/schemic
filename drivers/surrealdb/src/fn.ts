@@ -13,12 +13,15 @@
  */
 
 import type { FieldRefBase } from "@schemic/core/query";
-import { BoundQuery } from "surrealdb";
+import type { BoundQuery } from "surrealdb";
+import { Surql } from "./frag";
 import type { ParamRef } from "./pure";
 import { argRenderer, type Ctx, type RefKind } from "./query/render";
 
-/** A typed expression fragment — the `[T]` rule (`Frag<T>` = a one-statement query of `T`). */
-export type Frag<T> = BoundQuery<[T]>;
+/** A typed expression fragment — the `[T]` rule (`Frag<T>` = a one-statement query of `T`).
+ *  Catalog results are `Surql`, so every call carries `.as<T2>()` — retype where the true shape
+ *  is caller-known: `surql.fn.http.post(...).as<{ id?: string }>()`. */
+export type Frag<T> = Surql<[T]>;
 
 /** What a builtin-call argument accepts: a literal `T` (bound as a param), a typed field ref
  *  (spliced), a `$param` ref (spliced as text), or a fragment/builder (spliced, binds merged). */
@@ -31,12 +34,12 @@ export type FnArg<T> =
 
 // --- the call lowering ----------------------------------------------------------------------------
 
-function call(name: string, args: readonly unknown[]): BoundQuery<[unknown]> {
+function call(name: string, args: readonly unknown[]): Surql<[unknown]> {
   const ctx: Ctx = { vars: {} };
   const parts = args
     .filter((a) => a !== undefined)
     .map((a) => argRenderer(a)(ctx));
-  return new BoundQuery(`${name}(${parts.join(", ")})`, ctx.vars);
+  return new Surql(`${name}(${parts.join(", ")})`, ctx.vars);
 }
 
 // Arity helpers — the catalog below stays one line per function. `o` = trailing optionals,
@@ -79,6 +82,9 @@ const fv =
     call(name, xs) as Frag<R>;
 
 type Json = unknown;
+/** HTTP headers: a plain object whose VALUES may be fragments/refs (each splices), or a whole
+ *  fragment/ref for the object itself. */
+type HeadersArg = FnArg<Record<string, FnArg<string>>>;
 
 // --- the catalog -----------------------------------------------------------------------------------
 
@@ -183,14 +189,31 @@ export const fn = {
     centroid: f1<unknown, unknown>("geo::centroid"),
     distance: f2<unknown, unknown, number>("geo::distance"),
   },
-  /** `http::*` — server-side HTTP (events/functions; needs the server's http capability). */
+  /** `http::*` — server-side HTTP (events/functions; needs the server's http capability).
+   *  The generic is the RESPONSE shape (caller-known): `surql.fn.http.post<{ id?: string }>(…)`
+   *  — shorthand for `.as<{ id?: string }>()`. Header values take fragments/refs. */
   http: {
-    head: f1o<string, Record<string, string>, Json>("http::head"),
-    get: f1o<string, Record<string, string>, Json>("http::get"),
-    put: f2o<string, Json, Record<string, string>, Json>("http::put"),
-    post: f2o<string, Json, Record<string, string>, Json>("http::post"),
-    patch: f2o<string, Json, Record<string, string>, Json>("http::patch"),
-    delete: f1o<string, Record<string, string>, Json>("http::delete"),
+    head: <R = Json>(url: FnArg<string>, headers?: HeadersArg): Frag<R> =>
+      call("http::head", [url, headers]) as Frag<R>,
+    get: <R = Json>(url: FnArg<string>, headers?: HeadersArg): Frag<R> =>
+      call("http::get", [url, headers]) as Frag<R>,
+    put: <R = Json>(
+      url: FnArg<string>,
+      body?: FnArg<Json>,
+      headers?: HeadersArg,
+    ): Frag<R> => call("http::put", [url, body, headers]) as Frag<R>,
+    post: <R = Json>(
+      url: FnArg<string>,
+      body?: FnArg<Json>,
+      headers?: HeadersArg,
+    ): Frag<R> => call("http::post", [url, body, headers]) as Frag<R>,
+    patch: <R = Json>(
+      url: FnArg<string>,
+      body?: FnArg<Json>,
+      headers?: HeadersArg,
+    ): Frag<R> => call("http::patch", [url, body, headers]) as Frag<R>,
+    delete: <R = Json>(url: FnArg<string>, headers?: HeadersArg): Frag<R> =>
+      call("http::delete", [url, headers]) as Frag<R>,
   },
   /** `math::*` — numeric + statistical. */
   math: {
