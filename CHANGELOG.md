@@ -81,6 +81,13 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
   type (`DEFINE FIELD id … TYPE 'default'`, DB-enforced), id-optional client sugar (`db.get(Config)`;
   create/update/delete target THE record), and the literal id survives lower/normalize so it emits,
   diffs, and `pull` regenerates `defineSingleton`.
+- **surrealdb:** `DEFINE PARAM` with the access-style secret split — an INLINE LITERAL value is fully
+  managed (emit/diff/migrations/pull round-trip); an `env()`/`secret()` value is SECRET and excluded
+  from snapshots/migrations (SurrealDB stores param values readably), deployed out-of-band via new
+  `sc param push/check/list` (placeholder + binding — the value never appears in DDL text, and `pull`
+  drops out-of-band params so values never reach generated source); a bare schema declares presence
+  only. Typed `Def.$` deep param ref; the def splices `$name` in templates. Expression values are
+  rejected by design (the DB stores them EVALUATED — they can't round-trip).
 
 ### Fixed
 - **core:** the DEFAULT migrations dir now follows the documented contract — RELATIVE TO THE SCHEMA
