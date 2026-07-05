@@ -11,6 +11,8 @@ import type { DbStructured, Snapshot } from "./structure";
 export function included(f: Filter, s: DefineStatement): boolean {
   const table = s.table ?? s.name;
   switch (s.kind) {
+    case "param":
+      return true; // db-level; no filter category (yet)
     case "table":
     case "field":
     case "index":
@@ -63,5 +65,11 @@ export function filterStructured(db: DbStructured, f: Filter): DbStructured {
     }));
   const functions = db.functions.filter((fn) => inCat(f.functions, fn.name));
   const accesses = db.accesses.filter((a) => inCat(f.access, a.name));
-  return { tables, functions, accesses, analyzers: db.analyzers };
+  return {
+    tables,
+    functions,
+    accesses,
+    analyzers: db.analyzers,
+    params: db.params,
+  };
 }

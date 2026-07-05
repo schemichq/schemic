@@ -33,6 +33,7 @@ describe("renderPerFile", () => {
     functions: [],
     accesses: [],
     analyzers: [],
+      params: [],
   };
 
   test("renders one module per object, keyed by file path", () => {
@@ -88,6 +89,7 @@ describe("renderPerFile", () => {
       functions: [],
       accesses: [],
       analyzers: [],
+      params: [],
     };
     const out = renderPerFile(withDefaults, (_k, n) => `${n}.ts`).get(
       "thing.ts",
@@ -137,6 +139,7 @@ describe("renderPerFile", () => {
       functions: [],
       accesses: [],
       analyzers: [],
+      params: [],
     };
     const out =
       renderPerFile(withRef, (_k, n) => `${n}.ts`).get("comment.ts") ?? "";
@@ -177,6 +180,7 @@ describe("pull reverses native codecs / string formats", () => {
       functions: [],
       accesses: [],
       analyzers: [],
+      params: [],
     };
     return renderPerFile(db, (_k, n) => `${n}.ts`).get("t.ts") ?? "";
   };
@@ -229,6 +233,7 @@ describe("pull reverses native codecs / string formats", () => {
       functions: [],
       accesses: [],
       analyzers: [],
+      params: [],
     };
     const out = renderPerFile(db, (_k, n) => `${n}.ts`).get("order.ts") ?? "";
     expect(out).toContain("export const Order = defineTable(");
@@ -255,6 +260,7 @@ describe("pull reverses native codecs / string formats", () => {
       functions: [],
       accesses: [],
       analyzers: [],
+      params: [],
     };
     const out = renderPerFile(db, (_k, n) => `${n}.ts`).get("likes.ts") ?? "";
     expect(out).toContain("export const Likes = defineRelation(");

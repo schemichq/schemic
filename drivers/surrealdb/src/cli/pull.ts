@@ -12,6 +12,7 @@ import {
   type RenderedUnit,
   scanLocalEntities,
 } from "@schemic/core";
+import { loadDefs } from "@schemic/core";
 import type { Surreal } from "surrealdb";
 import { formatForAssert } from "../pure";
 import {
@@ -21,6 +22,7 @@ import {
   type StructAnalyzer,
   type StructField,
   type StructFunction,
+  type StructParam,
   type StructPerm,
   type StructPermissions,
   type StructTable,
@@ -774,10 +776,14 @@ export async function planPull(
     db,
     new Set([config.migrationsTable, `${config.migrationsTable}_lock`]),
   );
-  const { tables, functions, accesses, analyzers } = filterStructured(
-    introspected,
-    opts.filter ?? parseFilter({}),
-  );
+  const filtered = filterStructured(introspected, opts.filter ?? parseFilter({}));
+  const { tables, functions, accesses, analyzers } = filtered;
+  // SECRET GUARD: SurrealDB returns param values READABLY — rendering a live param that the
+  // schema authors as secret/declared (out-of-band) would write its VALUE into source. Drop
+  // those from the pull; their defs stay as authored. (Best effort: an unloadable schema —
+  // e.g. first scaffold — skips the filter.)
+  const oob = await outOfBandParamNames(config.schemaPath);
+  const params = filtered.params.filter((p) => !oob.has(p.name));
 
   const makeCtx = ctxFactory(tables);
   const keepLocal = opts.keepLocal ?? false;
@@ -789,11 +795,15 @@ export async function planPull(
       ...functions.map(functionUnit),
       ...accesses.map(accessUnit),
       ...analyzers.map(analyzerUnit),
+      ...params.map(paramUnit),
     ];
     return {
       files: [
         planFile(config.schemaPath, units, keepLocal, config, () =>
-          assembleCombined({ tables, functions, accesses, analyzers }, makeCtx),
+          assembleCombined(
+            { tables, functions, accesses, analyzers, params },
+            makeCtx,
+          ),
         ),
       ],
     };
@@ -820,6 +830,8 @@ export async function planPull(
     add(join(dir, "access", `${a.name}.ts`), accessUnit(a));
   for (const an of analyzers)
     add(join(dir, "analyzers", `${an.name}.ts`), analyzerUnit(an));
+  for (const pm of params)
+    add(join(dir, "params", `${pm.name}.ts`), paramUnit(pm));
 
   const files = [...groups].map(([abs, units]) =>
     planFile(abs, units, keepLocal, config, () =>
@@ -986,6 +998,62 @@ function analyzerUnit(a: StructAnalyzer): RenderedUnit {
   };
 }
 
+/** The names of authored OUT-OF-BAND params (secret/declared — no inline literal value): their
+ *  live values must never be rendered by pull. Empty when the schema can't load. */
+async function outOfBandParamNames(schemaPath: string): Promise<Set<string>> {
+  try {
+    const { defs } = await loadDefs(schemaPath);
+    return new Set(
+      defs
+        .filter(
+          (d) =>
+            (d as { kind?: string }).kind === "param" &&
+            (d as { config?: { mode?: string } }).config?.mode !== "value",
+        )
+        .map((d) => (d as { name: string }).name),
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+/** A canonical param VALUE text as a TS literal, when representable: `'x'` -> "x", `25` -> 25,
+ *  true/false. Unrepresentable values regenerate as a DECLARED param with the text in a comment. */
+function paramValueTS(text: string): string | undefined {
+  const m = /^'(.*)'$/.exec(text);
+  if (m)
+    return JSON.stringify(m[1].replace(/\\'/g, "'").replace(/\\\\/g, "\\"));
+  if (/^-?\d+(?:\.\d+)?$/.test(text)) return text;
+  if (text === "true" || text === "false") return text;
+  return undefined;
+}
+
+function renderParamConst(p: StructParam): string {
+  const value = paramValueTS(p.value);
+  let expr =
+    value === undefined
+      ? `defineParam(${JSON.stringify(p.name)})`
+      : `defineParam(${JSON.stringify(p.name)}, ${value})`;
+  if (p.permissions === false) expr += `.permissions(false)`;
+  if (p.comment) expr += `.comment(${JSON.stringify(p.comment)})`;
+  const note =
+    value === undefined
+      ? `// live value \`${p.value}\` isn't a plain literal — declared-only; manage via \`sc param push\`\n`
+      : "";
+  return `${note}export const ${fnConst(p.name)} = ${expr};`;
+}
+
+function paramUnit(p: StructParam): RenderedUnit {
+  return {
+    // core `RenderedUnit.kind` lacks "param" yet — group with the other db-level objects for now.
+    kind: "access",
+    name: p.name,
+    exportName: fnConst(p.name),
+    code: renderParamConst(p),
+    imports: [`import { defineParam } from "@schemic/surrealdb";`],
+  };
+}
+
 /** Build the per-table {@link RenderCtx} factory: cycle-aware ref resolution + import accumulation. */
 function ctxFactory(tables: StructTable[]): (t: StructTable) => RenderCtx {
   // Reference graph (record<…> targets + relation endpoints) → cycle-aware imports / ordering.
@@ -1065,6 +1133,7 @@ export function renderPerFile(
   for (const a of db.accesses) add(fileFor("access", a.name), accessUnit(a));
   for (const an of db.analyzers)
     add(fileFor("access", an.name), analyzerUnit(an));
+  for (const pm of db.params) add(fileFor("access", pm.name), paramUnit(pm));
 
   const out = new Map<string, string>();
   for (const [file, units] of byFile)
@@ -1079,7 +1148,7 @@ export function renderPerFile(
 
 /** Assemble the single-file combined module (tables ordered so same-file refs resolve). */
 function assembleCombined(
-  { tables, functions, accesses, analyzers }: DbStructured,
+  { tables, functions, accesses, analyzers, params }: DbStructured,
   makeCtx: (t: StructTable) => RenderCtx,
 ): string {
   // Render each const (collecting its same-file direct deps via ctx.imports), then order so deps
@@ -1099,10 +1168,12 @@ function assembleCombined(
   const fnCode = functions.map(renderFunctionConst);
   const accessCode = accesses.map(renderAccessConst);
   const analyzerCode = analyzers.map(renderAnalyzerConst);
+  const paramCode = params.map(renderParamConst);
   const factories = [...new Set(ordered.map((r) => r.factory))];
   if (functions.length) factories.push("defineFunction");
   if (accesses.length) factories.push("defineAccess");
   if (analyzers.length) factories.push("defineAnalyzer");
+  if (params.length) factories.push("defineParam");
   factories.sort();
   const usesSurql =
     functions.length > 0 ||
@@ -1112,8 +1183,9 @@ function assembleCombined(
   const imports = [`import { ${names.join(", ")} } from "@schemic/surrealdb";`];
   // `surql` from surrealdb on its own line (see tableUnit), kept out of the @schemic/surrealdb import.
   if (usesSurql) imports.push(`import { surql } from "surrealdb";`);
-  // Analyzers first — a FULLTEXT index references its analyzer.
+  // Params + analyzers first — functions/events may reference $params; a FULLTEXT index its analyzer.
   const body = [
+    ...paramCode,
     ...analyzerCode,
     ...ordered.map((r) => r.code),
     ...fnCode,

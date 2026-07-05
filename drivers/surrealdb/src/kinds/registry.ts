@@ -35,6 +35,7 @@ import type {
   PEvent,
   PFunction,
   PIndex,
+  PParam,
   PTable,
 } from "./portable";
 
@@ -127,6 +128,17 @@ const accessEngine: KindEngine<PAccess, PAccess> = {
   excludeFromMigrations: true,
 };
 
+// --- param: db-level OPAQUE kind (functions/events may reference $param) -------------------------
+
+const paramEngine: KindEngine<PParam, PParam> = {
+  lower: (p) => p,
+  emit: (p) => [p.stmt.ddl],
+  remove: (p) => [removeStatement(p.stmt)],
+  // DEFINE PARAM OVERWRITE in place.
+  overwrite: (_prev, next) => [overwriteStatement(next.stmt.ddl)],
+  deps: (p) => p.deps,
+};
+
 // --- analyzer: db-level OPAQUE kind (a FULLTEXT index depends on it) -----------------------------
 
 const analyzerEngine: KindEngine<PAnalyzer, PAnalyzer> = {
@@ -169,6 +181,11 @@ surrealKinds.define({
   name: "analyzer",
   build: (a: PAnalyzer) => a,
   ...analyzerEngine,
+});
+surrealKinds.define({
+  name: "param",
+  build: (p: PParam) => p,
+  ...paramEngine,
 });
 
 /** Author -> portable via the registry: explode tables/defs into per-kind objects, then lower each. */

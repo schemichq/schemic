@@ -402,7 +402,8 @@ export interface DefineStatement {
     | "event"
     | "function"
     | "access"
-    | "analyzer";
+    | "analyzer"
+    | "param";
   name: string;
   table?: string;
   ddl: string;
@@ -735,6 +736,24 @@ export function emitDefStatement(
   }
   if (def.kind === "analyzer") {
     return { kind: "analyzer", name: def.name, ddl: emitAnalyzer(def, opts) };
+  }
+  if (def.kind === "param") {
+    // Managed (inline literal) params inline the value; secret/declared params emit a `$__value`
+    // PLACEHOLDER + a binding, resolved at `sc param push` — the value never reaches DDL text.
+    const cfg = def.config;
+    const value =
+      cfg.mode === "value" ? toSurqlString(cfg.value) : "$__value";
+    let ddl = `DEFINE PARAM ${existsPrefix(opts)}$${def.name} VALUE ${value}`;
+    if (cfg.permissions === false) ddl += " PERMISSIONS NONE";
+    if (cfg.comment) ddl += ` COMMENT ${JSON.stringify(cfg.comment)}`;
+    return {
+      kind: "param",
+      name: def.name,
+      ddl: `${ddl};`,
+      ...(cfg.mode === "secret" && cfg.secret
+        ? { bindings: { __value: cfg.secret } }
+        : {}),
+    };
   }
   return { kind: "function", name: def.name, ddl: emitFunction(def, opts) };
 }
@@ -1178,6 +1197,9 @@ export function removeStatement(
   }
   if (s.kind === "analyzer") {
     return `REMOVE ANALYZER IF EXISTS ${escapeIdent(s.name)};`;
+  }
+  if (s.kind === "param") {
+    return `REMOVE PARAM IF EXISTS $${s.name};`;
   }
   return `REMOVE FIELD IF EXISTS ${s.name} ON TABLE ${escapeIdent(s.table ?? "")};`;
 }

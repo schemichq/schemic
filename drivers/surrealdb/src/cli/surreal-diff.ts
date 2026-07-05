@@ -110,6 +110,7 @@ export function buildSnapshot(
 // order is the reverse. Statements are grouped by table (see `diffSnapshots`).
 const RANK: Record<DefineStatement["kind"], number> = {
   analyzer: 0, // db-level; defined first (a FULLTEXT index references its analyzer)
+  param: 0, // db-level; defined first (functions/events may reference $param)
   function: 0, // db-level; defined first (tables/events may reference fn::…)
   table: 1,
   field: 2,

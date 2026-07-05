@@ -16,6 +16,7 @@ import { fn } from "./fn";
 import {
   FunctionDef,
   isParamRef,
+  ParamDef,
   type ParamRef,
   paramProxy,
   RecordIdField,
@@ -38,6 +39,7 @@ function markerText(v: unknown): string | undefined {
   if (v instanceof TableDef) return escapeIdent(v.name);
   if (v instanceof Table) return escapeIdent(v.name);
   if (v instanceof FunctionDef) return `fn::${v.name}`;
+  if (v instanceof ParamDef) return `$${v.name}`;
   if (isParamRef(v)) return v.toText();
   if (v instanceof RecordIdField && v.tables.length === 1)
     return escapeIdent(v.tables[0] as string);
@@ -174,6 +176,7 @@ export type {
   PresetColumnConflict,
   PresetEvent,
   PresetIndex,
+  ParamConfig,
   Shape,
   SingletonIdOf,
   SnowballLanguage,
@@ -198,6 +201,7 @@ export {
   defineAnalyzer,
   defineEvent,
   defineFunction,
+  defineParam,
   defineRelation,
   defineSingleton,
   defineTable,
@@ -209,6 +213,7 @@ export {
   JwtAccessDef,
   NamespaceAccessDef,
   objectFieldsRegistry,
+  ParamDef,
   ParamRef,
   RecordAccessDef,
   RecordIdField,

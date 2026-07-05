@@ -1,6 +1,7 @@
 // Type-only (erased at runtime, so the authoring index stays side-effect-free): a `DEFINE ACCESS` key
 // may be an env()/secret() reference instead of an inline literal.
 import type { SecretRef } from "@schemic/core";
+import { isSecretRef } from "@schemic/core/authoring";
 import type { FieldRefBase } from "@schemic/core/query";
 import {
   type Bound,
@@ -4469,8 +4470,93 @@ export function defineAnalyzer(name: string): AnalyzerDef {
   return new AnalyzerDef(name);
 }
 
+/** The three `defineParam` flows (see {@link defineParam}). */
+export interface ParamConfig {
+  /** How the VALUE is managed: `value` = inline literal (full migrate/diff flow); `secret` =
+   *  env()/secret(), resolved at `sc param push`/apply and NEVER in source/migrations/snapshots;
+   *  `declared` = presence-only (type-optional), value pushed out of band. */
+  mode: "value" | "secret" | "declared";
+  value?: unknown;
+  secret?: SecretRef;
+  /** The declared value TYPE (an s schema) — types `.$` without carrying a value. */
+  valueType?: AnyField;
+  /** `PERMISSIONS NONE` (false). Omitted/true = FULL (the default). */
+  permissions?: boolean;
+  comment?: string;
+}
+
+/**
+ * A database-wide parameter — `DEFINE PARAM $<name>`. Reference it TYPED via {@link ParamDef.$}
+ * (`ResendKey.$` splices `$resend_api_key`; interpolating the def itself does too). Three flows,
+ * picked by the second argument (mirrors the `defineAccess` secret handling):
+ *
+ *  - `defineParam("page_size", 25)` — inline literal: fully managed (emit/diff/migrations/pull).
+ *  - `defineParam("resend_api_key", env("RESEND_API_KEY"))` — SECRET: excluded from
+ *    migrations/snapshots (SurrealDB stores param values readably — INFO would leak them);
+ *    managed out of band via `sc param push/check`.
+ *  - `defineParam("resend_api_key", s.string())` / `defineParam("flag")` — DECLARED only:
+ *    presence-tracked, value pushed via `sc param push <name> --value/--env`.
+ */
+export class ParamDef<T = unknown> {
+  readonly kind = "param" as const;
+  constructor(
+    readonly name: string,
+    readonly config: ParamConfig,
+  ) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name))
+      throw new Error(
+        `defineParam("${name}"): the name must be a plain identifier (it becomes the \$param).`,
+      );
+  }
+  private withConfig(c: Partial<ParamConfig>): ParamDef<T> {
+    return new ParamDef<T>(this.name, { ...this.config, ...c });
+  }
+  /** The TYPED `$<name>` reference (a deep {@link ParamRef} proxy) — drops into operands,
+   *  `Def.call` args, `surql.fn` args, and templates. */
+  get $(): ParamRef<T> {
+    return paramProxy([this.name]) as ParamRef<T>;
+  }
+  /** `PERMISSIONS NONE` (false) / FULL (true — the SurrealDB default, omitted from DDL). */
+  permissions(p: boolean): ParamDef<T> {
+    return this.withConfig({ permissions: p });
+  }
+  comment(comment: string): ParamDef<T> {
+    return this.withConfig({ comment });
+  }
+  /** Is this param in the MANAGED flow (inline literal value -> emit/diff/migrations)? Secret +
+   *  declared params are excluded and managed via `sc param push/check` instead. */
+  get managed(): boolean {
+    return this.config.mode === "value";
+  }
+}
+
+/** SECRET param — env()/secret(): out-of-band flow. */
+export function defineParam(name: string, value: SecretRef): ParamDef<string>;
+/** DECLARED param with a value TYPE — presence-only flow, `.$` typed by the schema. */
+export function defineParam<F extends AnyField>(
+  name: string,
+  type: F,
+): ParamDef<App<F>>;
+/** Inline LITERAL value — the fully-managed flow (emit/diff/migrations/pull). */
+export function defineParam<const V>(name: string, value: V): ParamDef<V>;
+/** DECLARED param (untyped) — presence-only flow. */
+export function defineParam(name: string): ParamDef<unknown>;
+export function defineParam(name: string, value?: unknown): ParamDef<unknown> {
+  if (arguments.length < 2)
+    return new ParamDef(name, { mode: "declared" });
+  if (isSecretRef(value))
+    return new ParamDef(name, { mode: "secret", secret: value });
+  if (value instanceof SField)
+    return new ParamDef(name, { mode: "declared", valueType: value });
+  return new ParamDef(name, { mode: "value", value });
+}
 /** A schema object declared apart from a table (collected by the CLI loader and emitted on its own). */
-export type StandaloneDef = EventDef | FunctionDef | AccessDef | AnalyzerDef;
+export type StandaloneDef =
+  | EventDef
+  | FunctionDef
+  | AccessDef
+  | AnalyzerDef
+  | ParamDef;
 
 /**
  * The underlying Zod schema of any s value: a field (`SField`), a table/relation def

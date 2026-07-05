@@ -8,7 +8,7 @@
 // come straight off `SField.surreal` and `TableConfig`. The output is RAW (unsorted, defaults not
 // stripped, `option<>` not folded, `x.*` elements present) — `normalizeTable` closes those gaps.
 
-import { BoundQuery, escapeIdent } from "surrealdb";
+import { BoundQuery, escapeIdent, toSurqlString } from "surrealdb";
 import {
   assertExpr,
   blockThen,
@@ -34,6 +34,7 @@ import type {
   TableDef,
   TableEvent,
   TablePermissions,
+  ParamDef,
 } from "../pure";
 import { normalizeDb } from "./struct";
 import type {
@@ -48,6 +49,7 @@ import type {
   StructPermissions,
   StructTable,
   StructTableKind,
+  StructParam,
 } from "./structure";
 
 const FIELD_PERM_OPS = ["select", "create", "update"] as const;
@@ -371,14 +373,27 @@ function lowerAnalyzer(a: AnalyzerDef): StructAnalyzer {
   return out;
 }
 
-/** Lower a standalone def (`defineFunction`/`defineAccess`/`defineEvent`/`defineAnalyzer`) to its `Struct` IR. */
+/** Lower a MANAGED `defineParam` (inline literal value) to its `StructParam` — the value is the
+ *  canonical SurrealQL literal TEXT (what INFO stores), so it round-trips. */
+export function lowerParam(p: ParamDef): StructParam {
+  const out: StructParam = {
+    name: p.name,
+    value: toSurqlString(p.config.value),
+  };
+  if (p.config.permissions === false) out.permissions = false;
+  if (p.config.comment) out.comment = p.config.comment;
+  return out;
+}
+
+/** Lower a standalone def (`defineFunction`/`defineAccess`/`defineEvent`/`defineAnalyzer`/`defineParam`) to its `Struct` IR. */
 export function fromStandalone(
   def: StandaloneDef,
-): StructFunction | StructAccess | StructEvent | StructAnalyzer {
+): StructFunction | StructAccess | StructEvent | StructAnalyzer | StructParam {
   // An `EventDef` already carries `name`/`when`/`then` — the `TableEvent` shape `lowerEvent` reads.
   if (def.kind === "event") return lowerEvent(def.table, def);
   if (def.kind === "function") return lowerFunction(def);
   if (def.kind === "analyzer") return lowerAnalyzer(def);
+  if (def.kind === "param") return lowerParam(def);
   return lowerAccess(def);
 }
 
@@ -396,6 +411,7 @@ export function schemaStruct(
   const functions: StructFunction[] = [];
   const accesses: StructAccess[] = [];
   const analyzers: StructAnalyzer[] = [];
+  const params: StructParam[] = [];
   for (const d of defs) {
     if (d.kind === "function")
       functions.push(fromStandalone(d) as StructFunction);
@@ -403,7 +419,12 @@ export function schemaStruct(
       accesses.push(fromStandalone(d) as StructAccess);
     else if (d.kind === "analyzer")
       analyzers.push(fromStandalone(d) as StructAnalyzer);
-    else if (d.kind === "event")
+    // Only MANAGED params (inline literal value) enter the migration flow; secret/declared params
+    // are out-of-band (`sc param push/check`) — SurrealDB stores param values READABLY, so a
+    // secret value must never reach a snapshot or migration.
+    else if (d.kind === "param") {
+      if (d.managed) params.push(fromStandalone(d) as StructParam);
+    } else if (d.kind === "event")
       byName.get(d.table)?.events.push(fromStandalone(d) as StructEvent);
   }
   // An inline `.function(input => surql`…`)` carries an auto-created function — expand it into the
@@ -411,5 +432,11 @@ export function schemaStruct(
   // the analyzer references. Same helper the emit path uses, so both agree on collisions.
   for (const fn of inlineAnalyzerFunctions(defs))
     functions.push(fromStandalone(fn) as StructFunction);
-  return normalizeDb({ tables: structTables, functions, accesses, analyzers });
+  return normalizeDb({
+    tables: structTables,
+    functions,
+    accesses,
+    analyzers,
+    params,
+  });
 }

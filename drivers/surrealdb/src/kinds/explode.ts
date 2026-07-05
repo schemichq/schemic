@@ -27,6 +27,7 @@ import type {
   StructAnalyzer,
   StructFunction,
   StructTable,
+  StructParam,
 } from "../cli/structure";
 import { introspectStructured, structuredSnapshot } from "../cli/structure";
 import type { DefineStatement } from "../ddl";
@@ -149,6 +150,12 @@ export function fromStructured(db: DbStructured): SurrealPortable[] {
     if (native)
       out.push({ kind: "analyzer", name: s.name, stmt: s, deps: [], native });
   }
+  const pmByName = new Map(db.params.map((p) => [p.name, p]));
+  for (const s of of("param")) {
+    const native = pmByName.get(s.name);
+    if (native)
+      out.push({ kind: "param", name: s.name, stmt: s, deps: [], native });
+  }
 
   return out;
 }
@@ -161,13 +168,15 @@ export function toStructured(objects: SurrealPortable[]): DbStructured {
   const functions: StructFunction[] = [];
   const accesses: StructAccess[] = [];
   const analyzers: StructAnalyzer[] = [];
+  const params: StructParam[] = [];
   for (const o of objects) {
     if (o.kind === "table") tables.push(o.struct);
     else if (o.kind === "function") functions.push(o.native);
     else if (o.kind === "access") accesses.push(o.native);
     else if (o.kind === "analyzer") analyzers.push(o.native);
+    else if (o.kind === "param") params.push(o.native);
   }
-  return { tables, functions, accesses, analyzers };
+  return { tables, functions, accesses, analyzers, params };
 }
 
 /**

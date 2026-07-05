@@ -161,6 +161,7 @@ live("event DDL introspects + round-trips", () => {
       functions: [],
       accesses: [],
       analyzers: [],
+      params: [],
     }).statements["event:it_evented:it_reverify"]?.ddl;
     expect(ddl).toBe(
       "DEFINE EVENT it_reverify ON TABLE it_evented WHEN $before.email != $after.email THEN UPDATE $after.id SET verified = false;",
@@ -199,6 +200,7 @@ live("function DDL introspects + round-trips", () => {
       functions: fn ? [fn] : [],
       accesses: [],
       analyzers: [],
+      params: [],
     }).statements["function::it_greet"]?.ddl;
     expect(ddl).toContain(
       "DEFINE FUNCTION fn::it_greet($name: string) -> string {",

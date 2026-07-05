@@ -143,7 +143,14 @@ live parity suites (`test/parity/{struct,live,canonical}-parity.test.ts`) and th
 
 ## Database-level objects
 
-- [ ] `DEFINE PARAM`
+- [x] `DEFINE PARAM` — `defineParam(name, value?)`, three flows (mirrors the access split):
+      inline literal = fully managed (emit/diff/migrations/pull); `env()`/`secret()` = SECRET,
+      excluded from snapshots/migrations (SurrealDB stores values READABLY), deployed via
+      `sc param push/check/list` (bindings, never DDL text; pull won't render their live value);
+      `s.*` schema / bare = declared-only (presence + typed `.$`). `.$` is the typed `$name` ref;
+      the def itself splices in `surql` templates. `PERMISSIONS NONE` + `COMMENT` covered;
+      expression VALUES intentionally unsupported (the DB stores them EVALUATED — they can't
+      round-trip).
 - [ ] `DEFINE SEQUENCE`
 - [x] `DEFINE ANALYZER TOKENIZERS … [FILTERS …]` — `defineAnalyzer(name, { tokenizers, filters? })` (its own kind; a FULLTEXT index `deps` on it)
 - [ ] `DEFINE USER`

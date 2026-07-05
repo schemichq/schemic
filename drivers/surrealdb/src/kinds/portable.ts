@@ -16,6 +16,7 @@ import type {
   StructAnalyzer,
   StructFunction,
   StructTable,
+  StructParam,
 } from "../cli/structure";
 import type { DefineStatement } from "../ddl";
 
@@ -99,6 +100,16 @@ export interface PAnalyzer extends PortableObject {
   readonly native: StructAnalyzer;
 }
 
+/** A MANAGED `DEFINE PARAM` (inline literal value; secret/declared params never lower). */
+export interface PParam extends PortableObject {
+  readonly kind: "param";
+  readonly name: string;
+  readonly stmt: DefineStatement;
+  readonly deps: Ref[];
+  /** The structured param (the opaque kind's `native` payload). */
+  readonly native: StructParam;
+}
+
 /** Every portable object a SurrealDB schema lowers to. */
 export type SurrealPortable =
   | PTable
@@ -106,7 +117,8 @@ export type SurrealPortable =
   | PEvent
   | PFunction
   | PAccess
-  | PAnalyzer;
+  | PAnalyzer
+  | PParam;
 
 /**
  * The authoring-side definables the explode produces. They ALREADY carry the normalized, canonical

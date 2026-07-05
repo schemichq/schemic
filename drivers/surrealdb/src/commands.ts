@@ -12,7 +12,7 @@ import { escapeIdent, type Surreal } from "surrealdb";
 import { lowerAccess } from "./cli/lower";
 import { introspectStructured, type StructAccess } from "./cli/structure";
 import { accessBindings, emitDefStatement, secretParam } from "./ddl";
-import type { AccessDef } from "./pure";
+import type { AccessDef, ParamDef } from "./pure";
 
 type Ctx = CommandContext<Surreal>;
 
@@ -46,6 +46,24 @@ function isAccessDef(d: unknown): d is AccessDef {
 async function loadAccessDefs(ctx: Ctx): Promise<AccessDef[]> {
   const { defs } = await loadDefs(ctx.config.schemaPath);
   return defs.filter(isAccessDef);
+}
+
+/** Type-guard + loader for authored `defineParam` defs (realm-safe: matched by `kind`). */
+function isParamDef(d: unknown): d is ParamDef {
+  return (
+    (d as { kind?: string }).kind === "param" &&
+    (d as Partial<ParamDef>).config !== undefined
+  );
+}
+async function loadParamDefs(ctx: Ctx): Promise<ParamDef[]> {
+  const { defs } = await loadDefs(ctx.config.schemaPath);
+  return defs.filter(isParamDef);
+}
+
+/** The live params (name -> canonical value text) via `INFO FOR DB STRUCTURE`. */
+async function liveParams(ctx: Ctx): Promise<Map<string, string>> {
+  const db = await introspectStructured(ctx.conn);
+  return new Map(db.params.map((p) => [p.name, p.value]));
 }
 
 /** Resolve an access's `$param -> SecretRef` bindings to concrete values via the provider (empty when the
@@ -105,6 +123,131 @@ function compareAccess(a: StructAccess, l: StructAccess): string[] {
 }
 
 export const surrealCommands: readonly DriverCommand<Surreal>[] = [
+  // --- param ------------------------------------------------------------------------------------
+  // Secret/declared params are OUT-OF-BAND (mirrors access): SurrealDB stores param values
+  // READABLY (INFO returns them), so their values must never reach snapshots or migrations —
+  // these verbs are how they deploy. Managed (inline-literal) params ride normal migrations.
+  {
+    kind: "param",
+    verb: "push",
+    summary:
+      "apply DEFINE PARAM out-of-band (all secret/declared params, or <name>) — values from env()/secret(), --value, or --env",
+    args: {
+      positionals: [
+        {
+          name: "name",
+          required: false,
+          help: "a single param to push (default: all secret/declared params)",
+        },
+      ],
+      flags: [
+        { name: "value", value: true, help: "an explicit value (declared params)" },
+        {
+          name: "env",
+          value: true,
+          help: "read the value from this environment variable",
+        },
+        {
+          name: "dry-run",
+          help: "print the DEFINE PARAM … statements (values REDACTED) without applying",
+        },
+      ],
+    },
+    async run(ctx: Ctx, a: ParsedCommandArgs) {
+      const only = a.positionals[0];
+      const flagValue =
+        typeof a.flags.value === "string"
+          ? a.flags.value
+          : typeof a.flags.env === "string"
+            ? process.env[a.flags.env]
+            : undefined;
+      if (typeof a.flags.env === "string" && flagValue === undefined)
+        throw new Error(`environment variable ${a.flags.env} is not set`);
+      const params = (await loadParamDefs(ctx)).filter(
+        (d) => (only ? d.name === only : d.config.mode !== "value"),
+      );
+      if (!params.length)
+        throw new Error(
+          only
+            ? `no defineParam named "${only}" in the schema`
+            : "no secret/declared defineParam definitions in the schema",
+        );
+      const dryRun = Boolean(a.flags["dry-run"]);
+      for (const def of params) {
+        const stmt = emitDefStatement(def, { exists: "overwrite" });
+        let vars: Record<string, unknown> | undefined;
+        if (def.config.mode === "secret" && def.config.secret) {
+          vars = { __value: await ctx.secrets.resolve(def.config.secret) };
+        } else if (def.config.mode === "declared") {
+          if (flagValue === undefined)
+            throw new Error(
+              `param "${def.name}" is declared without a value — pass --value or --env (or give it env()/secret() in the schema)`,
+            );
+          vars = { __value: flagValue };
+        }
+        if (dryRun) {
+          ctx.io.info(stmt.ddl); // the value is a $__value placeholder — nothing to redact
+          continue;
+        }
+        await ctx.conn.query(stmt.ddl, vars);
+        ctx.io.ok(`pushed param "$${def.name}"`);
+      }
+      if (dryRun) ctx.io.ok(`dry-run — ${params.length} param(s) not applied`);
+    },
+  },
+  {
+    kind: "param",
+    verb: "check",
+    summary:
+      "compare authored params against the live database (presence; secret values verified without printing)",
+    args: { positionals: [], flags: [] },
+    async run(ctx: Ctx) {
+      const authored = await loadParamDefs(ctx);
+      if (!authored.length) throw new Error("no defineParam definitions in the schema");
+      const live = await liveParams(ctx);
+      let bad = 0;
+      for (const def of authored) {
+        const liveValue = live.get(def.name);
+        if (liveValue === undefined) {
+          ctx.io.fail(`missing  $${def.name} — not defined live (sc param push${def.config.mode === "value" ? " or sc push" : ""})`);
+          bad++;
+          continue;
+        }
+        if (def.config.mode === "secret" && def.config.secret) {
+          // Compare quietly: the live value is readable to root, but never printed here.
+          const want = await ctx.secrets.resolve(def.config.secret);
+          const ok = liveValue === `'${want.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+          if (ok) ctx.io.ok(`ok       $${def.name} (secret, matches ${def.config.secret.kind}:${def.config.secret.name})`);
+          else {
+            ctx.io.fail(`stale    $${def.name} — live value differs from ${def.config.secret.kind}:${def.config.secret.name} (sc param push ${def.name})`);
+            bad++;
+          }
+        } else {
+          ctx.io.ok(`present  $${def.name}`);
+        }
+      }
+      if (bad) throw new Error(`${bad} param(s) need attention`);
+    },
+  },
+  {
+    kind: "param",
+    verb: "list",
+    summary:
+      "list live DEFINE PARAMs (values of authored secret params are REDACTED)",
+    args: { positionals: [], flags: [] },
+    async run(ctx: Ctx) {
+      const authored = await loadParamDefs(ctx).catch(() => [] as ParamDef[]);
+      const secretNames = new Set(
+        authored.filter((d) => d.config.mode !== "value").map((d) => d.name),
+      );
+      const db = await introspectStructured(ctx.conn);
+      if (!db.params.length) return ctx.io.info("no params defined");
+      for (const p of db.params) {
+        const value = secretNames.has(p.name) ? "<redacted>" : p.value;
+        ctx.io.info(`$${p.name} = ${value}${p.permissions === false ? "  [PERMISSIONS NONE]" : ""}`);
+      }
+    },
+  },
   // --- access -----------------------------------------------------------------------------------
   {
     kind: "access",

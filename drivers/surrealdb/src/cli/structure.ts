@@ -133,6 +133,18 @@ export interface StructAnalyzer {
   comment?: string;
 }
 
+/** A `DEFINE PARAM` — INFO … STRUCTURE returns the value as canonical SurrealQL literal TEXT
+ *  (`'https://x.dev'`, `25`) and `permissions` as a boolean. Only MANAGED (inline-literal) params
+ *  enter this flow; secret/declared params are out-of-band (`sc param push/check`). */
+export interface StructParam {
+  name: string;
+  /** The canonical literal text of the stored value. */
+  value: string;
+  /** `false` = PERMISSIONS NONE; omitted/true = FULL (the default, dropped by normalize). */
+  permissions?: boolean;
+  comment?: string;
+}
+
 export interface StructTableKind {
   kind: "NORMAL" | "ANY" | "RELATION";
   in?: string[];
@@ -169,14 +181,16 @@ interface DbStructure {
   functions?: StructFunction[];
   accesses?: StructAccess[];
   analyzers?: StructAnalyzer[];
+  params?: StructParam[];
 }
 
-/** The structured database: tables (with their fields/indexes/events) and db-level functions/access/analyzers. */
+/** The structured database: tables (with their fields/indexes/events) and db-level functions/access/analyzers/params. */
 export interface DbStructured {
   tables: StructTable[];
   functions: StructFunction[];
   accesses: StructAccess[];
   analyzers: StructAnalyzer[];
+  params: StructParam[];
 }
 interface TableStructure {
   fields?: StructField[];
@@ -547,6 +561,14 @@ function canonicalAccess(a: StructAccess): string {
 
 /** Canonical `DEFINE ANALYZER …` — tokenizer/filter lists joined `, ` (uppercase, as INFO returns them).
  *  Both clauses are optional: a bare `DEFINE ANALYZER <name>` is valid (INFO returns just the name). */
+/** Canonical `DEFINE PARAM $<name> VALUE <literal> [PERMISSIONS NONE] [COMMENT …]`. */
+function canonicalParam(p: StructParam): string {
+  let s = `DEFINE PARAM $${p.name} VALUE ${p.value}`;
+  if (p.permissions === false) s += " PERMISSIONS NONE";
+  if (p.comment) s += ` COMMENT ${JSON.stringify(p.comment)}`;
+  return `${s};`;
+}
+
 function canonicalAnalyzer(a: StructAnalyzer): string {
   let s = `DEFINE ANALYZER ${a.name}`;
   // Grammar order: FUNCTION, TOKENIZERS, FILTERS, COMMENT. `function` is stored bare; re-prefix `fn::`.
@@ -609,6 +631,7 @@ export function structuredSnapshot({
   functions,
   accesses,
   analyzers,
+  params,
 }: DbStructured): Snapshot {
   const statements: Record<string, DefineStatement> = {};
   for (const t of tables) {
@@ -697,6 +720,14 @@ export function structuredSnapshot({
     };
     statements[keyOf(s)] = s;
   }
+  for (const pm of params) {
+    const s: DefineStatement = {
+      kind: "param",
+      name: pm.name,
+      ddl: canonicalParam(pm),
+    };
+    statements[keyOf(s)] = s;
+  }
   return { version: 1, statements };
 }
 
@@ -745,5 +776,6 @@ export async function introspectStructured(
     functions: dbInfo.functions ?? [],
     accesses: dbInfo.accesses ?? [],
     analyzers: dbInfo.analyzers ?? [],
+    params: dbInfo.params ?? [],
   };
 }
