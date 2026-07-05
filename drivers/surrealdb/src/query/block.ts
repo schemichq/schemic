@@ -335,8 +335,14 @@ export class Block<V extends Record<string, unknown>, R> {
   toQuery(): BoundQuery<[R]> {
     const ctx: Ctx = { vars: {} };
     const texts = this.stmts.map((f) => f(ctx));
+    // Canonical block forms: empty `{ }` (a valid no-op body), single `{ stmt }`,
+    // multi `{ s1; s2; }` — matching INFO's printer.
     const body =
-      texts.length === 1 ? `{ ${texts[0]} }` : `{ ${texts.join("; ")}; }`;
+      texts.length === 0
+        ? "{ }"
+        : texts.length === 1
+          ? `{ ${texts[0]} }`
+          : `{ ${texts.join("; ")}; }`;
     return toFragment(
       { sql: body, vars: ctx.vars },
       (sql) => sql,

@@ -265,3 +265,29 @@ describe("object bindings — refactor safety extras", () => {
     );
   });
 });
+
+describe("empty block", () => {
+  test("block() with no statements emits the valid no-op `{ }`", () => {
+    expect(block().toQuery().query).toBe("{ }");
+  });
+});
+
+const EMPTY_URL = process.env.SURREAL_URL;
+describe.skipIf(!EMPTY_URL)("empty block live", () => {
+  test("an empty block is a valid function body and round-trips", async () => {
+    const { Surreal } = await import("surrealdb");
+    const { emitDefStatement } = await import("../../src/ddl");
+    const { defineFunction } = await import("../../src/index");
+    const F = defineFunction("blk_noop").body(block());
+    const c = new Surreal();
+    await c.connect(EMPTY_URL as string);
+    await c.signin({ username: "root", password: "root" });
+    await c.use({ namespace: "blk_e", database: "blk_e" });
+    await c.query("REMOVE FUNCTION IF EXISTS fn::blk_noop;");
+    await c.query(emitDefStatement(F, { exists: "overwrite" }).ddl);
+    const [out] = (await c.query("RETURN fn::blk_noop()")) as [unknown];
+    expect(out ?? null).toBeNull(); // a no-op body returns NONE
+    await c.query("REMOVE FUNCTION IF EXISTS fn::blk_noop;");
+    await c.close();
+  }, 30_000);
+});
