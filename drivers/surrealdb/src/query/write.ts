@@ -19,11 +19,13 @@ import {
   type Project,
   type ProjectionField,
 } from "@schemic/core/query";
-import { type BoundQuery, escapeIdent, type RecordId } from "surrealdb";
+import { BoundQuery, escapeIdent, type RecordId } from "surrealdb";
 import type { App, Create, TableDef, Update, Wire } from "../pure";
+import { isParamRef } from "../pure";
 import {
   type FieldRefOps,
   FRAGMENT,
+  type Operand,
   type Queryable,
   type Row,
   refCol,
@@ -32,6 +34,7 @@ import {
   thingOf,
   toFragment,
 } from "./index";
+import { type Ctx, operandText, refState } from "./render";
 
 export type { TargetId } from "./index";
 
@@ -64,6 +67,12 @@ const retClause = (ret: Ret): string =>
 abstract class WriteQuery<TD extends AnyTableDef, Res> {
   /** Interpolate this write into a `surql` template — it splices as `(CREATE/UPDATE/DELETE ...)`. */
   [FRAGMENT](): BoundQuery {
+    return this.toQuery();
+  }
+
+  /** This write as a composable fragment: the lowered `(CREATE/UPDATE/DELETE ...)` with
+   *  namespaced binds. Interpolates into `surql` templates and every authoring slot that takes one. */
+  toQuery(): BoundQuery {
     const { sql, vars } = this.toSQL();
     return toFragment({ sql, vars });
   }
@@ -207,6 +216,24 @@ export class CreateQuery<
 
 type UpdateMode = "merge" | "content" | "set";
 
+/** The callback form of `.set`: each field takes its app value (encoded through the codec), a
+ *  typed expression over the row (`p.views.plus(1)`), a `$param` ref, or a `surql` fragment. */
+export type SetSpec<TD extends AnyTableDef> = {
+  [K in keyof Update<TD>]?: Operand<Update<TD>[K]>;
+};
+
+/** Is this `.set` value an EXPRESSION (spliced) rather than a literal (codec-encoded + bound)? */
+function isSetExpr(v: unknown): boolean {
+  return (
+    isParamRef(v) ||
+    refState(v) !== undefined ||
+    v instanceof BoundQuery ||
+    (v !== null &&
+      typeof v === "object" &&
+      typeof (v as { toQuery?: unknown }).toQuery === "function")
+  );
+}
+
 export class UpdateQuery<
   TD extends AnyTableDef,
   Res = App<TD>,
@@ -219,6 +246,8 @@ export class UpdateQuery<
     ret: Ret = "after",
     decode = true,
     conn?: Queryable,
+    /** `.set` callback entries whose value is an EXPRESSION (spliced, not bound). */
+    private readonly exprSet?: readonly { col: string; value: unknown }[],
   ) {
     super(table, ret, decode, conn);
   }
@@ -226,7 +255,11 @@ export class UpdateQuery<
     return "update";
   }
 
-  private with(mode: UpdateMode, payload: Record<string, unknown>) {
+  private with(
+    mode: UpdateMode,
+    payload: Record<string, unknown>,
+    exprSet?: readonly { col: string; value: unknown }[],
+  ) {
     return new UpdateQuery<TD, Res>(
       this.table,
       this.target,
@@ -235,6 +268,7 @@ export class UpdateQuery<
       this.ret,
       this.decode,
       this.conn,
+      exprSet,
     );
   }
 
@@ -256,11 +290,30 @@ export class UpdateQuery<
   }
 
   /** Explicit `SET field = value, …` — a partial patch via the `Update` codec; unlike `.merge`,
-   *  a nested object value REPLACES the field (SurrealDB `SET` assignment semantics). */
-  set(patch: Update<TD>): UpdateQuery<TD, Res> {
+   *  a nested object value REPLACES the field (SurrealDB `SET` assignment semantics). The
+   *  CALLBACK form takes typed row expressions per field —
+   *  `.set((p) => ({ views: p.views.plus(1) }))` lowers to `SET views = views + $n` — mixing
+   *  freely with literal values (codec-encoded + bound) and `surql` fragments. */
+  set(patch: Update<TD>): UpdateQuery<TD, Res>;
+  set(fn: (row: Row<TD>) => SetSpec<TD>): UpdateQuery<TD, Res>;
+  set(arg: Update<TD> | ((row: Row<TD>) => SetSpec<TD>)): UpdateQuery<TD, Res> {
+    if (typeof arg === "function") {
+      const spec = arg(refsFor(this.table)) as Record<string, unknown>;
+      const literals: Record<string, unknown> = {};
+      const exprs: { col: string; value: unknown }[] = [];
+      for (const [k, v] of Object.entries(spec)) {
+        if (v === undefined) continue;
+        if (isSetExpr(v)) exprs.push({ col: k, value: v });
+        else literals[k] = v;
+      }
+      const encoded = Object.keys(literals).length
+        ? (this.table.encodePartial(literals) as Record<string, unknown>)
+        : {};
+      return this.with("set", encoded, exprs);
+    }
     return this.with(
       "set",
-      this.table.encodePartial(patch) as Record<string, unknown>,
+      this.table.encodePartial(arg) as Record<string, unknown>,
     );
   }
 
@@ -286,6 +339,7 @@ export class UpdateQuery<
       ret,
       this.decode,
       this.conn,
+      this.exprSet,
     );
   }
 
@@ -299,6 +353,7 @@ export class UpdateQuery<
       this.ret,
       false,
       this.conn,
+      this.exprSet,
     );
   }
 
@@ -314,6 +369,15 @@ export class UpdateQuery<
         vars[`__s${i}`] = (this.payload as Record<string, unknown>)[k];
         return `${escapeIdent(k)} = $__s${i}`;
       });
+      if (this.exprSet?.length) {
+        const ctx: Ctx = { vars };
+        for (const e of this.exprSet)
+          parts.push(`${escapeIdent(e.col)} = ${operandText(e.value, ctx)}`);
+      }
+      if (!parts.length)
+        throw new Error(
+          "update().set() got an empty patch — set at least one field.",
+        );
       clause = `SET ${parts.join(", ")}`;
     } else {
       vars.__payload = this.payload;

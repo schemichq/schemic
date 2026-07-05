@@ -163,3 +163,70 @@ describe("write builders — execution mechanics", () => {
     expect(q.decodeRows([{ t: "hello" }])).toEqual({ t: "hello" });
   });
 });
+
+describe(".set callback — typed row expressions", () => {
+  test("p.views.plus(1) lowers to SET views = views + $r<n>", () => {
+    const { sql, vars } = update(Post, "p1")
+      .set((p) => ({ views: p.views.plus(1) }))
+      .toSQL();
+    expect(sql).toMatch(
+      /^UPDATE \$__thing SET views = views \+ \$r\d+ RETURN AFTER$/,
+    );
+    expect(Object.values(vars)).toContain(1);
+  });
+
+  test("literals mix in and still go through the codec channel", () => {
+    const { sql, vars } = update(Post, "p1")
+      .set((p) => ({ title: "renamed", views: p.views.times(2) }))
+      .toSQL();
+    expect(sql).toContain("title = $__s0");
+    expect(sql).toMatch(/views = views \* \$r\d+/);
+    expect(vars.__s0).toBe("renamed");
+  });
+
+  test("surql fragments are accepted as values", () => {
+    const { sql } = update(Post, "p1")
+      .set(() => ({ views: surql`views + 1`.as<number>() }))
+      .toSQL();
+    expect(sql).toContain("views = (views + 1)");
+  });
+
+  test("typed: a wrong-typed expression is a compile error", () => {
+    const _bad = () =>
+      update(Post, "p1")
+        // @ts-expect-error — title is a string; a number expression doesn't fit
+        .set((p) => ({ title: p.views.plus(1) }));
+    expect(typeof _bad).toBe("function");
+  });
+
+  test("empty callback patch throws with guidance", () => {
+    expect(() =>
+      update(Post, "p1")
+        .set(() => ({}))
+        .toSQL(),
+    ).toThrow(/empty patch/);
+  });
+});
+
+// --- live (SURREAL_URL-gated) ---------------------------------------------------------------------
+const LIVE_URL = process.env.SURREAL_URL;
+
+describe.skipIf(!LIVE_URL)(".set callback live", () => {
+  test("increment round-trips", async () => {
+    const { Surreal } = await import("surrealdb");
+    const { emitTable } = await import("../../src/ddl");
+    const c = new Surreal();
+    await c.connect(LIVE_URL as string);
+    await c.signin({ username: "root", password: "root" });
+    await c.use({ namespace: "qw", database: "qw" });
+    await c.query("REMOVE TABLE IF EXISTS post;");
+    await c.query(emitTable(Post, { exists: "overwrite" }));
+    await c.query("CREATE post:p1 SET title = 'hi', views = 41;");
+    const row = await update(Post, "p1")
+      .set((p) => ({ views: p.views.plus(1) }))
+      .run(c);
+    expect(row?.views).toBe(42);
+    await c.query("REMOVE TABLE IF EXISTS post;");
+    await c.close();
+  }, 60_000);
+});

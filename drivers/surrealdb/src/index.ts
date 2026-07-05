@@ -11,10 +11,11 @@
  */
 
 import { BoundQuery, escapeIdent, surql as sdkSurql, Table } from "surrealdb";
+import { fn } from "./fn";
 import {
   FunctionDef,
   isParamRef,
-  ParamRef,
+  type ParamRef,
   paramProxy,
   RecordIdField,
   TableDef,
@@ -103,6 +104,9 @@ function surqlTag<R extends unknown[] = unknown[]>(
  *  - `surql.table(Table)` — the escaped table name as a fragment.
  *  - `surql.$` — the param-path proxy (`surql.$.after.email` -> `$after.email`). UNTYPED here;
  *    typed variants come from slot callbacks (see the typed-fragments proposal).
+ *  - `surql.fn.<ns>.<name>(...)` — SurrealDB's builtin function library, TYPED (the catalog in
+ *    `./fn`): `surql.fn.crypto.bcrypt.compare(a, b)`, `surql.fn.string.len(x)` — every call a
+ *    typed fragment that composes anywhere.
  */
 export const surql: typeof surqlTag & {
   /** `type::record(<table>, <id>)` — a record id built from a typed table ref + an id fragment. */
@@ -111,6 +115,8 @@ export const surql: typeof surqlTag & {
   table: (table: { name: string }) => BoundQuery<[unknown]>;
   /** The param-path proxy: `surql.$.after.email` splices `$after.email`. */
   $: Record<string, ParamRef & Record<string, ParamRef>>;
+  /** The typed builtin-function catalog: `surql.fn.string.len(x)` -> `Frag<number>`. */
+  fn: typeof fn;
 } = Object.assign(surqlTag, {
   record: (table: { name: string }, id: BoundQuery): BoundQuery<[unknown]> =>
     surqlTag`type::record(${new Table(table.name)}, ${id})`,
@@ -120,6 +126,7 @@ export const surql: typeof surqlTag & {
     string,
     ParamRef & Record<string, ParamRef>
   >,
+  fn,
 });
 // Secret references for `DEFINE ACCESS` keys — `.jwt({ key: env("JWT_SECRET") })`. Re-exported from
 // core's SIDE-EFFECT-FREE authoring subpath (so this index stays side-effect-free); the value resolves
@@ -148,6 +155,8 @@ export {
   Table,
   Uuid,
 } from "surrealdb";
+// The catalog's arg/result types — `Frag<T>` is the typed-fragment alias (the `[T]` rule).
+export type { FnArg, Frag } from "./fn";
 export type {
   AnalyzerConfig,
   App,
@@ -162,6 +171,7 @@ export type {
   FieldRefs,
   Filter,
   FilterBuilder,
+  Fragmentable,
   FulltextFieldOptions,
   FulltextOptions,
   HnswOptions,

@@ -62,7 +62,7 @@ describe("Expr combinators — no standalone and/or import needed", () => {
       )
       .toSQL();
     expect(sql).toContain(
-      "WHERE ((age >= $b0 AND email CONTAINS $b1) OR name = $b2)",
+      "WHERE (age >= $b0 AND email CONTAINS $b1) OR name = $b2",
     );
   });
 
@@ -121,7 +121,7 @@ describe("builders interpolate as fragments", () => {
       .where((u) => u.age.gte(18))
       .count();
     expect(surql`RETURN ${n};`.query).toMatch(
-      /\(\(SELECT count\(\).*GROUP ALL\)\[0\]\.count \|\| 0\)/,
+      /\(\(SELECT count\(\).*GROUP ALL\)\[0\]\.count OR 0\)/,
     );
     const first = select(User).one();
     expect(surql`RETURN ${first};`.query).toMatch(

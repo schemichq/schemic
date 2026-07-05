@@ -517,18 +517,22 @@ describe("DEFINE statements", () => {
   });
 
   test("DEFINE ACCESS RECORD / JWT / BEARER", () => {
-    const rec = defineAccess("app").onDatabase()
+    const rec = defineAccess("app")
+      .onDatabase()
       .record()
       .signin(surql`SELECT * FROM usr WHERE email = $email`)
       .duration({ token: "1h", session: "12h" });
     expect(emitDefStatement(rec).ddl).toBe(
       "DEFINE ACCESS app ON DATABASE TYPE RECORD SIGNIN { SELECT * FROM usr WHERE email = $email } DURATION FOR TOKEN 1h, FOR SESSION 12h;",
     );
-    const jwt = defineAccess("ext").onDatabase().jwt({ alg: "HS512", key: "secret" });
+    const jwt = defineAccess("ext")
+      .onDatabase()
+      .jwt({ alg: "HS512", key: "secret" });
     expect(emitDefStatement(jwt).ddl).toBe(
       'DEFINE ACCESS ext ON DATABASE TYPE JWT ALGORITHM HS512 KEY "secret";',
     );
-    const bearer = defineAccess("svc").onDatabase()
+    const bearer = defineAccess("svc")
+      .onDatabase()
       .bearer({ for: "record" })
       .duration({ grant: "30d" });
     expect(emitDefStatement(bearer).ddl).toBe(

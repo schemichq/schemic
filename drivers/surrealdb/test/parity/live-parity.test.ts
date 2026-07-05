@@ -219,12 +219,16 @@ live("DB accepts @schemic/core's generated DDL", () => {
     ).toEqual([]);
 
     const accesses = [
-      defineAccess("pl_app").onDatabase()
+      defineAccess("pl_app")
+        .onDatabase()
         .record()
         .signin(surql`SELECT * FROM pl_big WHERE email = $email`)
         .duration({ token: "1h", session: "12h" }),
-      defineAccess("pl_jwt").onDatabase().jwt({ alg: "HS512", key: "supersecretvalue" }),
-      defineAccess("pl_svc").onDatabase()
+      defineAccess("pl_jwt")
+        .onDatabase()
+        .jwt({ alg: "HS512", key: "supersecretvalue" }),
+      defineAccess("pl_svc")
+        .onDatabase()
         .bearer({ for: "record" })
         .duration({ grant: "30d" }),
     ];
@@ -240,7 +244,10 @@ live("DB accepts @schemic/core's generated DDL", () => {
     // defaults; an access that omits them must not diff against the introspected materialized form.
     const defs = [
       defineAccess("pl_rt_rec").onDatabase().record(), // no duration
-      defineAccess("pl_rt_rec2").onDatabase().record().duration({ session: "12h" }), // token omitted
+      defineAccess("pl_rt_rec2")
+        .onDatabase()
+        .record()
+        .duration({ session: "12h" }), // token omitted
       defineAccess("pl_rt_bear").onDatabase().bearer({ for: "user" }), // grant default
     ];
     for (const a of defs)

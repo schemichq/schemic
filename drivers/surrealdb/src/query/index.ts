@@ -3,306 +3,161 @@
  * Driver-OWNED surface: the operators + the lowering to SurrealQL live here; the cross-driver machinery
  * (projection inference + the projection decode) is reused from core.
  *
- * Scope (Phase-1): single-table `SELECT` — `where` (comparisons, `in`/`notIn`, `contains*`,
- * `startsWith`/`endsWith`, NONE checks, and/or), `orderBy`, `limit`/`start`, a flat `return`
- * projection, plus the single-row terminals `one()`/`get(T, id)` and `count()`. Decode-by-default;
- * `.raw()` opts out. NO graph/FETCH yet (writes live in `./write`).
+ * Scope: single-table `SELECT` — `where` (comparisons, `in`/`notIn`, `contains*`,
+ * `startsWith`/`endsWith`, NONE checks, and/or, raw fragments), the per-kind stdlib on refs
+ * (`u.name.length().gt(3)`), `orderBy`, `limit`/`start`, a `return` projection (columns, derived
+ * expressions, and SUBQUERIES — an outer-row ref inside a nested builder lowers to
+ * `$parent.<col>`), plus the single-row terminals `one()`/`get(T, id)` and `count()`.
+ * Decode-by-default; `.raw()` opts out. Writes live in `./write`; `block()` in `./block`.
  */
-import {
-  brandRef,
-  decodeProjection,
-  type FieldRefBase,
-  type Project,
-  type ProjectionField,
-} from "@schemic/core/query";
+import type { FieldRefBase } from "@schemic/core/query";
 import { BoundQuery, escapeIdent, RecordId, type Surreal } from "surrealdb";
+import { z } from "zod";
+import type { App, TableDef, Wire } from "../pure";
 import {
-  type App,
-  isParamRef,
-  type ParamRef,
-  type TableDef,
-  type Wire,
-} from "../pure";
+  type Expr,
+  type FieldRefOps,
+  lowerExpr,
+  type Predicate,
+  type Row,
+  refCol,
+  refsFor,
+  toExpr,
+} from "./expr";
+import {
+  type Ctx,
+  FRAGMENT,
+  fragOf,
+  mergeRaw,
+  refState,
+  renderRef,
+  stripOuterParens,
+  toFragment,
+} from "./render";
 
-// --- the field-ref surface (driver-owned: operators + the column it carries) --------------------
+export type { FnArg, Frag } from "../fn";
+export type {
+  ArrayRefOps,
+  DateRefOps,
+  NumberRefOps,
+  StringRefOps,
+} from "./expr";
+// The stable public surface of the predicate/ref layer (implementation in ./expr and ./render).
+export {
+  and,
+  type Expr,
+  type FieldRef,
+  type FieldRefOps,
+  type Operand,
+  or,
+  type Predicate,
+  type Row,
+  refCol,
+  refsFor,
+} from "./expr";
+export { FRAGMENT, toFragment } from "./render";
 
-/** Binary operators lowered as `col <op> $bind` (spellings live-verified on 3.1.4). */
-type BinOp =
-  | "="
-  | "!="
-  | "<"
-  | "<="
-  | ">"
-  | ">="
-  | "IN"
-  | "NOT IN"
-  | "CONTAINS"
-  | "CONTAINSANY"
-  | "CONTAINSALL";
-type ExprNode =
-  | {
-      readonly kind: "cmp";
-      readonly col: string;
-      readonly op: BinOp;
-      readonly value: unknown;
-    }
-  | {
-      readonly kind: "strfn";
-      readonly fn: "string::starts_with" | "string::ends_with";
-      readonly col: string;
-      readonly value: unknown;
-    }
-  | { readonly kind: "none"; readonly col: string; readonly negated: boolean }
-  | { readonly kind: "and" | "or"; readonly parts: readonly Expr[] }
-  | { readonly kind: "not"; readonly part: Expr }
-  | { readonly kind: "raw"; readonly q: BoundQuery };
-
-/** Chainable boolean combinators — every predicate carries them, so `u.age.gte(18).and(...)`
- *  needs no standalone import. A raw `surql` fragment (`Frag<boolean>`) is accepted anywhere an
- *  `Expr` is. */
-interface ExprOps {
-  and(...more: (Expr | BoundQuery)[]): Expr;
-  or(...more: (Expr | BoundQuery)[]): Expr;
-  not(): Expr;
-}
-type Expr = ExprNode & ExprOps;
-
-/** A raw predicate leaf: `where` (and every combinator) accepts a `surql` fragment directly. */
-export type Predicate = Expr | BoundQuery;
-
-const exprProto: ExprOps = {
-  and(this: Expr, ...more: Predicate[]): Expr {
-    return mkExpr({ kind: "and", parts: [this, ...more.map(toExpr)] });
-  },
-  or(this: Expr, ...more: Predicate[]): Expr {
-    return mkExpr({ kind: "or", parts: [this, ...more.map(toExpr)] });
-  },
-  not(this: Expr): Expr {
-    return mkExpr({ kind: "not", part: this });
-  },
-};
-function mkExpr(node: ExprNode): Expr {
-  return Object.assign(Object.create(exprProto), node) as Expr;
-}
-/** Coerce a raw `surql` fragment into an Expr leaf (an Expr passes through). */
-function toExpr(p: Predicate): Expr {
-  return p instanceof BoundQuery ? mkExpr({ kind: "raw", q: p }) : p;
-}
-
-/** An operand: a literal (BOUND as a param), a typed `$param` ref from a contextual callback —
- *  `u.age.gte(a.adultThreshold)` splices `$adultThreshold` — or a `surql` fragment (spliced,
- *  bindings merged). */
-export type Operand<T> = T | ParamRef<T> | BoundQuery;
-
-/** The operators every column carries (comparisons, set membership, NONE checks). */
-export interface FieldRefOps<T> extends FieldRefBase<T> {
-  eq(v: Operand<T>): Expr;
-  neq(v: Operand<T>): Expr;
-  lt(v: Operand<T>): Expr;
-  lte(v: Operand<T>): Expr;
-  gt(v: Operand<T>): Expr;
-  gte(v: Operand<T>): Expr;
-  /** `col IN [...]` — the value is one of. */
-  in(values: Operand<readonly T[]>): Expr;
-  /** `col NOT IN [...]`. */
-  notIn(values: Operand<readonly T[]>): Expr;
-  /** `col = NONE` — the field is absent (optional fields). */
-  isNone(): Expr;
-  /** `col != NONE` — the field is present. */
-  isNotNone(): Expr;
-}
-/** String-only operators (`string::starts_with`/`ends_with`, substring `CONTAINS`). */
-export interface StringRefOps {
-  startsWith(prefix: Operand<string>): Expr;
-  endsWith(suffix: Operand<string>): Expr;
-  /** `col CONTAINS $substr` — substring test. */
-  contains(substring: Operand<string>): Expr;
-}
-/** Array-only operators (SurrealDB `CONTAINS`/`CONTAINSANY`/`CONTAINSALL`). */
-export interface ArrayRefOps<E> {
-  /** `col CONTAINS $v` — the array holds the element. */
-  contains(v: Operand<E>): Expr;
-  containsAny(vs: Operand<readonly E[]>): Expr;
-  containsAll(vs: Operand<readonly E[]>): Expr;
-}
-
-// biome-ignore lint/suspicious/noExplicitAny: the canonical `IsAny` probe.
-type IsAny<T> = 0 extends 1 & T ? true : false;
-
-/** A reference to a column inside a `where`/`orderBy`/`return` callback. Extends the neutral
- *  `FieldRefBase<T>` (so core's `Project` can read its app type); the operator set narrows by the
- *  column's app type — string ops on strings, `contains*` on arrays. The `IsAny` guard keeps the
- *  shape-agnostic `TableDef<string, any>` row assignable (an `any` column gets just the base ops). */
-export type FieldRef<T> = FieldRefOps<T> &
-  (IsAny<T> extends true
-    ? unknown
-    : ([NonNullable<T>] extends [string] ? StringRefOps : unknown) &
-        ([NonNullable<T>] extends [readonly (infer E)[]]
-          ? ArrayRefOps<E>
-          : unknown));
-
-/** The typed row handed to a callback: every column as a `FieldRef`. */
 // biome-ignore lint/suspicious/noExplicitAny: TableDef's Shape varies per call site.
-export type Row<TD extends TableDef<string, any>> = {
-  [K in keyof App<TD>]-?: FieldRef<App<TD>[K]>;
-};
-
-export const and = (...parts: Predicate[]): Expr =>
-  mkExpr({ kind: "and", parts: parts.map(toExpr) });
-export const or = (...parts: Predicate[]): Expr =>
-  mkExpr({ kind: "or", parts: parts.map(toExpr) });
-
-/** Runtime field ref — carries its column name; phantom `FieldRefBase` member is type-only. */
-interface RuntimeRef {
-  readonly __col: string;
-}
-function makeRef(col: string): FieldRef<unknown> {
-  const cmp =
-    (op: BinOp) =>
-    (value: unknown): Expr =>
-      mkExpr({ kind: "cmp", col, op, value });
-  const strfn =
-    (fn: "string::starts_with" | "string::ends_with") =>
-    (value: unknown): Expr =>
-      mkExpr({ kind: "strfn", fn, col, value });
-  return brandRef({
-    __col: col,
-    // Interpolation brand: `surql\`${u.email} CONTAINS '@corp'\`` splices the escaped column.
-    [Symbol.for("schemic.surrealdb.colref")]: col,
-    eq: cmp("="),
-    neq: cmp("!="),
-    lt: cmp("<"),
-    lte: cmp("<="),
-    gt: cmp(">"),
-    gte: cmp(">="),
-    in: cmp("IN"),
-    notIn: cmp("NOT IN"),
-    contains: cmp("CONTAINS"),
-    containsAny: cmp("CONTAINSANY"),
-    containsAll: cmp("CONTAINSALL"),
-    startsWith: strfn("string::starts_with"),
-    endsWith: strfn("string::ends_with"),
-    isNone: (): Expr => mkExpr({ kind: "none", col, negated: false }),
-    isNotNone: (): Expr => mkExpr({ kind: "none", col, negated: true }),
-  }) as FieldRef<unknown>;
-}
-const colOf = (ref: unknown): string => (ref as RuntimeRef).__col;
-
-/** INTERNAL (shared with `./write`): the typed callback row for a table, every column a ref. */
-// biome-ignore lint/suspicious/noExplicitAny: TableDef's Shape varies per call site.
-export function refsFor<TD extends TableDef<string, any>>(table: TD): Row<TD> {
-  const refs: Record<string, FieldRef<unknown>> = {};
-  for (const key of Object.keys(table.object.shape)) refs[key] = makeRef(key);
-  return refs as unknown as Row<TD>;
-}
-/** INTERNAL (shared with `./write`): a ref's column name. */
-export const refCol: (ref: unknown) => string = colOf;
+type AnyTableDef = TableDef<string, any>;
 
 /** A record target: the app-typed smart id (a `RecordId`) or its plain string id part. */
-// biome-ignore lint/suspicious/noExplicitAny: TableDef's Shape varies per call site.
-export type TargetId<TD extends TableDef<string, any>> = App<TD>["id"] | string;
+export type TargetId<TD extends AnyTableDef> = App<TD>["id"] | string;
 
 /** INTERNAL (shared with `./write`): normalize a target to a `RecordId` (a plain string is the
  *  STRING id part — no numeric coercion). */
-export const thingOf = (
-  // biome-ignore lint/suspicious/noExplicitAny: TableDef's Shape varies per call site.
-  table: TableDef<string, any>,
-  id: unknown,
-): RecordId =>
+export const thingOf = (table: AnyTableDef, id: unknown): RecordId =>
   id instanceof RecordId ? id : new RecordId(table.name, id as string);
 
-// --- SurrealQL lowering --------------------------------------------------------------------------
+// --- projections ----------------------------------------------------------------------------------
+
+/** What a `.return(row => ({ … }))` entry accepts: a column ref, a DERIVED expression over one
+ *  (`u.name.length()`), a nested builder (subquery — outer-row refs lower to `$parent.<col>`),
+ *  or a raw fragment. */
+export type ProjectionValue =
+  | FieldRefBase<unknown>
+  // biome-ignore lint/suspicious/noExplicitAny: any table's builder can be projected.
+  | Select<any, any>
+  // biome-ignore lint/suspicious/noExplicitAny: any row shape.
+  | SelectOne<any>
+  | CountQuery
+  | BoundQuery;
+
+/** The decoded result type of a projection shape: refs decode to their app value, a nested
+ *  `select` to its rows, `.one()` to row-or-undefined, `.count()` to a number, a typed fragment
+ *  to its `[T]`. */
+export type Projected<P> = { [K in keyof P]: ProjectedValue<P[K]> };
+type ProjectedValue<E> = E extends CountQuery
+  ? number
+  : E extends SelectOne<infer R>
+    ? R | undefined
+    : // biome-ignore lint/suspicious/noExplicitAny: matching any table's builder.
+      E extends Select<any, infer R>
+      ? R[]
+      : E extends BoundQuery<[infer T]>
+        ? T
+        : E extends FieldRefBase<infer T>
+          ? T
+          : unknown;
+
+/** One lowered projection entry: a plain column (schema-decoded) or a rendered expression /
+ *  subquery (custom or identity decode). */
+type ProjEntry =
+  | { readonly kind: "col"; readonly as: string; readonly col: string }
+  | {
+      readonly kind: "expr";
+      readonly as: string;
+      readonly render: (ctx: Ctx) => string;
+      readonly decode?: (v: unknown) => unknown;
+    };
+
+function projEntry(as: string, v: unknown): ProjEntry {
+  const rs = refState(v);
+  if (rs) {
+    if (!rs.wrap && "col" in rs.root)
+      return { kind: "col", as, col: rs.root.col };
+    return { kind: "expr", as, render: (ctx) => renderRef(rs, ctx) };
+  }
+  if (v instanceof Select || v instanceof SelectOne || v instanceof CountQuery)
+    return {
+      kind: "expr",
+      as,
+      render: (ctx) => mergeRaw(v.toQuery(), ctx.vars),
+      decode: (raw) => v.decodeValue(raw),
+    };
+  const frag = fragOf(v);
+  if (frag)
+    return {
+      kind: "expr",
+      as,
+      render: (ctx) =>
+        v instanceof BoundQuery
+          ? `(${mergeRaw(frag, ctx.vars)})`
+          : mergeRaw(frag, ctx.vars),
+    };
+  throw new Error(
+    `.return(): "${as}" is not a projectable value — pass a column ref, a derived expression, a nested builder, or a surql fragment.`,
+  );
+}
+
+// --- SurrealQL lowering ----------------------------------------------------------------------------
 
 interface Lowered {
   readonly sql: string;
   readonly vars: Record<string, unknown>;
 }
 
-/** Merge a raw fragment's bindings into the builder's vars, renaming on collision (boundary-aware
- *  rewrite in the fragment text — `$b1` must not touch `$b10`). SDK-tagged fragments use globally
- *  countered names, so renames only fire for hand-built BoundQuery bindings. */
-function mergeRaw(q: BoundQuery, vars: Record<string, unknown>): string {
-  let text = q.query;
-  for (const [name, value] of Object.entries(q.bindings ?? {})) {
-    let use = name;
-    if (use in vars) {
-      let n = 2;
-      while (`${name}_${n}` in vars) n++;
-      use = `${name}_${n}`;
-      text = text.replace(
-        new RegExp(`\\$${name}(?![A-Za-z0-9_])`, "g"),
-        `$${use}`,
-      );
-    }
-    vars[use] = value;
-  }
-  return text;
-}
-
-/** Render an operand: a `$param` ref splices as text, a fragment splices with bindings merged,
- *  anything else BINDS as a fresh `$b<n>` param. */
-function operandText(v: unknown, vars: Record<string, unknown>): string {
-  if (isParamRef(v)) return v.toText();
-  if (v instanceof BoundQuery) return `(${mergeRaw(v, vars)})`;
-  const bind = `b${Object.keys(vars).length}`;
-  vars[bind] = v;
-  return `$${bind}`;
-}
-
-function lowerExpr(e: Expr, vars: Record<string, unknown>): string {
-  if (e.kind === "cmp")
-    return `${escapeIdent(e.col)} ${e.op} ${operandText(e.value, vars)}`;
-  if (e.kind === "strfn")
-    return `${e.fn}(${escapeIdent(e.col)}, ${operandText(e.value, vars)})`;
-  if (e.kind === "none")
-    return `${escapeIdent(e.col)} ${e.negated ? "!=" : "="} NONE`;
-  if (e.kind === "raw") return `(${mergeRaw(e.q, vars)})`;
-  if (e.kind === "not") return `!(${lowerExpr(e.part, vars)})`;
-  const joined = e.parts
-    .map((p) => lowerExpr(p, vars))
-    .join(e.kind === "and" ? " AND " : " OR ");
-  return `(${joined})`;
-}
-
-// --- the builder --------------------------------------------------------------------------------
+// --- the builder ------------------------------------------------------------------------------------
 
 /** The minimal connection the builder needs to execute — a `.query(sql, vars)`. Both a `Surreal`
  *  client and a forked `SurrealSession` satisfy it, so a bound builder works against either. */
 export type Queryable = Pick<Surreal, "query">;
-
-/** The fragment brand the `surql` tag reads (Symbol.for -> shared without importing this module):
- *  a builder carrying it interpolates as its lowered `(subquery)` with bindings merged. */
-export const FRAGMENT: unique symbol = Symbol.for(
-  "schemic.surrealdb.fragment",
-) as never;
-
-let subCounter = 0;
-/** Lower a builder to an interpolatable fragment: parenthesize the sql and NAMESPACE its binds
- *  (`$b0` -> `$sub__<n>_b0`, boundary-aware) so several builder fragments compose in one template
- *  without colliding (the SDK throws on duplicate bind names rather than renaming). */
-export function toFragment(
-  lowered: { sql: string; vars: Record<string, unknown> },
-  wrap = (sql: string) => `(${sql})`,
-): BoundQuery {
-  const prefix = `sub__${++subCounter}_`;
-  let text = lowered.sql;
-  const binds: Record<string, unknown> = {};
-  for (const [name, value] of Object.entries(lowered.vars)) {
-    text = text.replace(
-      new RegExp(`\\$${name}(?![A-Za-z0-9_])`, "g"),
-      `$${prefix}${name}`,
-    );
-    binds[`${prefix}${name}`] = value;
-  }
-  return new BoundQuery(wrap(text), binds);
-}
 
 interface State {
   where?: Expr;
   order?: { col: string; dir: "asc" | "desc" };
   limit?: number;
   start?: number;
-  proj?: { as: string; col: string }[]; // flat projection (undefined => SELECT *)
+  proj?: ProjEntry[]; // projection (undefined => SELECT *)
   decode: boolean;
   /** A single-record target (`get(T, id)`) — `FROM $__thing` instead of the table. */
   target?: RecordId;
@@ -311,18 +166,24 @@ interface State {
   conn?: Queryable;
 }
 
-// biome-ignore lint/suspicious/noExplicitAny: TableDef's Shape varies per call site.
-class Select<TD extends TableDef<string, any>, Res> {
+class Select<TD extends AnyTableDef, Res> {
   private readonly row: Row<TD>;
   constructor(
     private readonly table: TD,
     private readonly state: State,
+    /** This CHAIN's row-scope token (persists across the immutable chain) — a ref lowered
+     *  inside a DIFFERENT chain's builder renders as `$parent.<col>`. */
+    private readonly token: symbol = Symbol("row"),
   ) {
-    this.row = refsFor(table);
+    this.row = refsFor(table, this.token);
   }
 
   private next<R>(patch: Partial<State>): Select<TD, R> {
-    return new Select<TD, R>(this.table, { ...this.state, ...patch });
+    return new Select<TD, R>(
+      this.table,
+      { ...this.state, ...patch },
+      this.token,
+    );
   }
 
   where(fn: (row: Row<TD>) => Predicate): Select<TD, Res> {
@@ -333,7 +194,7 @@ class Select<TD extends TableDef<string, any>, Res> {
     fn: (row: Row<TD>) => FieldRefOps<unknown>,
     dir: "asc" | "desc" = "asc",
   ): Select<TD, Res> {
-    return this.next<Res>({ order: { col: colOf(fn(this.row)), dir } });
+    return this.next<Res>({ order: { col: refCol(fn(this.row)), dir } });
   }
 
   limit(n: number): Select<TD, Res> {
@@ -345,16 +206,16 @@ class Select<TD extends TableDef<string, any>, Res> {
     return this.next<Res>({ start: n });
   }
 
-  /** Project to a flat shape of refs — re-types the result to the decoded projection (`Project<P>`). */
-  return<P extends Record<string, FieldRefOps<unknown>>>(
+  /** Project to a shape of refs, derived expressions, fragments, or nested builders — re-types
+   *  the result to the decoded projection. An outer-row ref inside a nested builder lowers to
+   *  `$parent.<col>` (correlated subquery):
+   *  `select(User).return((u) => ({ posts: select(Post).where((p) => p.author.eq(u.id)) }))`. */
+  return<P extends Record<string, ProjectionValue>>(
     fn: (row: Row<TD>) => P,
-  ): Select<TD, Project<P>> {
+  ): Select<TD, Projected<P>> {
     const shape = fn(this.row);
-    const proj = Object.entries(shape).map(([as, ref]) => ({
-      as,
-      col: colOf(ref),
-    }));
-    return this.next<Project<P>>({ proj });
+    const proj = Object.entries(shape).map(([as, v]) => projEntry(as, v));
+    return this.next<Projected<P>>({ proj });
   }
 
   /** Skip decode — return raw wire rows. */
@@ -370,24 +231,38 @@ class Select<TD extends TableDef<string, any>, Res> {
   /** Count the matching rows (`SELECT count() … GROUP ALL`) — `where` applies; order/limit/projection
    *  don't. Awaitable when bound; `.run(conn)` standalone. */
   count(): CountQuery {
-    return new CountQuery(this.table.name, this.state.where, this.state.conn);
+    return new CountQuery(
+      this.table.name,
+      this.state.where,
+      this.state.conn,
+      this.token,
+    );
   }
 
   /** Interpolate this builder into a `surql` template — it splices as `(SELECT ...)`. */
   [FRAGMENT](): BoundQuery {
+    return this.toQuery();
+  }
+
+  /** This builder as a composable fragment: the lowered `(SELECT ...)` with namespaced binds.
+   *  Interpolates into `surql` templates and every authoring slot that takes one. */
+  toQuery(): BoundQuery {
     return toFragment(this.toSQL());
   }
 
   /** The SurrealQL + named binds this builder lowers to. */
   toSQL(): Lowered {
     const vars: Record<string, unknown> = {};
+    const ctx: Ctx = { vars, row: this.token };
     const s = this.state;
     const cols = s.proj
       ? s.proj
-          .map((p) =>
-            p.as === p.col
-              ? escapeIdent(p.col)
-              : `${escapeIdent(p.col)} AS ${escapeIdent(p.as)}`,
+          .map((e) =>
+            e.kind === "col"
+              ? e.as === e.col
+                ? escapeIdent(e.col)
+                : `${escapeIdent(e.col)} AS ${escapeIdent(e.as)}`
+              : `${e.render(ctx)} AS ${escapeIdent(e.as)}`,
           )
           .join(", ")
       : "*";
@@ -399,7 +274,7 @@ class Select<TD extends TableDef<string, any>, Res> {
       from = escapeIdent(this.table.name);
     }
     let sql = `SELECT ${cols} FROM ${from}`;
-    if (s.where) sql += ` WHERE ${lowerExpr(s.where, vars)}`;
+    if (s.where) sql += ` WHERE ${stripOuterParens(lowerExpr(s.where, ctx))}`;
     if (s.order)
       sql += ` ORDER BY ${escapeIdent(s.order.col)} ${s.order.dir.toUpperCase()}`;
     if (s.limit !== undefined) sql += ` LIMIT ${Number(s.limit)}`;
@@ -407,18 +282,34 @@ class Select<TD extends TableDef<string, any>, Res> {
     return { sql, vars };
   }
 
-  /** Decode raw rows per the current shape (full-row codec, or core's projection codec). Used by `run`;
-   *  exposed so decode-by-default is testable without a live server. */
+  /** Decode raw rows per the current shape (full-row codec, or per-entry projection decode —
+   *  plain columns decode through their field codec, nested builders through THEIR decode, other
+   *  expressions pass through). Used by `run`; exposed so decode-by-default is testable without a
+   *  live server. */
   decodeRows(rows: readonly unknown[]): Res[] {
     if (!this.state.decode) return rows as Res[];
-    if (this.state.proj) {
-      const fields: ProjectionField[] = this.state.proj.map((p) => ({
-        as: p.as,
-        schema: this.table.object.shape[p.col],
-      }));
-      return decodeProjection(fields, rows) as Res[];
+    const proj = this.state.proj;
+    if (proj) {
+      return rows.map((r) => {
+        const rec = r as Record<string, unknown>;
+        const out: Record<string, unknown> = {};
+        for (const e of proj) {
+          if (e.kind === "col")
+            out[e.as] = z.decode(
+              this.table.object.shape[e.col] as z.ZodType,
+              rec[e.as] as never,
+            );
+          else out[e.as] = e.decode ? e.decode(rec[e.as]) : rec[e.as];
+        }
+        return out;
+      }) as Res[];
     }
     return rows.map((r) => this.table.decode(r)) as Res[];
+  }
+
+  /** INTERNAL: decode this builder's value when PROJECTED inside another builder (its rows). */
+  decodeValue(raw: unknown): unknown {
+    return this.decodeRows((raw ?? []) as unknown[]);
   }
 
   /** Execute against `conn` (or the pre-bound connection, if this builder came from a client). */
@@ -451,12 +342,23 @@ export class SelectOne<Res> {
 
   /** Interpolates as the FIRST ROW of the `(SELECT ... LIMIT 1)` subquery. */
   [FRAGMENT](): BoundQuery {
+    return this.toQuery();
+  }
+
+  /** This terminal as a composable fragment: `(SELECT ... LIMIT 1)[0]`. */
+  toQuery(): BoundQuery {
     return toFragment(this.sel.toSQL(), (sql) => `(${sql})[0]`);
   }
 
   /** The SurrealQL + named binds the wrapped select lowers to. */
   toSQL(): Lowered {
     return this.sel.toSQL();
+  }
+
+  /** INTERNAL: decode this terminal's value when PROJECTED inside another builder (one row). */
+  decodeValue(raw: unknown): unknown {
+    if (raw === undefined || raw === null) return undefined;
+    return (this.sel.decodeRows([raw]) as unknown[])[0];
   }
 
   async run(conn?: Queryable): Promise<Res | undefined> {
@@ -480,19 +382,32 @@ export class CountQuery {
     private readonly table: string,
     private readonly where: Expr | undefined,
     private readonly conn?: Queryable,
+    private readonly token?: symbol,
   ) {}
 
-  /** Interpolates as the SCALAR count: `((SELECT count() ... GROUP ALL)[0].count || 0)`. */
+  /** Interpolates as the SCALAR count: `((SELECT count() ... GROUP ALL)[0].count OR 0)` —
+   *  spelled `OR` (the canonical printer's form for `||`, so DDL round-trips stay drift-free). */
   [FRAGMENT](): BoundQuery {
-    return toFragment(this.toSQL(), (sql) => `((${sql})[0].count || 0)`);
+    return this.toQuery();
+  }
+
+  /** This terminal as a composable fragment: the scalar count expression. */
+  toQuery(): BoundQuery {
+    return toFragment(this.toSQL(), (sql) => `((${sql})[0].count OR 0)`);
   }
 
   toSQL(): Lowered {
     const vars: Record<string, unknown> = {};
     let sql = `SELECT count() FROM ${escapeIdent(this.table)}`;
-    if (this.where) sql += ` WHERE ${lowerExpr(this.where, vars)}`;
+    if (this.where)
+      sql += ` WHERE ${stripOuterParens(lowerExpr(this.where, { vars, row: this.token }))}`;
     sql += " GROUP ALL";
     return { sql, vars };
+  }
+
+  /** INTERNAL: decode this terminal's value when PROJECTED inside another builder (a number). */
+  decodeValue(raw: unknown): unknown {
+    return raw ?? 0;
   }
 
   async run(conn?: Queryable): Promise<number> {
@@ -518,8 +433,7 @@ export class CountQuery {
 /** Start a single-table SELECT. Bare result is the decoded row `App<TD>`; `.return(...)` re-types it.
  *  Pass a `conn` to pre-bind it (the ORM client does this) — then the builder is awaitable and `.run()`
  *  needs no argument; omit it for the standalone `select(table).run(conn)` path. */
-// biome-ignore lint/suspicious/noExplicitAny: TableDef's Shape varies per call site.
-export function select<TD extends TableDef<string, any>>(
+export function select<TD extends AnyTableDef>(
   table: TD,
   conn?: Queryable,
 ): Select<TD, App<TD>> {
@@ -529,8 +443,7 @@ export function select<TD extends TableDef<string, any>>(
 /** Fetch ONE record by id — `get(User, id)` resolves to the decoded row or `undefined`. `id` is the
  *  app-typed `RecordId` or its plain string id part. The read half of id-chaining: `create` hands you
  *  an id, `get` fetches it back. */
-// biome-ignore lint/suspicious/noExplicitAny: TableDef's Shape varies per call site.
-export function get<TD extends TableDef<string, any>>(
+export function get<TD extends AnyTableDef>(
   table: TD,
   id: TargetId<TD>,
   conn?: Queryable,
@@ -542,5 +455,4 @@ export function get<TD extends TableDef<string, any>>(
   }).one();
 }
 
-export type { Expr };
 export { Select };

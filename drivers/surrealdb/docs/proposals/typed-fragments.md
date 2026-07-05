@@ -96,12 +96,31 @@ Plain `Expr` forms stay (untyped quick path). `$auth` typing: `defineAccess(...)
   mutual record links.
 
 ## Phases
-0. Auto-block; lazy refs; `surql.record/table/$`; eager resolution in the tag. (in progress)
+0. Auto-block; lazy refs; `surql.record/table/$`; eager resolution in the tag. (SHIPPED)
 1. Fragments: `[T]` rule + `.as<T>()`; builders interpolatable (bind namespacing); raw leaves in
-   `where`; `Expr.and/.or/.not`; `Def.call(...)` fragment+runnable (BREAKING alpha).
+   `where`; `Expr.and/.or/.not`; `Def.call(...)` fragment+runnable (BREAKING alpha). (SHIPPED)
 2. Typed contextual callbacks (events, field clauses, permissions, function bodies);
-   `.subject(User)`.
-3. Stdlib catalog (`surql.fn` + typed ref methods); `block()`; `$parent` detection.
+   `.subject(User)`. (SHIPPED)
+3. Stdlib catalog (`surql.fn` + typed ref methods); `block()`; `$parent` detection. (SHIPPED)
+
+### Phase-3 notes (as built)
+- `surql.fn.<ns>.<name>(...)` — the catalog (`src/fn.ts`) is EXHAUSTIVELY live-verified: the test
+  sweep runs every entry against the target server with sample args, so a builtin name that
+  doesn't exist can't ship. 3.x spellings confirmed live: `type::is_*`, `duration::from_*`,
+  `time::from_*` (flat underscores), `rand::id` (no `guid`), `record::tb`.
+- Ref stdlib is KIND-mapped (string/number/array/datetime families from the field's schema;
+  array element kinds flow through `.at()`/`.first()`); a ref whose runtime kind is unknown
+  throws with guidance rather than a bare "not a function".
+- CANONICAL-FORM lowering (drift-free DDL round-trips, live-probed against INFO's printer):
+  single-statement blocks `{ stmt }` / multi `{ s1; s2; }`; `||` spelled `OR`; redundant parens
+  never emitted (arithmetic is precedence-aware; value positions strip whole-wrap parens;
+  subquery parens kept).
+- `$parent` is one level deep by design (SurrealDB defines only the immediate parent); every
+  builder CHAIN carries one row token, so any foreign ref in a nested lowering goes `$parent`.
+- Also shipped here: `.set((p) => ({ views: p.views.plus(1) }))` (typed expression writes,
+  mixing with codec-encoded literals), every builder/block exposes public `toQuery()`, and all
+  authoring slots (event when/then, field clauses, function bodies) accept any `{ toQuery() }`
+  carrier directly (`Fragmentable`).
 
 Cross-driver: the conventions (fragment typing rule, `Def.call` shape, helper namespace on the
 tag, contextual callbacks) mirror to pg on its `sql` tag — flagged to core-dev for ratification;

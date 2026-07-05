@@ -3672,18 +3672,42 @@ function eventCtx<S extends Shape>(): EventCtx<S> {
     },
   };
 }
-/** An event clause: a plain `Expr` (string/`surql`), or a CALLBACK receiving the typed ctx. */
-export type EventExpr<S extends Shape> = Expr | ((e: EventCtx<S>) => Expr);
+/** Anything that lowers to a composable `surql` fragment — query builders, `block()`, and
+ *  `Def.call(...)` all carry `toQuery()`, so every authoring slot that takes an `Expr` takes
+ *  them directly (`then: (e) => block().let(…)…`). */
+export interface Fragmentable {
+  toQuery(): BoundQuery;
+}
+/** Coerce a {@link Fragmentable} to its `BoundQuery`; anything else passes through. */
+function toQueryValue(v: unknown): unknown {
+  return v !== null &&
+    typeof v === "object" &&
+    typeof (v as Fragmentable).toQuery === "function"
+    ? (v as Fragmentable).toQuery()
+    : v;
+}
+
+/** An event clause: a plain `Expr` (string/`surql`), a builder/block fragment, or a CALLBACK
+ *  receiving the typed ctx. */
+export type EventExpr<S extends Shape> =
+  | Expr
+  | Fragmentable
+  | ((e: EventCtx<S>) => Expr | Fragmentable);
 export type EventThen<S extends Shape> =
   | Expr
-  | Expr[]
-  | ((e: EventCtx<S>) => Expr | Expr[]);
-function resolveEventExpr<S extends Shape, R>(
-  v: R | ((e: EventCtx<S>) => R),
-): R {
-  return typeof v === "function"
-    ? (v as (e: EventCtx<S>) => R)(eventCtx<S>())
-    : v;
+  | Fragmentable
+  | (Expr | Fragmentable)[]
+  | ((e: EventCtx<S>) => Expr | Fragmentable | (Expr | Fragmentable)[]);
+function resolveEventExpr<S extends Shape>(v: EventExpr<S>): Expr;
+function resolveEventExpr<S extends Shape>(v: EventThen<S>): Expr | Expr[];
+function resolveEventExpr<S extends Shape>(v: EventThen<S>): Expr | Expr[] {
+  const r =
+    typeof v === "function"
+      ? (v as (e: EventCtx<S>) => unknown)(eventCtx<S>())
+      : v;
+  return (Array.isArray(r) ? r.map(toQueryValue) : toQueryValue(r)) as
+    | Expr
+    | Expr[];
 }
 
 /** The typed context a FIELD-clause callback receives (`$default`/`$value`/`$computed`/`$assert`). */
@@ -3698,14 +3722,18 @@ const fieldCtx = (): FieldCtx => ({
   value: paramProxy(["value"]),
   this: paramProxy(["this"]) as FieldCtx["this"],
 });
-/** A field clause: a `surql` expression, or a CALLBACK receiving `{ value, this }`. */
-export type FieldExpr = BoundQuery | ((f: FieldCtx) => BoundQuery);
+/** A field clause: a `surql` expression, a builder/block fragment, or a CALLBACK receiving
+ *  `{ value, this }`. */
+export type FieldExpr =
+  | BoundQuery
+  | Fragmentable
+  | ((f: FieldCtx) => BoundQuery | Fragmentable);
 function resolveFieldExpr(v: FieldExpr): BoundQuery;
 function resolveFieldExpr<T>(v: T | FieldExpr): T | BoundQuery;
 function resolveFieldExpr(v: unknown): unknown {
-  return typeof v === "function"
-    ? (v as (f: FieldCtx) => unknown)(fieldCtx())
-    : v;
+  const r =
+    typeof v === "function" ? (v as (f: FieldCtx) => unknown)(fieldCtx()) : v;
+  return toQueryValue(r);
 }
 
 /** The typed context a PERMISSIONS callback receives. */
@@ -3827,19 +3855,29 @@ export class FunctionDef<A extends Shape = Shape, R = unknown> {
   returns<RF extends AnyField>(type: RF): FunctionDef<A, App<RF>> {
     return this.withConfig<App<RF>>({ returns: type });
   }
-  /** The function body — a `surql\`…\`` block (braces optional), a raw string, or a CALLBACK
-   *  receiving the def's own args as TYPED refs (`.body((a) => surql\`RETURN ${a.email}\`)` —
-   *  an arg-name typo is a compile error). */
+  /** The function body — a `surql\`…\`` block (braces optional), a raw string, a builder/`block()`
+   *  fragment, or a CALLBACK receiving the def's own args as TYPED refs
+   *  (`.body((a) => surql\`RETURN ${a.email}\`)` — an arg-name typo is a compile error). */
   body(
-    body: Expr | ((args: { [K in keyof A]: ParamRef<App<A[K]>> }) => Expr),
+    body:
+      | Expr
+      | Fragmentable
+      | ((
+          args: {
+            [K in keyof A]: ParamRef<App<A[K]>>;
+          },
+        ) => Expr | Fragmentable),
   ): FunctionDef<A, R> {
+    let resolved: Expr | Fragmentable;
     if (typeof body === "function") {
       const refs = Object.fromEntries(
         Object.keys(this.args).map((k) => [k, paramProxy([k])]),
       ) as { [K in keyof A]: ParamRef<App<A[K]>> };
-      return this.withConfig({ body: body(refs) });
+      resolved = body(refs);
+    } else {
+      resolved = body;
     }
-    return this.withConfig({ body });
+    return this.withConfig({ body: toQueryValue(resolved) as Expr });
   }
   /** `PERMISSIONS`: `FULL` (true, the default), `NONE` (false), or a `surql` condition. */
   permissions(

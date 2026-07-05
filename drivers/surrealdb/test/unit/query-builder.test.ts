@@ -48,7 +48,7 @@ describe("@schemic/surrealdb/query — lowering", () => {
       .where((p) => or(p.title.eq("a"), p.title.eq("b")))
       .toSQL();
     expect(sql).toContain(
-      `(${escapeIdent("title")} = $b0 OR ${escapeIdent("title")} = $b1)`,
+      `WHERE ${escapeIdent("title")} = $b0 OR ${escapeIdent("title")} = $b1`,
     );
     expect(vars).toEqual({ b0: "a", b1: "b" });
   });
