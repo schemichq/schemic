@@ -3695,8 +3695,18 @@ export class ParamRef<T = unknown> {
     const [param, ...rest] = this.path;
     return `$${param}${rest.map((p) => `.${escapeIdent(p)}`).join("")}`;
   }
+  /** LEAF: retype this `$param` path — `surql.$.resend_api_key.as<string>()` — so it drops into
+   *  typed positions (operands, `Def.call` args, `surql.fn` args) as a `ParamRef<T2>`. Purely a
+   *  type-level cast; the runtime object is unchanged. (Like `path`/`toText`/`then`, `as` is a
+   *  RESERVED name on the proxy — a path segment literally named `as` needs
+   *  `new ParamRef([...])` spelled out.) */
+  as<T2>(): ParamRef<T2> {
+    return this as unknown as ParamRef<T2>;
+  }
 }
-/** Deep `$param.path` proxy: each property access extends the path (`surql.$.after.email`). */
+/** Deep `$param.path` proxy: each property access extends the path (`surql.$.after.email`).
+ *  Names already on {@link ParamRef} (`path`/`toText`/`as`) and `then` are reserved, not path
+ *  segments. */
 export function paramProxy(path: readonly string[]): ParamRef {
   return new Proxy(new ParamRef(path), {
     get(target, key) {
