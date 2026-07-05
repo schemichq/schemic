@@ -14,12 +14,12 @@ if (!E2E_ENABLED)
 let H: Harness;
 beforeAll(async () => {
   if (E2E_ENABLED) H = await startHarness();
-}, 30_000);
+}, 120_000); // gate parallelism: PGlite CPU contention slows the ephemeral server boot
 afterAll(async () => {
   await H?.cleanup();
 });
 
-const T = 60_000; // subprocess + jiti + (for check) a nested ephemeral server
+const T = 180_000; // headroom for gate parallelism (PGlite CPU contention) // subprocess + jiti + (for check) a nested ephemeral server
 
 e2e("lifecycle: init -> gen -> migrate -> status -> diff -> check", () => {
   test(

@@ -13,12 +13,12 @@ if (!E2E_ENABLED)
 let H: Harness;
 beforeAll(async () => {
   if (E2E_ENABLED) H = await startHarness();
-}, 30_000);
+}, 120_000); // gate parallelism: PGlite CPU contention slows the ephemeral server boot
 afterAll(async () => {
   await H?.cleanup();
 });
 
-const T = 60_000;
+const T = 180_000; // headroom for gate parallelism (PGlite CPU contention)
 
 /** Init, then drop the sample `user.ts` so pull tests start from a clean, single-table slate. */
 async function setupBare() {
