@@ -67,8 +67,12 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
   bindings (`.let({ n: v })`, `.for({ item: iter }, body)` — the var name is a real property, so
   rename/find-refs work); `$parent` correlated subqueries; `Def.call(args)` typed named-arg function
   calls that also accept refs + builders; `ParamRef.as<T>()` types an untyped `surql.$` param chain
-  for typed operand/call/fn positions (type-only cast). Plus lazy record refs `s.recordId(() => User)`
-  (kills mutual-link import cycles) and auto-blocking of multi-statement event bodies.
+  for typed operand/call/fn positions (type-only cast). FULL-TS function bodies (zero raw surql):
+  `surql.fn` returns retypeable `Surql` (`.as<T>` everywhere) with `http.*<R>` response generics,
+  plain object/array args SPLICE embedded refs (`{ to: [$email] }`) while pure data binds whole, ref
+  PROPERTY PATHS (`sv.res.id` -> `$res.id`, `$parent`-aware), and `block().return` takes predicate
+  Exprs. Plus lazy record refs `s.recordId(() => User)` (kills mutual-link import cycles) and
+  auto-blocking of multi-statement event bodies.
 - **surrealdb:** the authoring index re-exports the SDK VALUE surface (`Surreal`, `RecordId`, `Table`,
   `DateTime`, `Duration`, geometry types, …) so apps never import `surrealdb` directly —
   single-instance by construction (the SDK's `#private` classes are nominal; dual copies break
@@ -89,7 +93,8 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 - **surrealdb:** `normalize` canonicalizes FORMATTING of function blocks / event exprs / field
   clauses / permissions (quote-aware whitespace collapse + INFO-style punctuation spacing + strip
   `;`-before-`}`) — any multi-line-authored surql body previously phantom-diffed forever against
-  INFO's single-line printing.
+  INFO's single-line printing; also folds `s"..."` -> `'...'` on function blocks/events (inlined
+  strings phantom-diffed).
 - **postgres:** returned rows carry the implicit `id` (select + write `RETURNING`).
 
 ### Changed (BREAKING — alpha)
