@@ -3598,7 +3598,10 @@ const PARAM_REF_BRAND: unique symbol = Symbol.for(
 
 /** A `$param.path` reference (built via `surql.$`) — splices as text (`$after.email`), never
  *  binds. Branded with a `Symbol.for` key so cross-instance checks survive package splits. */
-export class ParamRef {
+// biome-ignore lint/correctness/noUnusedVariables: T is the phantom value type.
+export class ParamRef<T = unknown> {
+  /** PHANTOM value type — lets typed operands (`u.age.gte(a.threshold)`) type-check. */
+  declare readonly __t?: T;
   /** Cross-realm brand: `Symbol.for("schemic.surrealdb.paramref")`. */
   readonly [PARAM_REF_BRAND] = true;
   constructor(readonly path: readonly string[]) {}
@@ -3635,9 +3638,10 @@ function colProxy(path: readonly string[]): unknown {
 /** Typed row refs under a `$param`: top-level keys from the table shape, each a {@link ParamRef}
  *  (`e.after.email` -> `$after.email`); deeper paths stay proxied (untyped). Collapses to a loose
  *  string-keyed map for shape-agnostic `TableDef<string, Shape|any>` (variance guard). */
+type AppShape<S extends Shape> = z.output<z.ZodObject<ZShape<S>>>;
 export type RowRefs<S extends Shape> = string extends keyof S
   ? Record<string, ParamRef>
-  : { readonly [K in keyof S]: ParamRef };
+  : { readonly [K in keyof AppShape<S>]: ParamRef<AppShape<S>[K]> };
 /** Typed BARE column refs (permissions): `p.row.author` -> `author`. Same variance guard. */
 export type ColRefs<S extends Shape> = string extends keyof S
   ? Record<string, unknown>
@@ -3827,12 +3831,12 @@ export class FunctionDef<A extends Shape = Shape, R = unknown> {
    *  receiving the def's own args as TYPED refs (`.body((a) => surql\`RETURN ${a.email}\`)` —
    *  an arg-name typo is a compile error). */
   body(
-    body: Expr | ((args: { [K in keyof A]: ParamRef }) => Expr),
+    body: Expr | ((args: { [K in keyof A]: ParamRef<App<A[K]>> }) => Expr),
   ): FunctionDef<A, R> {
     if (typeof body === "function") {
       const refs = Object.fromEntries(
         Object.keys(this.args).map((k) => [k, paramProxy([k])]),
-      ) as { [K in keyof A]: ParamRef };
+      ) as { [K in keyof A]: ParamRef<App<A[K]>> };
       return this.withConfig({ body: body(refs) });
     }
     return this.withConfig({ body });

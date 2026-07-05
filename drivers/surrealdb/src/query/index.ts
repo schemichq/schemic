@@ -16,7 +16,13 @@ import {
   type ProjectionField,
 } from "@schemic/core/query";
 import { BoundQuery, escapeIdent, RecordId, type Surreal } from "surrealdb";
-import type { App, TableDef, Wire } from "../pure";
+import {
+  type App,
+  isParamRef,
+  type ParamRef,
+  type TableDef,
+  type Wire,
+} from "../pure";
 
 // --- the field-ref surface (driver-owned: operators + the column it carries) --------------------
 
@@ -44,7 +50,7 @@ type ExprNode =
       readonly kind: "strfn";
       readonly fn: "string::starts_with" | "string::ends_with";
       readonly col: string;
-      readonly value: string;
+      readonly value: unknown;
     }
   | { readonly kind: "none"; readonly col: string; readonly negated: boolean }
   | { readonly kind: "and" | "or"; readonly parts: readonly Expr[] }
@@ -83,18 +89,23 @@ function toExpr(p: Predicate): Expr {
   return p instanceof BoundQuery ? mkExpr({ kind: "raw", q: p }) : p;
 }
 
+/** An operand: a literal (BOUND as a param), a typed `$param` ref from a contextual callback —
+ *  `u.age.gte(a.adultThreshold)` splices `$adultThreshold` — or a `surql` fragment (spliced,
+ *  bindings merged). */
+export type Operand<T> = T | ParamRef<T> | BoundQuery;
+
 /** The operators every column carries (comparisons, set membership, NONE checks). */
 export interface FieldRefOps<T> extends FieldRefBase<T> {
-  eq(v: T): Expr;
-  neq(v: T): Expr;
-  lt(v: T): Expr;
-  lte(v: T): Expr;
-  gt(v: T): Expr;
-  gte(v: T): Expr;
+  eq(v: Operand<T>): Expr;
+  neq(v: Operand<T>): Expr;
+  lt(v: Operand<T>): Expr;
+  lte(v: Operand<T>): Expr;
+  gt(v: Operand<T>): Expr;
+  gte(v: Operand<T>): Expr;
   /** `col IN [...]` — the value is one of. */
-  in(values: readonly T[]): Expr;
+  in(values: Operand<readonly T[]>): Expr;
   /** `col NOT IN [...]`. */
-  notIn(values: readonly T[]): Expr;
+  notIn(values: Operand<readonly T[]>): Expr;
   /** `col = NONE` — the field is absent (optional fields). */
   isNone(): Expr;
   /** `col != NONE` — the field is present. */
@@ -102,17 +113,17 @@ export interface FieldRefOps<T> extends FieldRefBase<T> {
 }
 /** String-only operators (`string::starts_with`/`ends_with`, substring `CONTAINS`). */
 export interface StringRefOps {
-  startsWith(prefix: string): Expr;
-  endsWith(suffix: string): Expr;
+  startsWith(prefix: Operand<string>): Expr;
+  endsWith(suffix: Operand<string>): Expr;
   /** `col CONTAINS $substr` — substring test. */
-  contains(substring: string): Expr;
+  contains(substring: Operand<string>): Expr;
 }
 /** Array-only operators (SurrealDB `CONTAINS`/`CONTAINSANY`/`CONTAINSALL`). */
 export interface ArrayRefOps<E> {
   /** `col CONTAINS $v` — the array holds the element. */
-  contains(v: E): Expr;
-  containsAny(vs: readonly E[]): Expr;
-  containsAll(vs: readonly E[]): Expr;
+  contains(v: Operand<E>): Expr;
+  containsAny(vs: Operand<readonly E[]>): Expr;
+  containsAll(vs: Operand<readonly E[]>): Expr;
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: the canonical `IsAny` probe.
@@ -152,7 +163,7 @@ function makeRef(col: string): FieldRef<unknown> {
       mkExpr({ kind: "cmp", col, op, value });
   const strfn =
     (fn: "string::starts_with" | "string::ends_with") =>
-    (value: string): Expr =>
+    (value: unknown): Expr =>
       mkExpr({ kind: "strfn", fn, col, value });
   return brandRef({
     __col: col,
@@ -228,17 +239,21 @@ function mergeRaw(q: BoundQuery, vars: Record<string, unknown>): string {
   return text;
 }
 
+/** Render an operand: a `$param` ref splices as text, a fragment splices with bindings merged,
+ *  anything else BINDS as a fresh `$b<n>` param. */
+function operandText(v: unknown, vars: Record<string, unknown>): string {
+  if (isParamRef(v)) return v.toText();
+  if (v instanceof BoundQuery) return `(${mergeRaw(v, vars)})`;
+  const bind = `b${Object.keys(vars).length}`;
+  vars[bind] = v;
+  return `$${bind}`;
+}
+
 function lowerExpr(e: Expr, vars: Record<string, unknown>): string {
-  if (e.kind === "cmp") {
-    const bind = `b${Object.keys(vars).length}`;
-    vars[bind] = e.value;
-    return `${escapeIdent(e.col)} ${e.op} $${bind}`;
-  }
-  if (e.kind === "strfn") {
-    const bind = `b${Object.keys(vars).length}`;
-    vars[bind] = e.value;
-    return `${e.fn}(${escapeIdent(e.col)}, $${bind})`;
-  }
+  if (e.kind === "cmp")
+    return `${escapeIdent(e.col)} ${e.op} ${operandText(e.value, vars)}`;
+  if (e.kind === "strfn")
+    return `${e.fn}(${escapeIdent(e.col)}, ${operandText(e.value, vars)})`;
   if (e.kind === "none")
     return `${escapeIdent(e.col)} ${e.negated ? "!=" : "="} NONE`;
   if (e.kind === "raw") return `(${mergeRaw(e.q, vars)})`;
