@@ -1,6 +1,7 @@
 // Type-only (erased at runtime, so the authoring index stays side-effect-free): a `DEFINE ACCESS` key
 // may be an env()/secret() reference instead of an inline literal.
 import type { SecretRef } from "@schemic/core";
+import type { FieldRefBase } from "@schemic/core/query";
 import {
   type Bound,
   BoundExcluded,
@@ -3766,11 +3767,28 @@ export function isParamRef(v: unknown): v is ParamRef {
   );
 }
 /** One argument to `Def.call(...)`: the app-typed literal (encoded + bound), a fragment
- *  (`BoundQuery` — spliced with its bindings merged), or a `surql.$` param ref (spliced as text). */
-export type CallArgValue<T> = T | BoundQuery | ParamRef;
+ *  (`BoundQuery` — spliced with its bindings merged), a `surql.$` param ref (spliced as text),
+ *  a typed FIELD/BLOCK-VAR ref (`sv.code` from a `block()` chain — spliced), or any
+ *  builder/block ({@link Fragmentable} — spliced with its bindings merged). */
+export type CallArgValue<T> =
+  | T
+  | BoundQuery
+  | ParamRef
+  | FieldRefBase<T>
+  | Fragmentable;
 export type CallArgsIn<A extends Shape> = {
   [K in keyof A]: CallArgValue<App<A[K]>>;
 };
+
+/** Coerce a fragment-CARRIER call arg (a query-layer ref via the `Symbol.for` fragment hook, or
+ *  a builder/block via `toQuery()`) to its `BoundQuery`; everything else passes through. */
+function callArgFragment(v: unknown): unknown {
+  const make = (v as Record<symbol, unknown> | null)?.[
+    Symbol.for("schemic.surrealdb.fragment")
+  ];
+  if (typeof make === "function") return make.call(v);
+  return toQueryValue(v);
+}
 
 let callBindCounter = 0;
 
@@ -3910,9 +3928,15 @@ export class FunctionDef<A extends Shape = Shape, R = unknown> {
     const parts: string[] = [];
     const bindings: Record<string, unknown> = {};
     for (const [key, field] of Object.entries(this.args)) {
-      const v = given[key];
+      const v = callArgFragment(given[key]);
       if (v instanceof BoundQuery) {
-        parts.push(`(${v.query})`);
+        // A SIMPLE param path (a coerced block-var/row ref like `$code`) splices bare — parens
+        // there are redundant and INFO's printer strips them (DDL round-trip drift).
+        const simple =
+          /^\$[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/.test(
+            v.query,
+          ) && !Object.keys(v.bindings ?? {}).length;
+        parts.push(simple ? v.query : `(${v.query})`);
         Object.assign(bindings, v.bindings);
       } else if (isParamRef(v)) {
         parts.push(v.toText());
