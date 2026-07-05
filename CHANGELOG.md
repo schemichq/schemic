@@ -66,8 +66,9 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
   kind-mapped ref stdlib (`u.name.length().gt(3)`); `block()` typed statement builder with OBJECT
   bindings (`.let({ n: v })`, `.for({ item: iter }, body)` — the var name is a real property, so
   rename/find-refs work); `$parent` correlated subqueries; `Def.call(args)` typed named-arg function
-  calls that also accept refs + builders. Plus lazy record refs `s.recordId(() => User)` (kills
-  mutual-link import cycles) and auto-blocking of multi-statement event bodies.
+  calls that also accept refs + builders; `ParamRef.as<T>()` types an untyped `surql.$` param chain
+  for typed operand/call/fn positions (type-only cast). Plus lazy record refs `s.recordId(() => User)`
+  (kills mutual-link import cycles) and auto-blocking of multi-statement event bodies.
 - **surrealdb:** the authoring index re-exports the SDK VALUE surface (`Surreal`, `RecordId`, `Table`,
   `DateTime`, `Duration`, geometry types, …) so apps never import `surrealdb` directly —
   single-instance by construction (the SDK's `#private` classes are nominal; dual copies break
