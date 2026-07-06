@@ -13,6 +13,7 @@ import {
   scanLocalEntities,
 } from "@schemic/core";
 import { loadDefs } from "@schemic/core";
+import { formatSurql } from "./format";
 import type { Surreal } from "surrealdb";
 import { formatForAssert } from "../pure";
 import {
@@ -614,12 +615,12 @@ function renderTableConst(
     // Drop a `WHEN true` (SurrealDB's stored form of an omitted WHEN). Author bodies as `surql\`…\``.
     const when =
       ev.when !== undefined && ev.when !== "true"
-        ? `when: surql\`${ev.when}\`, `
+        ? `when: ${tpl(ev.when, "    ")}, `
         : "";
     const then =
       ev.then.length === 1
-        ? `surql\`${ev.then[0]}\``
-        : `[${ev.then.map((e) => `surql\`${e}\``).join(", ")}]`;
+        ? tpl(ev.then[0] as string, "    ")
+        : `[${ev.then.map((e) => tpl(e, "    ")).join(", ")}]`;
     // `async`: drop the materialized retry=1/maxdepth=3 defaults — a bare ASYNC regenerates as `true`,
     // otherwise only the non-default knobs are kept.
     let asyncOpt = "";
@@ -636,7 +637,18 @@ function renderTableConst(
       ev.comment !== undefined
         ? `, comment: ${JSON.stringify(ev.comment)}`
         : "";
-    close += `\n  .event(${JSON.stringify(ev.name)}, { ${asyncOpt}${when}then: ${then}${comment} })`;
+    // A formatted (multi-line) body gets the expanded object layout; short events stay inline.
+    if (then.includes("\n") || when.includes("\n")) {
+      const entries = [
+        asyncOpt.replace(/, $/, ""),
+        when.replace(/, $/, ""),
+        `then: ${then}`,
+        comment.replace(/^, /, ""),
+      ].filter(Boolean);
+      close += `\n  .event(${JSON.stringify(ev.name)}, {\n    ${entries.join(",\n    ")},\n  })`;
+    } else {
+      close += `\n  .event(${JSON.stringify(ev.name)}, { ${asyncOpt}${when}then: ${then}${comment} })`;
+    }
   }
   body.push(`${close};`);
 
@@ -673,6 +685,19 @@ function tableUnit(t: StructTable, ctx: RenderCtx): RenderedUnit {
   };
 }
 
+/** A `surql\`…\`` template with FORMATTED content (statement-per-line, indented blocks — see
+ *  {@link formatSurql}); continuation lines re-indent to `base` so the template sits naturally in
+ *  the generated chain. Single-line results are unchanged. */
+function tpl(text: string, base: string): string {
+  const fmt = formatSurql(text);
+  if (!fmt.includes("\n")) return `surql\`${fmt}\``;
+  const body = fmt
+    .split("\n")
+    .map((l, i) => (i === 0 ? l : base + l))
+    .join("\n");
+  return `surql\`${body}\``;
+}
+
 /** A const name for a function — `fn.name` sanitized to an identifier (`math::add` → `math_add`). */
 function fnConst(name: string): string {
   const id = name.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
@@ -684,10 +709,10 @@ function renderFunctionConst(fn: StructFunction): string {
   const args = fn.args.map(([n, t]) => `${ident(n)}: ${szType(t)}`).join(", ");
   let code = `export const ${fnConst(fn.name)} = defineFunction(${JSON.stringify(fn.name)}, { ${args} })`;
   if (fn.returns !== undefined) code += `\n  .returns(${szType(fn.returns)})`;
-  code += `\n  .body(surql\`${fn.block}\`)`;
+  code += `\n  .body(${tpl(fn.block, "  ")})`;
   if (fn.permissions === false) code += `\n  .permissions(false)`;
   else if (typeof fn.permissions === "string")
-    code += `\n  .permissions(surql\`${fn.permissions}\`)`;
+    code += `\n  .permissions(${tpl(fn.permissions, "  ")})`;
   if (fn.comment !== undefined)
     code += `\n  .comment(${JSON.stringify(fn.comment)})`;
   return `${code};`;
@@ -717,11 +742,11 @@ function renderAccessConst(a: StructAccess): string {
   }
   lines.push(head);
   if (k.kind === "RECORD") {
-    if (k.signup) lines.push(`  .signup(surql\`${k.signup}\`)`);
-    if (k.signin) lines.push(`  .signin(surql\`${k.signin}\`)`);
+    if (k.signup) lines.push(`  .signup(${tpl(k.signup, "  ")})`);
+    if (k.signin) lines.push(`  .signin(${tpl(k.signin, "  ")})`);
     if (k.refresh) lines.push("  .withRefresh()");
     if (k.authenticate)
-      lines.push(`  .authenticate(surql\`${k.authenticate}\`)`);
+      lines.push(`  .authenticate(${tpl(k.authenticate, "  ")})`);
   }
   const d = a.duration;
   if (d?.grant || d?.token || d?.session) {

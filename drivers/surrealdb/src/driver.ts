@@ -9,6 +9,8 @@
 // Side-effect: register `surrealDriver` with the core registry on import.
 import "./driver/surreal";
 
+// Pretty-print SurrealQL for display/codegen (whitespace-only; normalize makes it drift-free).
+export { formatSurql } from "./cli/format";
 export type { DefineOptions, DefineStatement, FieldInfo } from "./ddl";
 export {
   alterField,
