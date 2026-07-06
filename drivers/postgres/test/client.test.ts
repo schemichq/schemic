@@ -353,6 +353,16 @@ describe("postgres ORM client — query Phase 1 (live)", () => {
       expect(
         ids(await db.select(post).where((r) => r.tags.containsAll(["x", "y"]))),
       ).toEqual(["p1"]); // prettier-ignore
+      // includes: substring, CASE-SENSITIVE, NULL column never matches (titles alpha/beta/gamma; note p2=NULL)
+      expect(
+        ids(await db.select(post).where((r) => r.title.includes("amm"))),
+      ).toEqual(["p3"]); // prettier-ignore
+      expect(
+        await db.select(post).where((r) => r.title.includes("AMM")),
+      ).toEqual([]); // case-sensitive
+      expect(
+        ids(await db.select(post).where((r) => r.note.includes("o"))),
+      ).toEqual(["p3"]); // p2 NULL excluded, p1 'hi' no 'o'
       expect(await db.select(post).where((r) => r.id.in([]))).toEqual([]); // empty IN -> no rows
     } finally {
       await conn.close();

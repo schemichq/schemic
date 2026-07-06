@@ -136,6 +136,17 @@ describe("postgres/query — Phase 1 ops (SQL lowering)", () => {
     });
   });
 
+  test("includes → strpos(col, $1) > 0 (ratified cross-driver substring op)", () => {
+    expect(
+      select(p1)
+        .where((r) => r.title.includes("ell"))
+        .toSQL(),
+    ).toEqual({
+      sql: 'SELECT "id", "title", "views", "tags", "note" FROM "p1" WHERE strpos("title", $1) > 0;',
+      params: ["ell"],
+    });
+  });
+
   test("contains → = ANY; containsAny → &&; containsAll → @> (array bound whole)", () => {
     expect(
       select(p1)
@@ -188,8 +199,11 @@ describe("postgres/query — Phase 1 typed narrowing (compile-time)", () => {
     // string ops only on string columns
     select(p1).where((r) => r.title.startsWith("a"));
     select(p1).where((r) => r.title.endsWith("a"));
+    select(p1).where((r) => r.title.includes("a"));
     // @ts-expect-error — startsWith is string-only (views is an int column)
     select(p1).where((r) => r.views.startsWith("a"));
+    // @ts-expect-error — includes is string-only (views is an int column)
+    select(p1).where((r) => r.views.includes("a"));
     // contains* only on array columns
     select(p1).where((r) => r.tags.contains("x"));
     select(p1).where((r) => r.tags.containsAll(["x"]));

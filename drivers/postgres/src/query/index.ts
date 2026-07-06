@@ -29,7 +29,12 @@ type PredNode =
   | { kind: "cmp"; path: string; op: Cmp; value: unknown }
   | { kind: "in"; path: string; values: readonly unknown[]; not: boolean }
   | { kind: "null"; path: string; not: boolean }
-  | { kind: "strfn"; path: string; fn: "starts" | "ends"; value: string }
+  | {
+      kind: "strfn";
+      path: string;
+      fn: "starts" | "ends" | "includes";
+      value: string;
+    }
   | {
       kind: "arr";
       path: string;
@@ -71,11 +76,15 @@ export interface FieldRefOps<T> extends FieldRefBase<T> {
   /** `col IS NOT NULL`. */
   isNotNone(): Expr;
 }
-/** String-only operators — `starts_with(col, …)` / `right(col, …) = …`. (No substring `contains`: that's
- *  array membership on pg; a future `.includes(...)` would be the substring op — cross-driver decision.) */
+/** String-only operators — `starts_with(col, …)` / `right(col, …) = …` / `strpos(col, …) > 0`. `includes`
+ *  is the ratified cross-driver SUBSTRING op (matches `z.string().includes()`); `contains*` stays
+ *  array-membership only. Case-SENSITIVE, no LIKE (so no metacharacter escaping); a NULL column never
+ *  matches. */
 export interface StringRefOps {
   startsWith(prefix: string): Expr;
   endsWith(suffix: string): Expr;
+  /** `strpos(col, $1) > 0` — the string CONTAINS this substring (case-sensitive). */
+  includes(substring: string): Expr;
 }
 /** Array-only operators — pg `= ANY` / `&&` / `@>`. */
 export interface ArrayRefOps<E> {
@@ -113,7 +122,7 @@ function makeRef(path: string, schema: z.ZodType): FieldRef<unknown> & RefImpl {
     new Expr({ kind: "cmp", path, op, value });
   const inOp = (not: boolean) => (values: readonly unknown[]) =>
     new Expr({ kind: "in", path, values, not });
-  const strfn = (fn: "starts" | "ends") => (value: string) =>
+  const strfn = (fn: "starts" | "ends" | "includes") => (value: string) =>
     new Expr({ kind: "strfn", path, fn, value });
   const arr = (op: "contains" | "any" | "all") => (value: unknown) =>
     new Expr({ kind: "arr", path, op, value });
@@ -132,6 +141,7 @@ function makeRef(path: string, schema: z.ZodType): FieldRef<unknown> & RefImpl {
     isNotNone: () => new Expr({ kind: "null", path, not: true }),
     startsWith: strfn("starts"),
     endsWith: strfn("ends"),
+    includes: strfn("includes"),
     contains: arr("contains"),
     containsAny: arr("any"),
     containsAll: arr("all"),
@@ -176,9 +186,11 @@ function renderPred(node: PredNode, b: Binder): string {
       return `${escId(node.path)} IS ${node.not ? "NOT NULL" : "NULL"}`;
     case "strfn": {
       const p = b.bind(node.value); // one bind, referenced twice for the suffix length + compare
-      return node.fn === "starts"
-        ? `starts_with(${escId(node.path)}, ${p})`
-        : `right(${escId(node.path)}, char_length(${p})) = ${p}`;
+      if (node.fn === "starts") return `starts_with(${escId(node.path)}, ${p})`;
+      // includes -> substring test; strpos is case-sensitive + NULL-propagating (NULL col never matches)
+      if (node.fn === "includes")
+        return `strpos(${escId(node.path)}, ${p}) > 0`;
+      return `right(${escId(node.path)}, char_length(${p})) = ${p}`; // ends
     }
     case "arr":
       // contains -> element membership; any -> overlap; all -> superset (bind the JS array directly).
