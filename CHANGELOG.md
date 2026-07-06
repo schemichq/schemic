@@ -116,6 +116,10 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 - **surrealdb:** an empty `block()` no longer emits invalid `{ ; }` — it renders the valid no-op
   `{ }` (live-verified).
 - **postgres:** returned rows carry the implicit `id` (select + write `RETURNING`).
+- **core:** multi-line DDL renders with PER-LINE diff indicators — now that drivers pretty-print
+  display statements, every line of a statement gets its `+`/`-` in `sc diff` (a bare continuation
+  line read as context), unified-patch hunk counts count LINES not statements, the rollback block
+  dims/indents per line, and the inline word-diff view collapses whitespace onto one line.
 
 ### Changed (BREAKING — alpha)
 - **surrealdb:** dropped the deprecated `$`-less field aliases `.unique()`/`.index()` — use
