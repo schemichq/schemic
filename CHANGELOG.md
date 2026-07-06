@@ -58,8 +58,14 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
   (`db.create(T).content(data)`, `db.update(T, id).merge(...)` / `.content(...)` / `.set(...)`,
   `db.delete(T, id)` — pg exports `remove`), decoding through the codec channel fail-fast and
   returning typed rows that CARRY their id.
-- **surrealdb / postgres:** query Phase 1 READS — richer WHERE operators under the shared cross-driver
-  op contract, pagination, and `one()` / `get()` / `count()` terminals on the select builder.
+- **surrealdb / postgres / sqlite:** query Phase 1 READS — richer WHERE operators under the shared
+  cross-driver op contract, pagination, and `one()` / `get()` / `count()` terminals on the select
+  builder. RATIFIED op vocabulary (2026-07): `.includes(substr)` is the STRING substring-containment
+  op (case-sensitive; a NULL/NONE column never matches; matches `z.string().includes()`), while
+  `.contains` / `.containsAny` / `.containsAll` are ARRAY-membership ops (array columns only). Builder
+  names are neutral; each driver lowers to its native operator (surreal `CONTAINS`, pg `strpos()>0`,
+  sqlite `instr()>0`). BREAKING (alpha, unreleased — query P1 is post-`alpha.24`): surreal renamed its
+  string `.contains` -> `.includes` (arrays keep `.contains*`).
 - **surrealdb / postgres:** table PRESETS — `defineTable.preset(...)` reusable table fragments applied
   via the chained single-arg `TableDef.use(a).use(b)` (ratified cross-driver form; columns + indexes).
 - **surrealdb:** TYPED FRAGMENTS (phases 0–3) — the query builder and raw `surql` compose BOTH ways:
