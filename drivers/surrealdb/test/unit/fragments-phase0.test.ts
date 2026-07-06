@@ -221,3 +221,29 @@ describe.skipIf(!URL)(
     });
   },
 );
+
+describe("surql.record takes typed refs; ref-carrying arrays/objects splice in the tag", () => {
+  test("ParamRef / event-ctx ref as the id (Manuel's diagnostics repro)", () => {
+    const q = surql`UPSERT ${surql.record(Verification, surql.$.after.id)} SET x = 1`;
+    expect(q.query).toBe(
+      "UPSERT type::record(frag_verification, $after.id) SET x = 1",
+    );
+  });
+
+  test("TUPLE ids: the array form splices refs — [e.after.id]", () => {
+    const q = surql.record(Verification, [surql.$.after.id]);
+    expect(q.query).toBe(
+      "type::record(frag_verification, [$after.id])",
+    );
+    expect(Object.keys(q.bindings ?? {})).toHaveLength(0);
+  });
+
+  test("literal ids still BIND; ref-carrying objects splice too", () => {
+    const q = surql.record(Verification, "x1");
+    expect(q.query).toMatch(/type::record\(frag_verification, \$\w+\)/);
+    expect(Object.values(q.bindings ?? {})).toContain("x1");
+    const o = surql`RETURN ${{ owner: surql.$.after.id, n: 1 }}`;
+    expect(o.query).toMatch(/^RETURN \{ owner: \$after\.id, n: \$\w+ \}$/);
+    expect(Object.values(o.bindings ?? {})).toContain(1);
+  });
+});
