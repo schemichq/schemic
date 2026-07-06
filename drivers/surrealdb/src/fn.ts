@@ -15,7 +15,7 @@
 import type { FieldRefBase } from "@schemic/core/query";
 import type { BoundQuery } from "surrealdb";
 import { Surql } from "./frag";
-import type { ParamRef } from "./pure";
+import type { ParamDef, ParamRef } from "./pure";
 import { argRenderer, type Ctx, type RefKind } from "./query/render";
 
 /** A typed expression fragment — the `[T]` rule (`Frag<T>` = a one-statement query of `T`).
@@ -28,6 +28,7 @@ export type Frag<T> = Surql<[T]>;
 export type FnArg<T> =
   | T
   | ParamRef<T>
+  | ParamDef<T>
   | FieldRefBase<T>
   | BoundQuery
   | { toQuery(): BoundQuery };

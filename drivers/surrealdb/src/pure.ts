@@ -3869,6 +3869,7 @@ export type CallArgValue<T> =
   | T
   | BoundQuery
   | ParamRef
+  | ParamDef<T>
   | FieldRefBase<T>
   | Fragmentable;
 export type CallArgsIn<A extends Shape> = {
@@ -4035,6 +4036,14 @@ export class FunctionDef<A extends Shape = Shape, R = unknown> {
         Object.assign(bindings, v.bindings);
       } else if (isParamRef(v)) {
         parts.push(v.toText());
+      } else if (
+        v !== null &&
+        typeof v === "object" &&
+        (v as { kind?: unknown }).kind === "param" &&
+        typeof (v as { name?: unknown }).name === "string"
+      ) {
+        // A defineParam def IS its `$name` reference.
+        parts.push(`$${(v as { name: string }).name}`);
       } else {
         const name = `call__${++callBindCounter}_${key}`;
         bindings[name] = field.encode(v as never);

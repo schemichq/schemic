@@ -165,3 +165,43 @@ describe.skipIf(!URL)("defineParam live", () => {
     await c.close();
   }, 60_000);
 });
+
+describe("the def IS the reference (no .$ needed)", () => {
+  const Key = defineParam("pd_key", env("PD_KEY"));
+
+  test("block().return(Def) splices $name — Manuel's [object Object] repro", () => {
+    const F = defineFunction("pd_get")
+      .returns(s.string())
+      .permissions(false)
+      .body(block().return(Key));
+    const { ddl } = emitDefStatement(F);
+    expect(ddl).toContain("{ RETURN $pd_key }");
+    expect(ddl).not.toContain("object Object");
+  });
+
+  test("operands, fn args, call args, and object-arg values all take the def", () => {
+    const T = defineTable("pd_t", { k: s.string() });
+    expect(
+      select(T)
+        .where((r) => r.k.eq(Key))
+        .toSQL().sql,
+    ).toBe("SELECT * FROM pd_t WHERE k = $pd_key");
+    expect(surql.fn.string.concat("Bearer ", Key).query).toMatch(
+      /^string::concat\(\$r\d+, \$pd_key\)$/,
+    );
+    const F = defineFunction("pd_send", { key: s.string() })
+      .returns(s.boolean())
+      .body(surql`RETURN $key != NONE`);
+    expect(F.call({ key: Key }).query).toBe("fn::pd_send($pd_key)");
+    expect(
+      surql.fn.object.keys({ auth: Key }).query,
+    ).toMatch(/^object::keys\(\{ auth: \$pd_key \}\)$/);
+  });
+
+  test("OTHER defs in value positions throw guidance instead of [object Object]", () => {
+    const T = defineTable("pd_t2", { k: s.string() });
+    const F = defineFunction("pd_fn");
+    expect(() => block().return(T).toQuery()).toThrow(/defineTable/);
+    expect(() => block().return(F).toQuery()).toThrow(/Def\.call/);
+  });
+});

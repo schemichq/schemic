@@ -141,6 +141,8 @@ export function mergeRaw(q: BoundQuery, vars: Record<string, unknown>): string {
  *  `BoundQuery` gets parens), anything else BINDS as a fresh `$b<n>` param. */
 export function operandText(v: unknown, ctx: Ctx): string {
   if (isParamRef(v)) return v.toText();
+  const param = paramDefName(v);
+  if (param !== undefined) return `$${param}`;
   const rs = refState(v);
   if (rs) return renderRef(rs, ctx);
   if (v instanceof BoundQuery) return `(${mergeRaw(v, ctx.vars)})`;
@@ -151,6 +153,7 @@ export function operandText(v: unknown, ctx: Ctx): string {
       "a predicate Expr can't be used as a plain value here — use it in `where`/`if`, or wrap it: block().return((s) => expr).",
     );
   if (hasRefDeep(v)) return renderData(v, ctx);
+  rejectDefValue(v);
   const bind = `b${Object.keys(ctx.vars).length}`;
   ctx.vars[bind] = v;
   return `$${bind}`;
@@ -158,6 +161,40 @@ export function operandText(v: unknown, ctx: Ctx): string {
 
 /** The Expr brand (`Symbol.for` — checked here without importing the expr layer). */
 const EXPR_BRAND = Symbol.for("schemic.surrealdb.expr");
+
+/** A `defineParam` def used AS a value — the def IS the reference: splice `$<name>`. Duck-typed
+ *  (kind + name + config) so it survives package-split dual instances. */
+function paramDefName(v: unknown): string | undefined {
+  const d = v as { kind?: unknown; name?: unknown; config?: unknown } | null;
+  return d !== null &&
+    typeof d === "object" &&
+    d.kind === "param" &&
+    typeof d.name === "string" &&
+    d.config !== undefined
+    ? d.name
+    : undefined;
+}
+
+/** Any OTHER schema def (table/function/event/access/analyzer) in a VALUE position is always a
+ *  bug — binding it would serialize the def object (`[object Object]` in DDL). Throw guidance. */
+function rejectDefValue(v: unknown): void {
+  const kind = (v as { kind?: unknown } | null)?.kind;
+  if (
+    v !== null &&
+    typeof v === "object" &&
+    typeof kind === "string" &&
+    ["table", "function", "event", "access", "analyzer"].includes(kind)
+  )
+    throw new Error(
+      `a define${kind[0]?.toUpperCase()}${kind.slice(1)} def can't be used as a VALUE here${
+        kind === "function"
+          ? " — call it: Def.call({...})"
+          : kind === "table"
+            ? " — interpolate it in a surql template (splices the table name), or query it"
+            : ""
+      }.`,
+    );
+}
 
 /** A PLAIN data object (proto Object/null) — class instances (RecordId, Date, Uint8Array,
  *  Duration, …) are leaf VALUES and always bind. */
@@ -175,6 +212,7 @@ export function hasRefDeep(v: unknown, depth = 0): boolean {
     isParamRef(v) ||
     refState(v) !== undefined ||
     v instanceof BoundQuery ||
+    paramDefName(v) !== undefined ||
     typeof (v as Record<symbol, unknown> | null)?.[FRAGMENT] === "function"
   )
     return true;
@@ -270,6 +308,9 @@ export function argRenderer(v: unknown): (ctx: Ctx) => string {
   if (typeof frag === "function")
     return (ctx) => mergeRaw(frag.call(v) as BoundQuery, ctx.vars);
   if (hasRefDeep(v)) return (ctx) => renderData(v, ctx);
+  const param = paramDefName(v);
+  if (param !== undefined) return () => `$${param}`;
+  rejectDefValue(v);
   const name = `r${++argCounter}`;
   return (ctx) => {
     ctx.vars[name] = v;

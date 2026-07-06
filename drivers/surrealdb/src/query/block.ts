@@ -19,7 +19,7 @@
 
 import type { FieldRefBase } from "@schemic/core/query";
 import { BoundQuery } from "surrealdb";
-import type { ParamRef } from "../pure";
+import type { ParamDef, ParamRef } from "../pure";
 import {
   type Expr,
   type FieldRef,
@@ -86,9 +86,11 @@ export type ValueOf<X> = X extends Expr
           ? T
           : X extends ParamRef<infer T>
             ? T
-            : X extends FieldRefBase<infer T>
+            : X extends ParamDef<infer T>
               ? T
-              : X;
+              : X extends FieldRefBase<infer T>
+                ? T
+                : X;
 
 /** The element type a `FOR` iterates. */
 type ElemOf<X> =

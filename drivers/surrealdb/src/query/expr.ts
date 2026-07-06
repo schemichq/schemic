@@ -12,7 +12,7 @@
 import { brandRef, type FieldRefBase } from "@schemic/core/query";
 import { BoundQuery, escapeIdent, type RecordId } from "surrealdb";
 import { type RefMethodSpec, refMethods } from "../fn";
-import type { App, ParamRef, TableDef } from "../pure";
+import type { App, ParamDef, ParamRef, TableDef } from "../pure";
 import {
   argRenderer,
   type Ctx,
@@ -112,7 +112,12 @@ export const or = (...parts: Predicate[]): Expr =>
  *  (`u.age.gte(a.adultThreshold)` splices `$adultThreshold`), another field ref (spliced —
  *  `$parent.<col>` when it belongs to an outer row), or a `surql` fragment / builder (spliced,
  *  bindings merged). */
-export type Operand<T> = T | ParamRef<T> | FieldRefBase<T> | BoundQuery;
+export type Operand<T> =
+  | T
+  | ParamRef<T>
+  | ParamDef<T>
+  | FieldRefBase<T>
+  | BoundQuery;
 
 // --- the typed ref surface ------------------------------------------------------------------------
 
