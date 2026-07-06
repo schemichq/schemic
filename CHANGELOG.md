@@ -96,6 +96,9 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
   idempotent, strings untouched). Wired into pull's function/event/access renders and exported from
   `/driver` for external display panes. Drift-safe by construction (normalize canonicalizes
   formatting — which now also strips trailing commas; hand-authored ones phantom-diffed before).
+  Every display/output boundary pretty-prints (`sc diff`, gen, live diff, migration files with
+  line-aware indent) while every COMPARISON stays canonical single-line — snapshots unchanged, no
+  phantom churn on upgrade.
 
 ### Fixed
 - **core:** the DEFAULT migrations dir now follows the documented contract — RELATIVE TO THE SCHEMA
