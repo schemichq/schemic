@@ -1,7 +1,8 @@
-// RecordIdField.for with REFS returns the `type::record(...)` fragment (a symbolic id can't be a
-// concrete RecordId) — `EmailVerification.record().for([e.after.id])` — typed against the
-// DECLARED id value shape. And `.use(preset)` no longer widens a declared id type (the tuple /
-// singleton-literal survives presets), which is what made `.for` look untyped.
+// `.record().for(...)` is the ZOD-side VALUE helper — it builds a concrete RecordId from LOCAL
+// data (Manuel's ruling: query-time refs are not values; the fragment spelling is
+// `surql.record(Table, [e.after.id])`). Refs in `.for` throw guidance instead of silently
+// constructing garbage. And `.use(preset)` no longer widens a declared id type (the tuple /
+// singleton literal survives presets), which is what made `.for` look untyped.
 import { describe, expect, test } from "bun:test";
 import { emitTable } from "../../src/ddl";
 import { defineSingleton, defineTable, s, surql } from "../../src/index";
@@ -36,11 +37,25 @@ describe(".use preserves the declared id type", () => {
   });
 });
 
-describe(".for with refs returns the type::record fragment", () => {
-  test("tuple with an event ref: for([e.after.id]) — Manuel's target spelling", () => {
+describe(".for is values-only (refs throw guidance; fragments spell surql.record)", () => {
+  test("plain values build a RecordId", () => {
+    const plain = User.record().for("ada");
+    expect(String(plain)).toBe("rfr_user:ada");
+  });
+
+  test("a query-time ref in .for is a compile error AND throws guidance at runtime", () => {
+    expect(() =>
+      EmailVerification.record().for([
+        // @ts-expect-error — refs are not local values; use surql.record
+        surql.$.after.id,
+      ]),
+    ).toThrow(/surql\.record/);
+  });
+
+  test("the fragment spelling stays surql.record(Table, [e.after.id])", () => {
     const T = User.event("rfr_ev", {
       then: (e) =>
-        surql`UPSERT ${EmailVerification.record().for([e.after.id])} SET codeHash = 'x'`,
+        surql`UPSERT ${surql.record(EmailVerification, [e.after.id])} SET codeHash = 'x'`,
     });
     const ddl = emitTable(T)
       .split("\n")
@@ -48,19 +63,5 @@ describe(".for with refs returns the type::record fragment", () => {
     expect(ddl).toContain(
       "UPSERT type::record(rfr_verification, [$after.id]) SET codeHash = 'x'",
     );
-  });
-
-  test("the fragment carries binds for literal parts; plain values still make a RecordId", () => {
-    const frag = EmailVerification.record().for([surql.$.after.id.as<never>()]);
-    expect(frag.query).toBe("type::record(rfr_verification, [$after.id])");
-    const plain = User.record().for("ada");
-    expect(String(plain)).toBe("rfr_user:ada");
-  });
-
-  test("typed: a wrong-shaped ref is rejected", () => {
-    const _bad = () =>
-      // @ts-expect-error — the tuple element is a rfr_user RecordId; a string ref doesn't fit
-      EmailVerification.record().for([surql.$.x.as<string>()]);
-    expect(typeof _bad).toBe("function");
   });
 });

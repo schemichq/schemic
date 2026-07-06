@@ -1313,24 +1313,6 @@ function resolveTableNames<T extends string>(
   return entries.map((e) => (typeof e === "function" ? (e().name as T) : e));
 }
 
-/** A REF-carrying id for {@link RecordIdField.for}: a typed ref standing for the WHOLE id, or —
- *  for array/tuple ids — the array shape with refs allowed in element positions
- *  (`[e.after.id]`). Typed against the declared id VALUE shape, so a wrong-shaped ref is a
- *  compile error. */
-export type IdRefArg<V> =
-  | ParamRef<V>
-  | FieldRefBase<V>
-  | ParamDef<V>
-  | (V extends readonly unknown[]
-      ? {
-          readonly [K in keyof V]:
-            | V[K]
-            | ParamRef<V[K]>
-            | FieldRefBase<V[K]>
-            | ParamDef<V[K]>;
-        }
-      : never);
-
 export class RecordIdField<
   T extends string,
   V extends RecordIdValue = RecordIdValue,
@@ -1388,25 +1370,15 @@ export class RecordIdField<
     return new RecordIdField<T, V2>(this.entries, schema, this.surreal);
   }
 
-  /** Build a RecordId — or, given REFS, the `type::record(...)` FRAGMENT for query/event
-   *  positions. Single-table: `for(id)`; multi-table: `for(table, id)`.
-   *  `for([e.after.id])` (a ref-carrying id) can't be a concrete `RecordId`, so it returns the
-   *  spliced fragment `type::record(<table>, [\$after.id])` — typed against the declared id
-   *  value shape. */
-  for(idOrTable: V | T, id?: V): RecordId<T, V>;
-  for(id: IdRefArg<V>): BoundQuery<[RecordId<T, V>]>;
-  for(
-    idOrTable: V | T | IdRefArg<V>,
-    id?: V,
-  ): RecordId<T, V> | BoundQuery<[RecordId<T, V>]> {
-    if (id === undefined && hasRefDeep(idOrTable)) {
-      const ctx = { vars: {} as Record<string, unknown> };
-      const text = renderData(idOrTable, ctx);
-      return new BoundQuery(
-        `type::record(${escapeIdent(this.tables[0]!)}, ${text})`,
-        ctx.vars,
-      ) as BoundQuery<[RecordId<T, V>]>;
-    }
+  /** Build a RecordId from LOCAL DATA (the Zod-side value helper). Single-table: `for(id)`;
+   *  multi-table: `for(table, id)`. Query-time REFERENCES (`e.after.id`, block vars) are not
+   *  values — those throw guidance toward `surql.record(Table, [e.after.id])`, the fragment
+   *  spelling. */
+  for(idOrTable: V | T, id?: V): RecordId<T, V> {
+    if (hasRefDeep(id === undefined ? idOrTable : id))
+      throw new Error(
+        `${this.tables[0]}.record().for(...) builds a RecordId from LOCAL VALUES — a query-time reference can't be one. For a spliced record id in a query/event, use surql.record(Table, [e.after.id]).`,
+      );
     return (
       id === undefined
         ? new RecordId(this.tables[0]!, idOrTable as V)
