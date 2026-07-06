@@ -91,6 +91,11 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
   by its `T` (other def kinds in value positions throw guidance instead of serializing to
   `[object Object]`). Expression values are rejected by design (the DB stores them EVALUATED — they
   can't round-trip).
+- **surrealdb:** `formatSurql` — pretty-prints generated SurrealQL (INFO collapses bodies to one
+  line; `pull` now writes statement-per-line with indented nested blocks and wrapped wide objects;
+  idempotent, strings untouched). Wired into pull's function/event/access renders and exported from
+  `/driver` for external display panes. Drift-safe by construction (normalize canonicalizes
+  formatting — which now also strips trailing commas; hand-authored ones phantom-diffed before).
 
 ### Fixed
 - **core:** the DEFAULT migrations dir now follows the documented contract — RELATIVE TO THE SCHEMA
