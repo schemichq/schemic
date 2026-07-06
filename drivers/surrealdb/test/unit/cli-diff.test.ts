@@ -429,7 +429,9 @@ describe("functions", () => {
       .permissions(false)
       .comment("greeter");
     expect(ddlOf(greet)).toBe(
-      `DEFINE FUNCTION fn::greet($name: string) -> string { RETURN "Hi " + $name } PERMISSIONS NONE COMMENT "greeter";`,
+      `DEFINE FUNCTION fn::greet($name: string) -> string {
+  RETURN "Hi " + $name;
+} PERMISSIONS NONE COMMENT "greeter";`,
     );
   });
 
@@ -439,13 +441,13 @@ describe("functions", () => {
       n: s.int(),
     }).body(surql`UPDATE $who SET hits = $n`);
     expect(ddlOf(fn)).toBe(
-      "DEFINE FUNCTION fn::touch($who: record<user>, $n: int) { UPDATE $who SET hits = $n };",
+      "DEFINE FUNCTION fn::touch($who: record<user>, $n: int) {\n  UPDATE $who SET hits = $n;\n};",
     );
   });
 
   test("a surql`{ … }` block body is not double-braced", () => {
     const fn = defineFunction("noop", {}).body(surql`{ RETURN NONE }`);
-    expect(ddlOf(fn)).toBe("DEFINE FUNCTION fn::noop() { RETURN NONE };");
+    expect(ddlOf(fn)).toBe("DEFINE FUNCTION fn::noop() {\n  RETURN NONE;\n};");
   });
 
   test("adding a function → DEFINE FUNCTION up / REMOVE FUNCTION down", () => {
@@ -454,7 +456,7 @@ describe("functions", () => {
       .body(surql`RETURN $a + $b`);
     const diff = diffSnapshots(EMPTY_SNAPSHOT, buildSnapshot([], [fn]));
     expect(diff.up).toEqual([
-      "DEFINE FUNCTION fn::add($a: int, $b: int) -> int { RETURN $a + $b };",
+      "DEFINE FUNCTION fn::add($a: int, $b: int) -> int {\n  RETURN $a + $b;\n};",
     ]);
     expect(diff.down).toEqual(["REMOVE FUNCTION IF EXISTS fn::add;"]);
   });
@@ -484,10 +486,11 @@ describe("access", () => {
       .signin(surql`SELECT * FROM user WHERE email = $email`)
       .duration({ token: "1h", session: "12h" });
     expect(ddlOf(account)).toBe(
-      "DEFINE ACCESS account ON DATABASE TYPE RECORD " +
-        "SIGNUP { CREATE user CONTENT { email: $email } } " +
-        "SIGNIN { SELECT * FROM user WHERE email = $email } " +
-        "DURATION FOR TOKEN 1h, FOR SESSION 12h;",
+      "DEFINE ACCESS account ON DATABASE TYPE RECORD SIGNUP {\n" +
+        "  CREATE user CONTENT { email: $email };\n" +
+        "} SIGNIN {\n" +
+        "  SELECT * FROM user WHERE email = $email;\n" +
+        "} DURATION FOR TOKEN 1h, FOR SESSION 12h;",
     );
   });
 

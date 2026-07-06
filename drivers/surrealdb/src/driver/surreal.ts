@@ -42,7 +42,7 @@ import { initScaffold, scaffoldEntity } from "../cli/scaffold";
 import { normalizeDb } from "../cli/struct";
 import type { DbStructured } from "../cli/structure";
 import { connect as surrealConnect } from "../cli/surreal-connect";
-import { renderMigration } from "../cli/surreal-diff";
+import { fmtDiff, renderMigration } from "../cli/surreal-diff";
 import { filterStructured } from "../cli/surreal-filter";
 import { surrealCommands } from "../commands";
 import type { SurrealParams } from "../config";
@@ -256,7 +256,8 @@ export const surrealDriver: Driver<
 
   // --- command capabilities (thin adapters over the existing surreal cli functions) ----------
 
-  diffLive: (conn, config, filter) => diffAgainstDb(conn, config, filter),
+  diffLive: async (conn, config, filter) =>
+    fmtDiff(await diffAgainstDb(conn, config, filter)),
   syncPlan: (diff, prune) => syncPlan(diff, prune),
 
   // Offline `diff --ts` / `pull`: reconstruct the structured form from the portable objects (no DDL

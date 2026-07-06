@@ -25,6 +25,7 @@ import {
   type Ref,
 } from "@schemic/core";
 import { EMPTY_SNAPSHOT, type Snapshot } from "../cli/structure";
+import { formatSurql } from "../cli/format";
 import { diffSnapshots } from "../cli/surreal-diff";
 import type { DefineStatement } from "../ddl";
 import { overwriteStatement, removeStatement } from "../ddl";
@@ -92,10 +93,10 @@ const indexEngine: KindEngine<PIndex, PIndex> = {
 
 const eventEngine: KindEngine<PEvent, PEvent> = {
   lower: (e) => e,
-  emit: (e) => [e.stmt.ddl],
+  emit: (e) => [formatSurql(e.stmt.ddl)],
   remove: (e) => [removeStatement(e.stmt)],
   // DEFINE EVENT OVERWRITE in place — matches the legacy `changeUp`/`changeDown` for an event.
-  overwrite: (_prev, next) => [overwriteStatement(next.stmt.ddl)],
+  overwrite: (_prev, next) => [formatSurql(overwriteStatement(next.stmt.ddl))],
   // -> its table (owner) + any `fn::` the WHEN/THEN call (so the function emits first).
   deps: (e) => e.deps,
   owner: (e) => ({ kind: "table", name: e.table }),
@@ -105,20 +106,22 @@ const eventEngine: KindEngine<PEvent, PEvent> = {
 
 const functionEngine: KindEngine<PFunction, PFunction> = {
   lower: (f) => f,
-  emit: (f) => [f.stmt.ddl],
+  // Emit/overwrite outputs are PRETTY-PRINTED (display + migrations); comparisons run on the
+  // portable objects' canonical text upstream, and the legacy diff formats identically (parity).
+  emit: (f) => [formatSurql(f.stmt.ddl)],
   remove: (f) => [removeStatement(f.stmt)],
   // DEFINE FUNCTION OVERWRITE in place — matches the legacy `changeUp`/`changeDown` for a function.
-  overwrite: (_prev, next) => [overwriteStatement(next.stmt.ddl)],
+  overwrite: (_prev, next) => [formatSurql(overwriteStatement(next.stmt.ddl))],
   // Other `fn::` its body calls (db-level, no owner cluster).
   deps: (f) => f.deps,
 };
 
 const accessEngine: KindEngine<PAccess, PAccess> = {
   lower: (a) => a,
-  emit: (a) => [a.stmt.ddl],
+  emit: (a) => [formatSurql(a.stmt.ddl)],
   remove: (a) => [removeStatement(a.stmt)],
   // DEFINE ACCESS OVERWRITE in place — matches the legacy `changeUp`/`changeDown` for an access.
-  overwrite: (_prev, next) => [overwriteStatement(next.stmt.ddl)],
+  overwrite: (_prev, next) => [formatSurql(overwriteStatement(next.stmt.ddl))],
   // Any `fn::` the SIGNUP/SIGNIN/AUTHENTICATE call (db-level, no owner cluster).
   deps: (a) => a.deps,
   // Access is UNMANAGED by the migration pipeline: it carries secrets, SurrealDB redacts keys on
@@ -132,10 +135,10 @@ const accessEngine: KindEngine<PAccess, PAccess> = {
 
 const paramEngine: KindEngine<PParam, PParam> = {
   lower: (p) => p,
-  emit: (p) => [p.stmt.ddl],
+  emit: (p) => [formatSurql(p.stmt.ddl)],
   remove: (p) => [removeStatement(p.stmt)],
   // DEFINE PARAM OVERWRITE in place.
-  overwrite: (_prev, next) => [overwriteStatement(next.stmt.ddl)],
+  overwrite: (_prev, next) => [formatSurql(overwriteStatement(next.stmt.ddl))],
   deps: (p) => p.deps,
 };
 
@@ -143,10 +146,10 @@ const paramEngine: KindEngine<PParam, PParam> = {
 
 const analyzerEngine: KindEngine<PAnalyzer, PAnalyzer> = {
   lower: (a) => a,
-  emit: (a) => [a.stmt.ddl],
+  emit: (a) => [formatSurql(a.stmt.ddl)],
   remove: (a) => [removeStatement(a.stmt)],
   // DEFINE ANALYZER OVERWRITE in place.
-  overwrite: (_prev, next) => [overwriteStatement(next.stmt.ddl)],
+  overwrite: (_prev, next) => [formatSurql(overwriteStatement(next.stmt.ddl))],
   deps: (a) => a.deps,
 };
 
