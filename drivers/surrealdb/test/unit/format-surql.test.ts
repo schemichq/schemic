@@ -13,11 +13,13 @@ describe("formatSurql", () => {
   test("statement-per-line, nested blocks indent, wide objects wrap", () => {
     const out = formatSurql(FN);
     expect(out).toContain("{\n  LET $html = string::concat('<b>', $code);");
-    expect(out).toContain("http::post('https://x.dev/emails', {\n    from:");
+    // prettier-style: a too-wide CALL breaks one arg per line (trailing comma; normalize strips)
+    expect(out).toContain("LET $res = http::post(\n    'https://x.dev/emails',");
+    expect(out).toContain("    {\n      from:");
     expect(out).toContain("IF $res.id = NONE {\n    THROW 'send failed; retry';\n  };");
     expect(out.endsWith("\n}")).toBe(true);
-    // short objects stay inline
-    expect(out).toContain("{ Authorization: string::concat('Bearer ', $key) }");
+    // short calls/objects stay inline
+    expect(out).toContain("{ Authorization: string::concat('Bearer ', $key) },");
   });
 
   test("idempotent; string literals with ;{} untouched", () => {

@@ -96,14 +96,41 @@ function isBlockBody(inner: string): boolean {
   return topSplit(t, ";").length > 1 || /;\s*$/.test(t) || t.includes(";");
 }
 
-/** Render one STATEMENT: nested statement blocks expand (brace on the same line, body indented);
- *  wide object/array literals wrap one entry per line. */
+/** Render one STATEMENT: nested statement blocks always expand (brace on the same line, body
+ *  indented); when the line is too wide, the LAST top-level CALL's arguments break one per line
+ *  (prettier-style, trailing comma), and wide object/array literals wrap one entry per line.
+ *  Recursion applies the same rules inside broken arguments. */
 function fmtStatement(
   stmt: string,
   level: number,
   indent: string,
   width: number,
 ): string {
+  const fits = indent.repeat(level).length + stmt.length <= width;
+  // The break target: the LAST top-level call group with 2+ args, chosen only when too wide.
+  // A `DEFINE …` head never breaks — its parens are a SIGNATURE (`fn::f($a: string, $b: int)`),
+  // not a call; the body block inside still formats via the block recursion.
+  let breakAt = -1;
+  if (!fits && !/^DEFINE\b/i.test(stmt.trim())) {
+    for (let i = 0; i < stmt.length; i++) {
+      const c = stmt[i] as string;
+      if (c === '"' || c === "'") {
+        i = skipString(stmt, i) - 1;
+        continue;
+      }
+      if (c === "(" && /[A-Za-z0-9_:]/.test(stmt[i - 1] ?? "")) {
+        const end = matchBracket(stmt, i);
+        if (end === -1) continue;
+        if (topSplit(stmt.slice(i + 1, end), ",").length >= 2) breakAt = i;
+        i = end;
+        continue;
+      }
+      if (c === "(" || c === "[" || c === "{") {
+        const end = matchBracket(stmt, i);
+        if (end !== -1) i = end;
+      }
+    }
+  }
   let out = "";
   for (let i = 0; i < stmt.length; i++) {
     const c = stmt[i] as string;
@@ -111,6 +138,16 @@ function fmtStatement(
       const j = skipString(stmt, i);
       out += stmt.slice(i, j);
       i = j - 1;
+      continue;
+    }
+    if (c === "(" && i === breakAt) {
+      const end = matchBracket(stmt, i);
+      const args = topSplit(stmt.slice(i + 1, end), ",");
+      const pad = indent.repeat(level + 1);
+      out += `(\n${args
+        .map((a) => `${pad}${fmtStatement(a, level + 1, indent, width)},`)
+        .join("\n")}\n${indent.repeat(level)})`;
+      i = end;
       continue;
     }
     if (c === "{") {
@@ -155,8 +192,8 @@ function fmtData(
   )
     return spaced;
   const pad = indent.repeat(level + 1);
-  // No trailing comma on the last entry — INFO prints none, and normalize compares both sides.
-  return `${open}\n${entries.map((e) => `${pad}${e}`).join(",\n")}\n${indent.repeat(level)}${close}`;
+  // Prettier-style trailing comma — normalize strips trailing commas on compare.
+  return `${open}\n${entries.map((e) => `${pad}${e},`).join("\n")}\n${indent.repeat(level)}${close}`;
 }
 
 /** Render a `;`-separated statement list, one per line at `level`. */
