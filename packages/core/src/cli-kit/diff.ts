@@ -95,14 +95,31 @@ export function tokenDiff(before: string, after: string): string {
 }
 
 /**
+ * Prefix EVERY line of `text` with the diff indicator — statements are multi-line now that drivers
+ * pretty-print display DDL, and a bare continuation line would read as context, not change.
+ */
+function mark(text: string, sign: string, color: (s: string) => string): string {
+  return text
+    .split("\n")
+    .map((l) => color(`  ${sign} ${l}`))
+    .join("\n");
+}
+
+/**
  * Render one display item: `+`/`-` line for add/remove. A change renders as separate red `-` /
  * green `+` lines by default, or as a single inline word-diff when `inline` is set (the A/B toggle).
  */
 function renderItem(it: DiffItem, inline = false): string {
-  if (it.op === "add") return style.green(`  + ${it.ddl}`);
-  if (it.op === "remove") return style.red(`  - ${it.ddl}`);
-  if (inline) return `    ${tokenDiff(it.before, it.after)}`;
-  return `${style.red(`  - ${it.before}`)}\n${style.green(`  + ${it.after}`)}`;
+  if (it.op === "add") return mark(it.ddl, "+", style.green);
+  if (it.op === "remove") return mark(it.ddl, "-", style.red);
+  if (inline)
+    return `    ${tokenDiff(collapseWs(it.before), collapseWs(it.after))}`;
+  return `${mark(it.before, "-", style.red)}\n${mark(it.after, "+", style.green)}`;
+}
+
+/** The inline word-diff is a one-line token view — collapse pretty-printed statements onto it. */
+function collapseWs(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
 }
 
 /**
@@ -149,8 +166,8 @@ export function formatItems(items: DiffItem[], inline = false): string {
 /**
  * A standard **unified diff** of the change, grouped one section per source file (git-style) — for
  * piping through a diff viewer (git's pager / delta). Objects with no file fall back to a section
- * headed by the object's bare name. Each object is a single-line DDL statement, so hunks are
- * line-for-line.
+ * headed by the object's bare name. A statement may be pretty-printed multi-line, so every LINE gets
+ * its own `+`/`-` and the hunk counts count lines, not statements.
  */
 export function formatPatch(diff: Diff): string {
   const items = diff.items ?? [];
@@ -160,17 +177,19 @@ export function formatPatch(diff: Diff): string {
     const lines: string[] = [];
     let dels = 0;
     let adds = 0;
+    const push = (text: string, sign: "+" | "-") => {
+      for (const l of text.split("\n")) {
+        lines.push(`${sign}${l}`);
+        if (sign === "+") adds++;
+        else dels++;
+      }
+    };
     for (const it of group) {
-      if (it.op === "add") {
-        lines.push(`+${it.ddl}`);
-        adds++;
-      } else if (it.op === "remove") {
-        lines.push(`-${it.old}`);
-        dels++;
-      } else {
-        lines.push(`-${it.before}`, `+${it.after}`);
-        dels++;
-        adds++;
+      if (it.op === "add") push(it.ddl, "+");
+      else if (it.op === "remove") push(it.old, "-");
+      else {
+        push(it.before, "-");
+        push(it.after, "+");
       }
     }
     out.push(
@@ -193,8 +212,14 @@ function formatFull(diff: Diff, inline = false): string {
     if (prev !== undefined && f.table !== prev) out.push("");
     const it = byKey.get(f.key);
     if (it?.op === "change") out.push(renderItem(it, inline));
-    else if (it?.op === "add") out.push(style.green(`  + ${f.ddl}`));
-    else out.push(style.dim(`    ${f.ddl}`));
+    else if (it?.op === "add") out.push(mark(f.ddl, "+", style.green));
+    else
+      out.push(
+        f.ddl
+          .split("\n")
+          .map((l) => style.dim(`    ${l}`))
+          .join("\n"),
+      );
     prev = f.table;
   }
   const removed = (diff.items ?? []).filter((it) => it.op === "remove");
@@ -215,7 +240,15 @@ export function formatDiff(
     ? formatFull(diff, opts.inline)
     : formatItems(diff.items ?? [], opts.inline);
   if (opts.down) {
-    out += `\n\n${style.dim("  rollback (down):")}\n${diff.down.map((s) => style.dim(`  ${s}`)).join("\n")}`;
+    const down = diff.down
+      .map((s) =>
+        s
+          .split("\n")
+          .map((l) => style.dim(`  ${l}`))
+          .join("\n"),
+      )
+      .join("\n");
+    out += `\n\n${style.dim("  rollback (down):")}\n${down}`;
   }
   return out;
 }
