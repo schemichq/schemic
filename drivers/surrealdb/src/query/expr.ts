@@ -144,8 +144,11 @@ export interface FieldRefOps<T> extends FieldRefBase<T> {
 export interface StringRefOps {
   startsWith(prefix: Operand<string>): Expr;
   endsWith(suffix: Operand<string>): Expr;
-  /** `col CONTAINS $substr` — substring test. */
-  contains(substring: Operand<string>): Expr;
+  /** `col CONTAINS $substr` — CASE-SENSITIVE substring test (a NONE column doesn't match, like
+   *  `startsWith`/`endsWith`). Named `.includes` to match `z.string().includes()` and the ratified
+   *  cross-driver spelling — `.contains*` is reserved for ARRAY membership. Lowers to the native
+   *  SurrealQL `CONTAINS`. */
+  includes(substring: Operand<string>): Expr;
   /** `string::len(col)`. */
   length(): FieldRef<number>;
   lowercase(): FieldRef<string>;
@@ -328,6 +331,11 @@ export function mkRef(state: RefState): FieldRef<unknown> {
     gte: cmp(">="),
     in: cmp("IN"),
     notIn: cmp("NOT IN"),
+    // `.includes` (string substring) and `.contains`/`Any`/`All` (array membership) both lower to
+    // the native `CONTAINS`; the neutral builder names split by the ratified cross-driver
+    // vocabulary while the emit stays dialect-faithful. The TYPE surface (StringRefOps vs
+    // ArrayRefOps) gates which name is visible per column kind.
+    includes: cmp("CONTAINS"),
     contains: cmp("CONTAINS"),
     containsAny: cmp("CONTAINSANY"),
     containsAll: cmp("CONTAINSALL"),

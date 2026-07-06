@@ -37,12 +37,18 @@ type CountRes = Awaited<ReturnType<(typeof countQ)["run"]>>;
 type _count = Expect<Equal<CountRes, number>>; // count() -> number
 
 // Operator narrowing: string ops exist on string columns only; contains* on arrays.
+// Ratified cross-driver vocab: STRING substring = .includes; ARRAY membership = .contains*.
 const _stringOps = () => select(Post).where((p) => p.title.startsWith("a"));
+const _stringIncludes = () => select(Post).where((p) => p.title.includes("a"));
 const _arrayOps = () => select(Post).where((p) => p.tags.containsAny(["a"]));
 // @ts-expect-error — startsWith is a string op; views is an int column
 const _badStr = () => select(Post).where((p) => p.views.startsWith("a"));
 // @ts-expect-error — containsAll is an array op; title is a string column
 const _badArr = () => select(Post).where((p) => p.title.containsAll(["a"]));
+// @ts-expect-error — .contains is ARRAY membership; a string column takes .includes
+const _badStrContains = () => select(Post).where((p) => p.title.contains("a"));
+// @ts-expect-error — .includes is the STRING substring op; an array column takes .contains
+const _badArrIncludes = () => select(Post).where((p) => p.tags.includes("a"));
 // @ts-expect-error — in() takes the column's type
 const _badIn = () => select(Post).where((p) => p.views.in(["not-a-number"]));
 
@@ -56,7 +62,7 @@ describe("phase-1 lowering", () => {
     expect(vars).toEqual({ b0: ["a", "b"], b1: [1, 2] });
   });
 
-  test("contains / containsAny / containsAll", () => {
+  test("array contains / containsAny / containsAll", () => {
     const { sql } = select(Post)
       .where((p) =>
         and(
@@ -69,6 +75,14 @@ describe("phase-1 lowering", () => {
     expect(sql).toContain(`${escapeIdent("tags")} CONTAINS $b0`);
     expect(sql).toContain(`${escapeIdent("tags")} CONTAINSANY $b1`);
     expect(sql).toContain(`${escapeIdent("tags")} CONTAINSALL $b2`);
+  });
+
+  test("string includes lowers to the native CONTAINS (substring)", () => {
+    const { sql, vars } = select(Post)
+      .where((p) => p.title.includes("hi"))
+      .toSQL();
+    expect(sql).toContain(`${escapeIdent("title")} CONTAINS $b0`);
+    expect(vars).toEqual({ b0: "hi" });
   });
 
   test("startsWith / endsWith lower to string:: functions", () => {

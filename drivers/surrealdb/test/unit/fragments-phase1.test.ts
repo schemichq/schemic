@@ -58,7 +58,7 @@ describe("Expr combinators — no standalone and/or import needed", () => {
   test(".and/.or/.not chain and lower with correct grouping", () => {
     const { sql } = select(User)
       .where((u) =>
-        u.age.gte(18).and(u.email.contains("@corp.com")).or(u.name.eq("root")),
+        u.age.gte(18).and(u.email.includes("@corp.com")).or(u.name.eq("root")),
       )
       .toSQL();
     expect(sql).toContain(
