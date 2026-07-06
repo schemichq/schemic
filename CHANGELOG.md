@@ -12,6 +12,13 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 ## [Unreleased]
 
 ### Added
+- **core:** `@schemic/core/testing` gains a shared COVERAGE RECONCILE — `describeCoverageReconcile`
+  (+ the pure `reconcileCoverage` and `KindCoverage`/`FeatureCoverage` types) reconciles a driver's
+  declared coverage manifest against the LIVE facts: `registry.names()` must exactly equal the declared
+  kinds (both directions, so the registered-kind side can't drift from code) and every `[x]` feature
+  must name a real, non-skipped `test()` title. The enforcement lives in core (one shape across
+  drivers, not three copies); a driver supplies only its `coverage-manifest.ts`. Convention documented
+  in `docs/DRIVER-COVERAGE.md`.
 - **cli / core:** debuggable errors — `SCHEMIC_DEBUG=1` (or `--stack`) prints the full stack + the
   `.cause` chain on any CLI failure (default output unchanged, now with a hint line), and a crashing
   schema module always reports the FAILING FILE path (original error as `cause`).

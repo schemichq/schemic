@@ -129,7 +129,10 @@ source layout is the clean template: `authoring.ts -> lower.ts -> emit.ts -> dri
 - **`s.*` = Zod 4 drop-in + Standard Schema** on every field; live-verify every DDL/builtin spelling
   against the REAL engine (the fn-catalog exhaustive-sweep pattern), and keep an exhaustive
   `docs/COVERAGE.md` from day one (author -> emit -> introspect -> diff status per feature; template:
-  `packages/core/docs/DRIVER-COVERAGE.md`).
+  `packages/core/docs/DRIVER-COVERAGE.md`). Back it with the machine-checked reconcile
+  (`describeCoverageReconcile` from `@schemic/core/testing` + a `coverage-manifest.ts`) so the
+  done-vs-todo list can't silently drift from the registered kinds — see the template's reconcile
+  section.
 
 ## 7. Process
 

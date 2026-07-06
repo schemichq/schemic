@@ -15,9 +15,11 @@
 // `instanceof SFieldBase` — a driver may extend its own copy of the base, so identity checks are unsafe.
 
 import { describe, expect, test } from "bun:test";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type * as z from "zod";
 import { type Driver, driverNames, getDriver } from "./driver/driver";
-import { emitKinds, lowerSchema } from "./kind";
+import { emitKinds, type KindRegistry, lowerSchema } from "./kind";
 
 /**
  * The driver's authoring namespace (`s`) — a bag of field builders, some NESTED (e.g.
@@ -183,4 +185,218 @@ export function describeDriverConformance(
       });
     });
   });
+}
+
+// --- Coverage reconcile -------------------------------------------------------------------------
+//
+// The shared, driver-AGNOSTIC guard that keeps a driver's `docs/COVERAGE.md` (prose discipline) honest
+// against reality — closing the "done-vs-todo list silently drifts" gap. A driver declares its coverage
+// as data (a KIND manifest + a FEATURE manifest) and this reconciles it against the LIVE facts: the
+// neutral `registry.names()`/`.entries()` enumeration (so the registered-kind side CAN'T drift from the
+// code) and the actual test titles (so a feature can't be marked done without a real test). The
+// ENFORCEMENT lives here, in ONE place — a driver supplies only its manifest, so a fix propagates to
+// every driver instead of drifting across three copies.
+//
+// DELIBERATELY NOT checked: "every kind defines `canonical()`". `KindEngine.canonical` is OPTIONAL by
+// contract (it defaults to `emit(portable).join("\n")`), so a kind whose `emit` already IS its canonical
+// form correctly omits it — requiring it here would false-fail a conformant driver. A driver that wants
+// the stricter "all MY kinds define an explicit canonical" invariant can assert it in a local test.
+
+/** Coverage status, mirroring the `docs/COVERAGE.md` checkbox: full round-trip / partial / not done. */
+export type CoverageStatus = "x" | "~" | " ";
+
+/** A registered KIND and the round-trip status it claims. */
+export interface KindCoverage {
+  name: string;
+  status: CoverageStatus;
+  note?: string;
+}
+
+/** A finer-grained FEATURE within a kind, and (when done) the test that proves it. */
+export interface FeatureCoverage {
+  key: string;
+  kind: string;
+  status: CoverageStatus;
+  /** A substring of the test title that exercises this feature — REQUIRED when status is `x`. */
+  coveredBy?: string;
+  note?: string;
+}
+
+/** The live inputs a reconcile runs against (the pure form — no `bun:test`, no filesystem). */
+export interface CoverageReconcileInput {
+  registry: KindRegistry;
+  kinds: KindCoverage[];
+  features: FeatureCoverage[];
+  /** Concatenated source of the driver's `*.test.ts` — real test titles are extracted from it. */
+  testSrc: string;
+}
+
+/** One named check and the assertions it failed (empty = passed). */
+export interface CoverageCheck {
+  name: string;
+  failures: string[];
+}
+
+/** The reconcile outcome: per-check breakdown + a flattened failure list for a single-assert test. */
+export interface CoverageReconcileResult {
+  checks: CoverageCheck[];
+  failures: string[];
+}
+
+/**
+ * Extract the titles of the REAL, non-skipped `test(...)`/`it(...)` calls from concatenated test source.
+ * Matching against actual titles (rather than a raw `source.includes`) means a mention in a comment or an
+ * unrelated string literal can't count as coverage, and a `.skip`/`.todo` test can't satisfy a done claim.
+ */
+function extractTestTitles(src: string): string[] {
+  const re =
+    /\b(?:test|it)(\.[\w.]+)?\s*\(\s*(["'`])((?:\\.|(?!\2)[\s\S])*?)\2/g;
+  const titles: string[] = [];
+  for (const m of src.matchAll(re)) {
+    const modifier = m[1] ?? "";
+    if (/\.(?:skip|todo)\b/.test(modifier)) continue;
+    titles.push(m[3]);
+  }
+  return titles;
+}
+
+/**
+ * Reconcile a driver's declared coverage against the live registry + tests. PURE — returns a per-check
+ * breakdown; {@link describeCoverageReconcile} is the `bun:test` shell around it. See the section header
+ * for what is (and deliberately isn't) checked.
+ */
+export function reconcileCoverage(
+  input: CoverageReconcileInput,
+): CoverageReconcileResult {
+  const { registry, kinds, features, testSrc } = input;
+  const registered = new Set(registry.names());
+  const checks: CoverageCheck[] = [];
+
+  // 1. Registered kinds EXACTLY equal the manifest, both directions — the neutral registry is the LHS,
+  //    so registering a kind without listing it (or vice versa) fails by construction.
+  const declared = new Set(kinds.map((k) => k.name));
+  const kindsFailures: string[] = [];
+  for (const name of registered)
+    if (!declared.has(name))
+      kindsFailures.push(
+        `kind "${name}" is registered but missing from the manifest`,
+      );
+  for (const name of declared)
+    if (!registered.has(name))
+      kindsFailures.push(
+        `kind "${name}" is in the manifest but not registered`,
+      );
+  checks.push({
+    name: "registered kinds match the manifest",
+    failures: kindsFailures,
+  });
+
+  // 2. Every feature references a registered kind (referential integrity).
+  checks.push({
+    name: "every feature maps to a registered kind",
+    failures: features
+      .filter((f) => !registered.has(f.kind))
+      .map((f) => `feature "${f.key}" -> unknown kind "${f.kind}"`),
+  });
+
+  // 3. Every DONE feature names a covering test that actually exists.
+  const titles = extractTestTitles(testSrc);
+  const coverFailures: string[] = [];
+  for (const f of features) {
+    if (f.status !== "x") continue;
+    if (!f.coveredBy) {
+      coverFailures.push(
+        `feature "${f.key}" is [x] but declares no coveredBy test`,
+      );
+      continue;
+    }
+    if (!titles.some((t) => t.includes(f.coveredBy as string)))
+      coverFailures.push(
+        `feature "${f.key}" coveredBy "${f.coveredBy}" — no matching (non-skipped) test title`,
+      );
+  }
+  checks.push({
+    name: "every [x] feature names a covering test",
+    failures: coverFailures,
+  });
+
+  // 4. No duplicate feature keys / kind entries (hygiene — a dup silently hides one side).
+  checks.push({
+    name: "no duplicate feature keys",
+    failures: duplicates(
+      features.map((f) => f.key),
+      "feature key",
+    ),
+  });
+  checks.push({
+    name: "no duplicate kind entries",
+    failures: duplicates(
+      kinds.map((k) => k.name),
+      "kind entry",
+    ),
+  });
+
+  return { checks, failures: checks.flatMap((c) => c.failures) };
+}
+
+/** Names appearing more than once, as failure messages. */
+function duplicates(names: string[], label: string): string[] {
+  const seen = new Set<string>();
+  const dup: string[] = [];
+  for (const n of names) {
+    if (seen.has(n)) dup.push(`duplicate ${label} "${n}"`);
+    seen.add(n);
+  }
+  return dup;
+}
+
+/** Options for the `bun:test` reconcile shell. Supply `testDir` (read for you) OR a pre-read `testSrc`. */
+export interface CoverageReconcileOptions {
+  /** Label for the describe block (typically the driver name). */
+  name?: string;
+  registry: KindRegistry;
+  kinds: KindCoverage[];
+  features: FeatureCoverage[];
+  /** The dir holding this driver's `*.test.ts`; the helper concatenates them to prove test coverage. */
+  testDir?: string;
+  /** Pre-read test source, if you'd rather gather it yourself (alternative to `testDir`). */
+  testSrc?: string;
+}
+
+/**
+ * Register the coverage reconcile as a `bun:test` block — one named `test(...)` per check, so CI reads
+ * granularly. A driver calls this from a single `*.test.ts` with its manifest + `testDir`:
+ *
+ *   import { describeCoverageReconcile } from "@schemic/core/testing";
+ *   import { registry } from "../src/kinds";
+ *   import { KIND_MANIFEST, FEATURE_MANIFEST } from "./coverage-manifest";
+ *   describeCoverageReconcile({ name: "sqlite", registry, kinds: KIND_MANIFEST,
+ *     features: FEATURE_MANIFEST, testDir: import.meta.dir });
+ */
+export function describeCoverageReconcile(
+  opts: CoverageReconcileOptions,
+): void {
+  const { name, registry, kinds, features } = opts;
+  const testSrc =
+    opts.testSrc ?? (opts.testDir ? readTestSrc(opts.testDir) : "");
+  describe(name ? `coverage reconcile: ${name}` : "coverage reconcile", () => {
+    for (const check of reconcileCoverage({
+      registry,
+      kinds,
+      features,
+      testSrc,
+    }).checks) {
+      test(check.name, () => {
+        expect(check.failures).toEqual([]);
+      });
+    }
+  });
+}
+
+/** Concatenate every `*.test.ts` in `dir` (the source the covering-test check scans). */
+function readTestSrc(dir: string): string {
+  return readdirSync(dir)
+    .filter((f) => f.endsWith(".test.ts"))
+    .map((f) => readFileSync(join(dir, f), "utf8"))
+    .join("\n");
 }
