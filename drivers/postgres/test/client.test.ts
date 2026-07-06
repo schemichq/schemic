@@ -311,8 +311,18 @@ describe("defineSingleton — DB-enforced one-record tables", () => {
   const normal = defineTable("u", { id: s.text().$primaryKey(), n: s.text() });
   // @ts-expect-error — a normal table has no singleton id (never)
   const _notSingleton: SingletonIdOf<typeof normal> = "default";
+  // the singleton id LITERAL marker SURVIVES `.use(preset)` (pg carries `id` as a plain field through
+  // MergeCols `Omit<F,keyof C> & C`, never re-derived — so a preset can't silently widen it to string).
+  const withPreset = appConfig.use(
+    defineTable.preset({ columns: { updatedBy: s.text() } }),
+  );
+  const _stillDefault: SingletonIdOf<typeof withPreset> = "default";
+  // @ts-expect-error — still the literal "default" after `.use`, not a widened string
+  const _notWide: SingletonIdOf<typeof withPreset> = "x" as string;
   void _idIsDefault;
   void _notSingleton;
+  void _stillDefault;
+  void _notWide;
 
   test("emits a DB-enforced one-record table (PK + DEFAULT + CHECK on the literal id)", () => {
     const [ddl] = emitKinds(
