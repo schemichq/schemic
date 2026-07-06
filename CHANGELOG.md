@@ -86,8 +86,11 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
   from snapshots/migrations (SurrealDB stores param values readably), deployed out-of-band via new
   `sc param push/check/list` (placeholder + binding — the value never appears in DDL text, and `pull`
   drops out-of-band params so values never reach generated source); a bare schema declares presence
-  only. Typed `Def.$` deep param ref; the def splices `$name` in templates. Expression values are
-  rejected by design (the DB stores them EVALUATED — they can't round-trip).
+  only. Typed `Def.$` deep param ref; the def splices `$name` in templates — and a `ParamDef` in ANY
+  value position (operands, block values, fn/call args, spliced object values) splices `$name` typed
+  by its `T` (other def kinds in value positions throw guidance instead of serializing to
+  `[object Object]`). Expression values are rejected by design (the DB stores them EVALUATED — they
+  can't round-trip).
 
 ### Fixed
 - **core:** the DEFAULT migrations dir now follows the documented contract — RELATIVE TO THE SCHEMA
