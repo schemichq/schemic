@@ -23,7 +23,7 @@ Everything below is on branch `feat/surrealdb-graph-traversal`. The two showcase
 | WHERE set-ops on a traversal (`.contains`/`.containsAny`/`.containsAll`) | ✅ shipped |
 | `select([A, B])` multi-table roots | ✅ shipped |
 | `.match(Member, …)` member primitive (union `.where`/`.return`) | ✅ shipped |
-| Recursion `.repeat("1..3", t => …)` (+collect/+path/+shortest) | ⬜ phase 2 |
+| Recursion `.repeat(depth, t => …)` (+collect/+path/+shortest) | ✅ shipped |
 | RELATE writes | ⬜ fast-follow |
 
 Only **recursion** and **RELATE writes** remain. Note: projecting a polymorphic *traversal* target
@@ -146,12 +146,13 @@ through* (`NONE != 'x'` is true). The table guard makes both directions correct.
 .return(r => ({ name: r.name, email: r.match(User, u => u.email) })) // member field, NONE for others
 ```
 
-## Recursion (PHASE 2)
+## Recursion (SHIPPED)
 
 `rec.{depth}(->E->node)` with `+collect`/`+path`/`+shortest=target`, depth ranges (`1..2`, `..2`,
-`..`, `2`), reverse bodies, and the `@` self-ref SELECT form. Body must yield record ids (projection
-inside errors). Proposed surface `p.repeat("1..3", t => t.out(PairsWith)).collect()/.shortest(x)`.
-Designed-for but not in the first PR.
+`..`, `2`, `2..`), and the `@` self-ref SELECT form. Body must yield record ids (projection inside
+errors). Surface — **depth is TYPED, not a string** (a `"1.3"` typo can't compile):
+`p.repeat({ min: 1, max: 3 }, t => t.out(PairsWith)).collect()/.paths()/.shortest(recordId)`. A plain
+number is an exact depth; `{ min?, max? }` a range; `+shortest`'s target binds as a param.
 
 ## RELATE writes (FAST-FOLLOW)
 
