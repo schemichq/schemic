@@ -29,7 +29,6 @@ import {
   isTraversal,
   type NodeRef,
   type NodeTraversal,
-  type TraversalIds,
 } from "./graph";
 import {
   type Ctx,
@@ -129,9 +128,9 @@ type ProjectedValue<E> = E extends CountQuery
     : // biome-ignore lint/suspicious/noExplicitAny: matching any table's builder.
       E extends Select<any, infer R>
       ? R[]
-      : // biome-ignore lint/suspicious/noExplicitAny: matching any node union.
-        E extends NodeTraversal<infer C extends TableDef<string, any>>
-        ? TraversalIds<C>
+      : // biome-ignore lint/suspicious/noExplicitAny: matching any node union + its result.
+        E extends NodeTraversal<infer _C extends TableDef<string, any>, infer R>
+        ? R
         : E extends BoundQuery<[infer T]>
           ? T
           : E extends FieldRefBase<infer T>

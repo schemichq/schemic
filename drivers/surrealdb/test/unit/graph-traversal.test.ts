@@ -3,7 +3,7 @@
 // polymorphic union targets `->edge->(a, b)`, narrowing `->edge->node`, unconstrained `->edge->?`.
 import { describe, expect, test } from "bun:test";
 import type { RecordId } from "surrealdb";
-import { defineRelation, defineTable, s } from "../../src/index";
+import { defineRelation, defineTable, s, surql } from "../../src/index";
 import { select } from "../../src/query";
 
 const User = defineTable("g_user", { name: s.string() });
@@ -14,9 +14,17 @@ const Product = defineTable("g_product", {
 const Brand = defineTable("g_brand", { name: s.string() });
 const Agent = defineTable("g_agent", { name: s.string() });
 
+const Ingredient = defineTable("g_ingredient", {
+  name: s.string(),
+  sulfate: s.boolean(),
+});
+const Concern = defineTable("g_concern", { name: s.string() });
+
 const Owns = defineRelation("g_owns").from(User).to(Product);
 const MadeBy = defineRelation("g_made_by").from(Product).to(Brand);
 const Knows = defineRelation("g_knows").from(User).to([User, Agent]);
+const Contains = defineRelation("g_contains").from(Product).to(Ingredient);
+const Treats = defineRelation("g_treats").from(Ingredient).to(Concern);
 const Loose = defineRelation("g_loose"); // endpoints undeclared
 
 const sqlOf = (q: { toSQL(): { sql: string } }) => q.toSQL().sql;
@@ -85,6 +93,95 @@ describe("graph traversal — types", () => {
     type Res = Awaited<ReturnType<typeof q.run>>[number];
     const _owners: Res["owners"] = [] as RecordId<"g_user">[];
     void _owners;
+    expect(true).toBe(true);
+  });
+});
+
+describe("graph traversal — .return projection", () => {
+  test("flat single field appends .col", () => {
+    expect(
+      sqlOf(
+        select(User).return((u) => ({
+          names: u.out(Owns).return((p) => p.name),
+        })),
+      ),
+    ).toBe("SELECT ->g_owns->g_product.name AS names FROM g_user");
+  });
+
+  test("object destructure with aliasing", () => {
+    expect(
+      sqlOf(
+        select(User).return((u) => ({
+          owned: u.out(Owns).return((p) => ({ title: p.name, cost: p.price })),
+        })),
+      ),
+    ).toBe(
+      "SELECT ->g_owns->g_product.{ title: name, cost: price } AS owned FROM g_user",
+    );
+  });
+
+  test("key === column emits the shorthand", () => {
+    expect(
+      sqlOf(
+        select(User).return((u) => ({
+          owned: u.out(Owns).return((p) => ({ name: p.name })),
+        })),
+      ),
+    ).toBe("SELECT ->g_owns->g_product.{ name } AS owned FROM g_user");
+  });
+
+  test("computed/derived value in a destructure", () => {
+    expect(
+      sqlOf(
+        select(User).return((u) => ({
+          owned: u.out(Owns).return((p) => ({ up: p.name.length() })),
+        })),
+      ),
+    ).toBe(
+      "SELECT ->g_owns->g_product.{ up: string::len(name) } AS owned FROM g_user",
+    );
+  });
+
+  test("nested traversal inside a destructure", () => {
+    expect(
+      sqlOf(
+        select(Product).return((p) => ({
+          ings: p.out(Contains).return((i) => ({
+            name: i.name,
+            treats: i.out(Treats).return((c) => c.name),
+          })),
+        })),
+      ),
+    ).toBe(
+      "SELECT ->g_contains->g_ingredient.{ name, treats: ->g_treats->g_concern.name } AS ings FROM g_product",
+    );
+  });
+
+  test(".all() materializes the full record (.*)", () => {
+    expect(
+      sqlOf(select(User).return((u) => ({ owned: u.out(Owns).all() }))),
+    ).toBe("SELECT ->g_owns->g_product.* AS owned FROM g_user");
+  });
+
+  test("projecting a polymorphic/unconstrained target throws (narrow first)", () => {
+    // `.return` throws in soleTarget() before the callback runs — the body just needs to typecheck.
+    expect(() =>
+      select(User).return((u) => ({
+        k: u.out(Knows).return(() => surql`name`),
+      })),
+    ).toThrow(/narrow the target first/);
+  });
+
+  test("types: destructure infers the projected shape; flat infers the field array", () => {
+    const q = select(Product).return((p) => ({
+      detail: p.out(Contains).return((i) => ({ n: i.name, s: i.sulfate })),
+      names: p.out(Contains).return((i) => i.name),
+    }));
+    type Res = Awaited<ReturnType<typeof q.run>>[number];
+    const _detail: Res["detail"] = [] as { n: string; s: boolean }[];
+    const _names: Res["names"] = [] as string[];
+    void _detail;
+    void _names;
     expect(true).toBe(true);
   });
 });

@@ -3485,8 +3485,12 @@ type RelationShape<
 };
 
 function tableNames(ref: TableRef): string[] {
-  const arr = (Array.isArray(ref) ? ref : [ref]) as readonly TableLike[];
-  return arr.map((t) => (typeof t === "string" ? t : t.name));
+  return refArray(ref).map((t) => (typeof t === "string" ? t : t.name));
+}
+
+/** Normalize a {@link TableRef} to an array of endpoints (a single ref becomes a one-element array). */
+function refArray(ref: TableRef): readonly TableLike[] {
+  return (Array.isArray(ref) ? ref : [ref]) as readonly TableLike[];
 }
 
 /** Build a relation's runtime fields: the edge fields + `in`/`out` (empty endpoints = any record). */
@@ -3525,6 +3529,10 @@ export class RelationDef<
     private readonly fromNames: string[] = [],
     private readonly toNames: string[] = [],
     private readonly isEnforced: boolean = false,
+    // The endpoint refs AS PASSED (def objects / `Table`s / bare names) — the runtime mirror of the
+    // `FromRef`/`ToRef` type captures, so the graph builder can recover a target's TableDef.
+    private readonly fromRefs: readonly TableLike[] = [],
+    private readonly toRefs: readonly TableLike[] = [],
   ) {
     super(
       name,
@@ -3541,6 +3549,12 @@ export class RelationDef<
       },
     );
   }
+  /** The endpoint {@link TableDef}s for a direction — the def objects handed to `.from()`/`.to()`
+   *  (bare-name endpoints are omitted). The graph query builder uses these to build target-node refs. */
+  endpointDefs(dir: "from" | "to"): AnyTable[] {
+    const refs = dir === "to" ? this.toRefs : this.fromRefs;
+    return refs.filter((r): r is AnyTable => r instanceof TableDef);
+  }
   /** Restrict the source endpoint(s) (`in`) — a `TableDef`, a SurrealDB `Table`, a bare name string, or
    *  an array mixing them for a `FROM a | b` union. Endpoint names flow into the typed `in` record link. */
   from<F extends TableRef>(ref: F): RelationDef<Name, S, NamesOf<F>, Out, F, ToRef> {
@@ -3550,6 +3564,8 @@ export class RelationDef<
       tableNames(ref),
       this.toNames,
       this.isEnforced,
+      refArray(ref),
+      this.toRefs,
     ) as unknown as RelationDef<Name, S, NamesOf<F>, Out, F, ToRef>;
   }
   /** Restrict the target endpoint(s) (`out`) — a `TableDef`, a SurrealDB `Table`, a bare name string, or
@@ -3561,6 +3577,8 @@ export class RelationDef<
       this.fromNames,
       tableNames(ref),
       this.isEnforced,
+      this.fromRefs,
+      refArray(ref),
     ) as unknown as RelationDef<Name, S, In, NamesOf<T>, FromRef, T>;
   }
   /** Require both endpoints to exist on RELATE (`TYPE RELATION … ENFORCED`). */
@@ -3571,6 +3589,8 @@ export class RelationDef<
       this.fromNames,
       this.toNames,
       true,
+      this.fromRefs,
+      this.toRefs,
     ) as unknown as RelationDef<Name, S, In, Out, FromRef, ToRef>;
   }
 }

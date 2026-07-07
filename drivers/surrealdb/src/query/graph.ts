@@ -2,13 +2,26 @@
 //
 // The atomic unit is `->edge->node` (bare `->edge->` is a parse error in SurrealQL). `.out(E)` /
 // `.in(E)` / `.both(E)` emit that unit and carry the TARGET node's TableDef type forward, read from
-// the endpoint types captured on `RelationDef` (`.from(X)/.to(Y)`). A traversal is a `FRAGMENT`, so it
-// drops into `.return({...})` projections, `surql` templates, and (later) WHERE — like a nested
-// subquery. Empirical grammar backing every form: `docs/graph-syntax-map.md`.
+// the endpoint types captured on `RelationDef` (`.from(X)/.to(Y)`). `.return(node => …)` projects the
+// target's fields (flat `->…->node.name`, or a `.{…}` destructure with aliasing/computed/nested). A
+// traversal is a `FRAGMENT`, so it drops into `.return({...})` and `surql` templates like a subquery.
+// Empirical grammar backing every form: `docs/graph-syntax-map.md`.
 
+import type { FieldRefBase } from "@schemic/core/query";
 import { BoundQuery, escapeIdent } from "surrealdb";
-import { type App, FRAGMENT, type RelationDef, type TableDef } from "../pure";
-import type { Row } from "./expr";
+import {
+  type App,
+  type Ctx,
+  FRAGMENT,
+  fragOf,
+  mergeRaw,
+  type RelationDef,
+  refState,
+  renderRef,
+  type TableDef,
+} from "../pure";
+import { type Row, refsFor } from "./expr";
+import type { Projected, ProjectionValue } from "./index";
 
 // biome-ignore lint/suspicious/noExplicitAny: shape-agnostic node reference.
 type AnyTableDef = TableDef<string, any>;
@@ -61,6 +74,16 @@ type NarrowTo<T> = T extends readonly (infer E)[]
 export type TraversalIds<Cur extends AnyTableDef> =
   App<Cur> extends { id: infer I } ? I[] : unknown[];
 
+/** The result of a FLAT `.return(node => value)`: a nested traversal keeps its own result; a field
+ *  ref becomes an array of that field's values. */
+type FlatResult<V> =
+  // biome-ignore lint/suspicious/noExplicitAny: matching any node/result traversal.
+  V extends NodeTraversal<any, infer R>
+    ? R
+    : V extends FieldRefBase<infer T>
+      ? T[]
+      : unknown[];
+
 // --- the step surface (shared by the row ref and every NodeTraversal) -----------------------------
 
 /** `.out` / `.in` / `.both` — hop along an edge to its target node(s). Without a target arg the
@@ -104,14 +127,28 @@ const ARROWS = {
   in: ["<-", "<-"],
   both: ["<->", "<->"],
 } as const;
+type Dir = keyof typeof ARROWS;
 
 /** Endpoint table names for a direction, read from the relation's runtime config. */
-function endpointNames(edge: AnyRelation, dir: keyof typeof ARROWS): string[] {
+function endpointNames(edge: AnyRelation, dir: Dir): string[] {
   const rel = (edge.config as { relation?: { from?: string[]; to?: string[] } })
     .relation;
   if (dir === "out") return rel?.to ?? [];
   if (dir === "in") return rel?.from ?? [];
   return [...new Set([...(rel?.from ?? []), ...(rel?.to ?? [])])];
+}
+
+/** Endpoint `TableDef`s a step lands on — for `.return` to build the target's field refs. */
+function endpointDefs(
+  edge: AnyRelation,
+  dir: Dir,
+  target?: TargetArg,
+): AnyTableDef[] {
+  if (target !== undefined)
+    return (Array.isArray(target) ? target : [target]) as AnyTableDef[];
+  if (dir === "both")
+    return [...edge.endpointDefs("from"), ...edge.endpointDefs("to")];
+  return edge.endpointDefs(dir === "in" ? "from" : "to");
 }
 
 function targetNames(target: TargetArg): string[] {
@@ -127,39 +164,96 @@ function renderTarget(names: string[]): string {
   return `(${names.map(escapeIdent).join(", ")})`;
 }
 
-function step(
-  prefix: string,
-  dir: keyof typeof ARROWS,
-  edge: AnyRelation,
-  target?: TargetArg,
-): NodeTraversal<AnyTableDef> {
-  const [a1, a2] = ARROWS[dir];
-  const names =
-    target !== undefined ? targetNames(target) : endpointNames(edge, dir);
-  return new NodeTraversal(
-    `${prefix}${a1}${escapeIdent(edge.name)}${a2}${renderTarget(names)}`,
+/** Escape a (possibly dotted) column path — `meta.author` -> `meta.author`. */
+function escapeCol(col: string): string {
+  return col.split(".").map(escapeIdent).join(".");
+}
+
+/** Lower one destructure entry (`{ key: value }`) to `key` (shorthand), `key: col`, or `key: <expr>`. */
+function renderEntry(key: string, value: unknown, ctx: Ctx): string {
+  const rs = refState(value);
+  if (rs) {
+    if (!rs.wrap && "col" in rs.root)
+      return rs.root.col === key
+        ? escapeIdent(key)
+        : `${escapeIdent(key)}: ${escapeCol(rs.root.col)}`;
+    return `${escapeIdent(key)}: ${renderRef(rs, ctx)}`;
+  }
+  if (isTraversal(value))
+    return `${escapeIdent(key)}: ${value.renderPath(ctx)}`;
+  const frag = fragOf(value);
+  if (frag) return `${escapeIdent(key)}: ${mergeRaw(frag, ctx.vars)}`;
+  throw new Error(
+    `.return(): "${key}" is not a projectable value — pass a field ref, a nested traversal, a derived expression, or a fragment.`,
+  );
+}
+
+/** Lower a `.return` projection to the segment appended to the traversal path: a flat field
+ *  (`.name`), a nested traversal (`->…`), or a destructure (`.{ … }`). */
+function projectSegment(shape: unknown, ctx: Ctx): string {
+  const rs = refState(shape);
+  if (rs) {
+    if (rs.wrap || !("col" in rs.root))
+      throw new Error(
+        ".return(): a single derived/computed value needs an object with a key — .return(p => ({ x: <expr> })).",
+      );
+    return `.${escapeCol(rs.root.col)}`;
+  }
+  if (isTraversal(shape)) return shape.renderPath(ctx);
+  if (shape && typeof shape === "object") {
+    const entries = Object.entries(shape as Record<string, unknown>).map(
+      ([k, v]) => renderEntry(k, v, ctx),
+    );
+    return `.{ ${entries.join(", ")} }`;
+  }
+  throw new Error(
+    ".return(): expected a field ref, a nested traversal, or an object of them.",
   );
 }
 
 /**
  * A graph traversal expression — one or more `->edge->node` hops from an anchor (the query row).
  * Chainable (`u.out(A).out(B)`), and a `FRAGMENT` so it projects/interpolates like a subquery. Bare,
- * it yields the target nodes' record ids; `.return(...)` (a later step) reshapes to a projection.
+ * it yields the target nodes' record ids; `.return(node => …)` reshapes to a projection, `.all()` to
+ * the full record (`.*`).
  */
-export class NodeTraversal<Cur extends AnyTableDef> {
-  /** Phantom: carries the current node type so projection inference can read it
-   *  (`NodeTraversal<infer C>` in `ProjectedValue`). Type-only — never present at runtime. */
+export class NodeTraversal<Cur extends AnyTableDef, Res = TraversalIds<Cur>> {
+  /** Phantom: carries the current node type + result so projection inference can read them
+   *  (`NodeTraversal<infer C, infer R>` in `ProjectedValue`). Type-only — never present at runtime. */
   declare readonly _node: Cur;
-  /** @internal the accumulated SurQL path (`->owns->product->made_by->brand`), anchor-relative. */
-  constructor(private readonly path: string) {}
+  declare readonly _res: Res;
+
+  constructor(
+    /** @internal renders the accumulated path in a lowering pass (binds go into `ctx.vars`). */
+    private readonly renderFn: (ctx: Ctx) => string,
+    /** @internal the target `TableDef`(s) this traversal lands on — for `.return` refs. */
+    private readonly targets: AnyTableDef[],
+  ) {}
+
+  private step(
+    dir: Dir,
+    edge: AnyRelation,
+    target?: TargetArg,
+  ): NodeTraversal<AnyTableDef> {
+    const [a1, a2] = ARROWS[dir];
+    const names =
+      target !== undefined ? targetNames(target) : endpointNames(edge, dir);
+    const seg = `${a1}${escapeIdent(edge.name)}${a2}${renderTarget(names)}`;
+    const prev = this.renderFn;
+    return new NodeTraversal(
+      (ctx) => prev(ctx) + seg,
+      endpointDefs(edge, dir, target),
+    );
+  }
 
   out<E extends AnyRelation>(edge: E): NodeTraversal<OutNodes<E>>;
   out<E extends AnyRelation, T extends TargetArg>(
     edge: E,
     target: T,
   ): NodeTraversal<NarrowTo<T>>;
-  out(edge: AnyRelation, target?: TargetArg): NodeTraversal<AnyTableDef> {
-    return step(this.path, "out", edge, target);
+  // biome-ignore lint/suspicious/noExplicitAny: overload impl signature; callers see the typed overloads.
+  out(edge: AnyRelation, target?: TargetArg): NodeTraversal<any, any> {
+    return this.step("out", edge, target);
   }
 
   in<E extends AnyRelation>(edge: E): NodeTraversal<InNodes<E>>;
@@ -167,8 +261,9 @@ export class NodeTraversal<Cur extends AnyTableDef> {
     edge: E,
     target: T,
   ): NodeTraversal<NarrowTo<T>>;
-  in(edge: AnyRelation, target?: TargetArg): NodeTraversal<AnyTableDef> {
-    return step(this.path, "in", edge, target);
+  // biome-ignore lint/suspicious/noExplicitAny: overload impl signature; callers see the typed overloads.
+  in(edge: AnyRelation, target?: TargetArg): NodeTraversal<any, any> {
+    return this.step("in", edge, target);
   }
 
   both<E extends AnyRelation>(edge: E): NodeTraversal<BothNodes<E>>;
@@ -176,16 +271,56 @@ export class NodeTraversal<Cur extends AnyTableDef> {
     edge: E,
     target: T,
   ): NodeTraversal<NarrowTo<T>>;
-  both(edge: AnyRelation, target?: TargetArg): NodeTraversal<AnyTableDef> {
-    return step(this.path, "both", edge, target);
+  // biome-ignore lint/suspicious/noExplicitAny: overload impl signature; callers see the typed overloads.
+  both(edge: AnyRelation, target?: TargetArg): NodeTraversal<any, any> {
+    return this.step("both", edge, target);
   }
 
-  /** Fragment hook: the bare path splices as-is (no binds yet — filters add them later). */
+  /** Project the target node's fields — flat (`.return(p => p.name)` -> `->…->node.name`) or a
+   *  destructure (`.return(p => ({ title: p.name, treats: p.out(Treats).return(c => c.name) }))`). */
+  return<P extends Record<string, ProjectionValue>>(
+    fn: (node: NodeRef<Cur>) => P,
+  ): NodeTraversal<Cur, Projected<P>[]>;
+  return<V extends ProjectionValue>(
+    fn: (node: NodeRef<Cur>) => V,
+  ): NodeTraversal<Cur, FlatResult<V>>;
+  return(fn: (node: NodeRef<Cur>) => unknown): NodeTraversal<Cur, unknown> {
+    const target = this.soleTarget("project");
+    const nodeRef = attachGraphSteps(refsFor(target)) as NodeRef<Cur>;
+    const shape = fn(nodeRef);
+    const prev = this.renderFn;
+    return new NodeTraversal(
+      (ctx) => prev(ctx) + projectSegment(shape, ctx),
+      this.targets,
+    );
+  }
+
+  /** Materialize the full target record (`->…->node.*`). */
+  all(): NodeTraversal<Cur, App<Cur>[]> {
+    const prev = this.renderFn;
+    return new NodeTraversal((ctx) => `${prev(ctx)}.*`, this.targets);
+  }
+
+  /** The single target def — `.return`/`.all` need exactly one (narrow a polymorphic edge first). */
+  private soleTarget(op: string): AnyTableDef {
+    if (this.targets.length === 1) return this.targets[0];
+    throw new Error(
+      `.${op}() over a ${this.targets.length === 0 ? "target-less" : "polymorphic"} traversal isn't supported yet — narrow the target first, e.g. .out(Edge, TargetTable).`,
+    );
+  }
+
+  /** @internal render the accumulated path (used to splice a nested traversal into a projection). */
+  renderPath(ctx: Ctx): string {
+    return this.renderFn(ctx);
+  }
+
+  /** Fragment hook: renders the path in a fresh pass, collecting any binds. */
   [FRAGMENT](): BoundQuery {
-    return new BoundQuery(this.path, {});
+    const ctx: Ctx = { vars: {} };
+    return new BoundQuery(this.renderFn(ctx), ctx.vars);
   }
 
-  /** Projection decode for a bare traversal — record ids pass through untouched. */
+  /** Projection decode — passthrough (record ids / shaped rows arrive as the SDK's native values). */
   decode(raw: unknown): unknown {
     return raw;
   }
@@ -200,7 +335,7 @@ export function isTraversal(v: unknown): v is NodeTraversal<AnyTableDef> {
 export function attachGraphSteps<TD extends AnyTableDef>(
   row: Row<TD>,
 ): NodeRef<TD> {
-  const anchor = new NodeTraversal<TD>("");
+  const anchor = new NodeTraversal<TD>(() => "", []);
   return Object.assign(row as object, {
     out: anchor.out.bind(anchor),
     in: anchor.in.bind(anchor),
