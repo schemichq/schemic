@@ -239,26 +239,42 @@ export class NodeTraversal<Cur extends AnyTableDef, Res = TraversalIds<Cur>> {
   declare readonly _res: Res;
 
   constructor(
-    /** @internal renders the accumulated path in a lowering pass (binds go into `ctx.vars`). */
-    private readonly renderFn: (ctx: Ctx) => string,
-    /** @internal the target `TableDef`(s) this traversal lands on — for `.return` refs. */
+    /** @internal path up to (not including) the target position. */
+    private readonly head: (ctx: Ctx) => string,
+    /** @internal target table name(s) — rendered as `node` / `(a, b)` / `?` / `(node WHERE …)`. */
+    private readonly tNames: string[],
+    /** @internal the target `TableDef`(s) — for `.where`/`.return` refs. */
     private readonly targets: AnyTableDef[],
+    /** @internal a target filter (`->E->(node WHERE …)`). */
+    private readonly filter?: Expr,
+    /** @internal a projection / `.*` appended after the target (`->…->node.{ … }`). */
+    private readonly projSeg?: (ctx: Ctx) => string,
+    /** @internal the row anchor (the query row itself) — contributes an empty path. */
+    private readonly isRoot: boolean = false,
   ) {}
 
-  private step(
-    dir: Dir,
-    edge: AnyRelation,
-    target?: TargetArg,
-  ): NodeTraversal<AnyTableDef> {
-    const [a1, a2] = ARROWS[dir];
-    const names =
-      target !== undefined ? targetNames(target) : endpointNames(edge, dir);
-    const seg = `${a1}${escapeIdent(edge.name)}${a2}${renderTarget(names)}`;
-    const prev = this.renderFn;
-    return new NodeTraversal(
-      (ctx) => prev(ctx) + seg,
-      endpointDefs(edge, dir, target),
-    );
+  /** The target position, filter folded in. */
+  private targetSeg(ctx: Ctx): string {
+    if (!this.filter) return renderTarget(this.tNames);
+    const name =
+      this.tNames.length === 1
+        ? escapeIdent(this.tNames[0])
+        : renderTarget(this.tNames);
+    return `(${name} WHERE ${lowerExpr(this.filter, ctx)})`;
+  }
+
+  /** Path through the target node (no projection) — the base for chaining another hop. */
+  private nodePath(ctx: Ctx): string {
+    return this.isRoot ? "" : this.head(ctx) + this.targetSeg(ctx);
+  }
+
+  /** Full render: node path + any projection. */
+  private full(ctx: Ctx): string {
+    return this.nodePath(ctx) + (this.projSeg?.(ctx) ?? "");
+  }
+
+  private base(): (ctx: Ctx) => string {
+    return (ctx) => this.nodePath(ctx);
   }
 
   out<E extends AnyRelation>(edge: E): NodeTraversal<OutNodes<E>>;
@@ -268,7 +284,7 @@ export class NodeTraversal<Cur extends AnyTableDef, Res = TraversalIds<Cur>> {
   ): NodeTraversal<NarrowTo<T>>;
   // biome-ignore lint/suspicious/noExplicitAny: overload impl signature; callers see the typed overloads.
   out(edge: AnyRelation, target?: TargetArg): NodeTraversal<any, any> {
-    return this.step("out", edge, target);
+    return makeNode(this.base(), "out", edge, target);
   }
 
   in<E extends AnyRelation>(edge: E): NodeTraversal<InNodes<E>>;
@@ -278,7 +294,7 @@ export class NodeTraversal<Cur extends AnyTableDef, Res = TraversalIds<Cur>> {
   ): NodeTraversal<NarrowTo<T>>;
   // biome-ignore lint/suspicious/noExplicitAny: overload impl signature; callers see the typed overloads.
   in(edge: AnyRelation, target?: TargetArg): NodeTraversal<any, any> {
-    return this.step("in", edge, target);
+    return makeNode(this.base(), "in", edge, target);
   }
 
   both<E extends AnyRelation>(edge: E): NodeTraversal<BothNodes<E>>;
@@ -288,23 +304,35 @@ export class NodeTraversal<Cur extends AnyTableDef, Res = TraversalIds<Cur>> {
   ): NodeTraversal<NarrowTo<T>>;
   // biome-ignore lint/suspicious/noExplicitAny: overload impl signature; callers see the typed overloads.
   both(edge: AnyRelation, target?: TargetArg): NodeTraversal<any, any> {
-    return this.step("both", edge, target);
+    return makeNode(this.base(), "both", edge, target);
   }
 
   outEdges<E extends AnyRelation>(edge: E): EdgeTraversal<E, OutNodes<E>> {
-    return edgeStep(this.renderFn, "out", edge) as EdgeTraversal<
-      E,
-      OutNodes<E>
-    >;
+    return makeEdge(this.base(), "out", edge) as EdgeTraversal<E, OutNodes<E>>;
   }
   inEdges<E extends AnyRelation>(edge: E): EdgeTraversal<E, InNodes<E>> {
-    return edgeStep(this.renderFn, "in", edge) as EdgeTraversal<E, InNodes<E>>;
+    return makeEdge(this.base(), "in", edge) as EdgeTraversal<E, InNodes<E>>;
   }
   bothEdges<E extends AnyRelation>(edge: E): EdgeTraversal<E, BothNodes<E>> {
-    return edgeStep(this.renderFn, "both", edge) as EdgeTraversal<
+    return makeEdge(this.base(), "both", edge) as EdgeTraversal<
       E,
       BothNodes<E>
     >;
+  }
+
+  /** Filter the target node (`->E->(node WHERE …)`); successive calls AND together. */
+  where(fn: (node: NodeRef<Cur>) => Predicate): NodeTraversal<Cur, Res> {
+    const target = this.soleTarget("where");
+    const nodeRef = attachGraphSteps(refsFor(target)) as NodeRef<Cur>;
+    const pred = toExpr(fn(nodeRef));
+    const combined = this.filter ? and(this.filter, pred) : pred;
+    return new NodeTraversal(
+      this.head,
+      this.tNames,
+      this.targets,
+      combined,
+      this.projSeg,
+    );
   }
 
   /** Project the target node's fields — flat (`.return(p => p.name)` -> `->…->node.name`) or a
@@ -319,20 +347,27 @@ export class NodeTraversal<Cur extends AnyTableDef, Res = TraversalIds<Cur>> {
     const target = this.soleTarget("project");
     const nodeRef = attachGraphSteps(refsFor(target)) as NodeRef<Cur>;
     const shape = fn(nodeRef);
-    const prev = this.renderFn;
     return new NodeTraversal(
-      (ctx) => prev(ctx) + projectSegment(shape, ctx),
+      this.head,
+      this.tNames,
       this.targets,
+      this.filter,
+      (ctx) => projectSegment(shape, ctx),
     );
   }
 
   /** Materialize the full target record (`->…->node.*`). */
   all(): NodeTraversal<Cur, App<Cur>[]> {
-    const prev = this.renderFn;
-    return new NodeTraversal((ctx) => `${prev(ctx)}.*`, this.targets);
+    return new NodeTraversal(
+      this.head,
+      this.tNames,
+      this.targets,
+      this.filter,
+      () => ".*",
+    );
   }
 
-  /** The single target def — `.return`/`.all` need exactly one (narrow a polymorphic edge first). */
+  /** The single target def — `.where`/`.return`/`.all` need exactly one (narrow a polymorphic edge). */
   private soleTarget(op: string): AnyTableDef {
     if (this.targets.length === 1) return this.targets[0];
     throw new Error(
@@ -340,15 +375,15 @@ export class NodeTraversal<Cur extends AnyTableDef, Res = TraversalIds<Cur>> {
     );
   }
 
-  /** @internal render the accumulated path (used to splice a nested traversal into a projection). */
+  /** @internal render the full path (used to splice a nested traversal into a projection). */
   renderPath(ctx: Ctx): string {
-    return this.renderFn(ctx);
+    return this.full(ctx);
   }
 
   /** Fragment hook: renders the path in a fresh pass, collecting any binds. */
   [FRAGMENT](): BoundQuery {
     const ctx: Ctx = { vars: {} };
-    return new BoundQuery(this.renderFn(ctx), ctx.vars);
+    return new BoundQuery(this.full(ctx), ctx.vars);
   }
 
   /** Projection decode — passthrough (record ids / shaped rows arrive as the SDK's native values). */
@@ -357,18 +392,33 @@ export class NodeTraversal<Cur extends AnyTableDef, Res = TraversalIds<Cur>> {
   }
 }
 
+/** Build a node hop from a base path (`base->edge->target`). */
+function makeNode(
+  base: (ctx: Ctx) => string,
+  dir: Dir,
+  edge: AnyRelation,
+  target?: TargetArg,
+  // biome-ignore lint/suspicious/noExplicitAny: shape-agnostic; callers narrow via overloads.
+): NodeTraversal<any, any> {
+  const [a1, a2] = ARROWS[dir];
+  const head = (ctx: Ctx) => `${base(ctx)}${a1}${escapeIdent(edge.name)}${a2}`;
+  const names =
+    target !== undefined ? targetNames(target) : endpointNames(edge, dir);
+  return new NodeTraversal(head, names, endpointDefs(edge, dir, target));
+}
+
 /** The record ids of a BARE edge traversal (no `.return`). */
 export type EdgeIds<E extends AnyRelation> =
   App<E> extends { id: infer I } ? I[] : unknown[];
 
-/** Build an edge step from a prefix render — used by both the row anchor and NodeTraversal. */
-function edgeStep(
-  prev: (ctx: Ctx) => string,
+/** Build an edge step from a base path (`base->edge`) — used by the row anchor and NodeTraversal. */
+function makeEdge(
+  base: (ctx: Ctx) => string,
   dir: Dir,
   edge: AnyRelation,
   // biome-ignore lint/suspicious/noExplicitAny: shape-agnostic edge step; callers narrow.
 ): EdgeTraversal<any, AnyTableDef> {
-  return new EdgeTraversal(prev, dir, edge, undefined, undefined);
+  return new EdgeTraversal(base, dir, edge, undefined, undefined);
 }
 
 /**
@@ -436,9 +486,10 @@ export class EdgeTraversal<
       target !== undefined
         ? targetNames(target)
         : endpointNames(this.edge, this.dir);
-    const seg = `${a2}${renderTarget(names)}`;
+    const head = (ctx: Ctx) => `${this.renderEdge(ctx)}${a2}`;
     return new NodeTraversal(
-      (ctx) => this.renderEdge(ctx) + seg,
+      head,
+      names,
       endpointDefs(this.edge, this.dir, target),
     );
   }
@@ -504,7 +555,14 @@ export function isEdgeTraversal(
 export function attachGraphSteps<TD extends AnyTableDef>(
   row: Row<TD>,
 ): NodeRef<TD> {
-  const anchor = new NodeTraversal<TD>(() => "", []);
+  const anchor = new NodeTraversal<TD>(
+    () => "",
+    [],
+    [],
+    undefined,
+    undefined,
+    true,
+  );
   return Object.assign(row as object, {
     out: anchor.out.bind(anchor),
     in: anchor.in.bind(anchor),

@@ -277,3 +277,62 @@ describe("graph traversal — edge steps (.outEdges/.node/edge fields/filters)",
     expect(true).toBe(true);
   });
 });
+
+describe("graph traversal — target filter (.out(E).where(node => …))", () => {
+  test("filters the target node (->E->(node WHERE …)) and binds the value", () => {
+    const q = select(Product).return((p) => ({
+      x: p.out(Contains).where((i) => i.sulfate.eq(true)),
+    }));
+    const { sql, vars } = q.toSQL();
+    expect(sql).toBe(
+      "SELECT ->g_contains->(g_ingredient WHERE sulfate = $b0) AS x FROM g_product",
+    );
+    expect(Object.values(vars)).toContain(true);
+  });
+
+  test("filter then project the (filtered) target", () => {
+    expect(
+      sqlOf(
+        select(Product).return((p) => ({
+          x: p
+            .out(Contains)
+            .where((i) => i.sulfate.eq(true))
+            .return((i) => i.name),
+        })),
+      ),
+    ).toBe(
+      "SELECT ->g_contains->(g_ingredient WHERE sulfate = $b0).name AS x FROM g_product",
+    );
+  });
+
+  test("edge filter + target filter compose (->(E WHERE …)->(node WHERE …))", () => {
+    expect(
+      sqlOf(
+        select(Product).return((p) => ({
+          x: p
+            .outEdges(Contains)
+            .where((e) => e.amount.eq("5%"))
+            .node()
+            .where((i) => i.sulfate.eq(true)),
+        })),
+      ),
+    ).toBe(
+      "SELECT ->(g_contains WHERE amount = $b0)->(g_ingredient WHERE sulfate = $b1) AS x FROM g_product",
+    );
+  });
+
+  test("a filtered target is still chainable", () => {
+    expect(
+      sqlOf(
+        select(Product).return((p) => ({
+          x: p
+            .out(Contains)
+            .where((i) => i.sulfate.eq(true))
+            .out(Treats),
+        })),
+      ),
+    ).toBe(
+      "SELECT ->g_contains->(g_ingredient WHERE sulfate = $b0)->g_treats->g_concern AS x FROM g_product",
+    );
+  });
+});
