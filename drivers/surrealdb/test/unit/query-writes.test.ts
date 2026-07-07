@@ -118,6 +118,84 @@ describe("write builders — lowering", () => {
   });
 });
 
+describe("bulk writes — whole-table + filtered (no id)", () => {
+  test("update(T) targets the whole table by name (not $__thing)", () => {
+    const { sql, vars } = update(Post)
+      .set((p) => ({ views: p.views.plus(1) }))
+      .toSQL();
+    expect(sql).toMatch(
+      new RegExp(
+        `^UPDATE ${escapeIdent("post")} SET views = views \\+ \\$r\\d+ RETURN AFTER$`,
+      ),
+    );
+    expect(vars.__thing).toBeUndefined(); // no record-id bind — it's a table target
+  });
+
+  test("update(T).where(...) filters the whole-table update", () => {
+    const { sql, vars } = update(Post)
+      .set({ title: "hot" })
+      .where((p) => p.views.gt(10))
+      .toSQL();
+    expect(sql).toBe(
+      `UPDATE ${escapeIdent("post")} SET ${escapeIdent("title")} = $__s0 WHERE views > $b1 RETURN AFTER`,
+    );
+    expect(vars.__s0).toBe("hot");
+    expect(vars.b1).toBe(10);
+  });
+
+  test("remove(T) deletes the whole table; .where(...) filters it", () => {
+    expect(remove(Post).toSQL().sql).toBe(
+      `DELETE ${escapeIdent("post")} RETURN NONE`,
+    );
+    const { sql, vars } = remove(Post)
+      .where((p) => p.views.lt(1))
+      .return("before")
+      .toSQL();
+    expect(sql).toBe(
+      `DELETE ${escapeIdent("post")} WHERE views < $b0 RETURN BEFORE`,
+    );
+    expect(vars.b0).toBe(1);
+  });
+
+  test("a by-id target still accepts .where as a conditional guard (optimistic write)", () => {
+    const { sql, vars } = update(Post, "p1")
+      .set({ title: "x" })
+      .where((p) => p.views.eq(5))
+      .toSQL();
+    expect(sql).toBe(
+      `UPDATE $__thing SET ${escapeIdent("title")} = $__s0 WHERE views = $b2 RETURN AFTER`,
+    );
+    expect(vars.__thing).toBeInstanceOf(RecordId);
+    expect(vars.b2).toBe(5);
+  });
+});
+
+describe("output mode — .only() emits ONLY (single row instead of an array)", () => {
+  test("create/update/remove .only() splice ONLY right after the verb", () => {
+    expect(create(Post).content({ title: "x" }).only().toSQL().sql).toBe(
+      `CREATE ONLY ${escapeIdent("post")} CONTENT $__content RETURN AFTER`,
+    );
+    expect(update(Post, "p1").merge({ title: "x" }).only().toSQL().sql).toBe(
+      "UPDATE ONLY $__thing MERGE $__payload RETURN AFTER",
+    );
+    expect(remove(Post, "p1").only().toSQL().sql).toBe(
+      "DELETE ONLY $__thing RETURN NONE",
+    );
+  });
+
+  test("ONLY composes with a bulk filtered update", () => {
+    expect(
+      update(Post)
+        .set({ title: "z" })
+        .where((p) => p.title.eq("q"))
+        .only()
+        .toSQL().sql,
+    ).toBe(
+      `UPDATE ONLY ${escapeIdent("post")} SET ${escapeIdent("title")} = $__s0 WHERE title = $b1 RETURN AFTER`,
+    );
+  });
+});
+
 describe("write builders — codec-channel validation (fail-fast)", () => {
   test(".content validates via the Create codec AT THE CALL SITE", () => {
     // title must be a string — the ZodError throws on .content, not at await/run.

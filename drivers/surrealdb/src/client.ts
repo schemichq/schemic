@@ -175,27 +175,29 @@ export class Client implements OrmClientBase {
     return create(table, this.conn);
   }
 
-  /** A connection-bound single-record UPDATE — `await db.update(User, id).merge({ … })` (deep merge,
-   *  via `User.update`) / `.content(row)` (replace) / `.set(patch)`. Returns the updated row. */
+  /** A connection-bound UPDATE — `await db.update(User, id).merge({ … })` (deep merge, via
+   *  `User.update`) / `.content(row)` (replace) / `.set(patch)` for one record, or `db.update(User)
+   *  .set(…) [.where(…)]` for a BULK whole-table / filtered update. Returns the updated rows. */
   update<TD extends AnyTable>(
     table: TD,
-    ...rest: IdArgs<TD, []>
+    ...rest: [id?: TargetId<TD>]
   ): UpdateQuery<TD, App<TD>> {
     return update(
       table,
-      ...([rest[0], this.conn] as unknown as IdArgs<TD, [Queryable?]>),
+      ...([rest[0], this.conn] as [TargetId<TD>?, Queryable?]),
     );
   }
 
-  /** A connection-bound single-record DELETE — `await db.delete(User, id)`; `.return("before")`
-   *  hands back the deleted row. */
+  /** A connection-bound DELETE — `await db.delete(User, id)` for one record, or `db.delete(User)
+   *  [.where(…)]` for a BULK whole-table / filtered delete; `.return("before")` hands back the
+   *  deleted rows. */
   delete<TD extends AnyTable>(
     table: TD,
-    ...rest: IdArgs<TD, []>
+    ...rest: [id?: TargetId<TD>]
   ): DeleteQuery<TD, undefined> {
     return remove(
       table,
-      ...([rest[0], this.conn] as unknown as IdArgs<TD, [Queryable?]>),
+      ...([rest[0], this.conn] as [TargetId<TD>?, Queryable?]),
     );
   }
 
@@ -278,25 +280,26 @@ export class Session implements OrmClientBase {
     return create(table, this.session);
   }
 
-  /** A session-bound single-record UPDATE. */
+  /** A session-bound UPDATE — one record (`update(User, id)`) or BULK (`update(User).set(…)
+   *  [.where(…)]`). */
   update<TD extends AnyTable>(
     table: TD,
-    ...rest: IdArgs<TD, []>
+    ...rest: [id?: TargetId<TD>]
   ): UpdateQuery<TD, App<TD>> {
     return update(
       table,
-      ...([rest[0], this.session] as unknown as IdArgs<TD, [Queryable?]>),
+      ...([rest[0], this.session] as [TargetId<TD>?, Queryable?]),
     );
   }
 
-  /** A session-bound single-record DELETE. */
+  /** A session-bound DELETE — one record (`delete(User, id)`) or BULK (`delete(User) [.where(…)]`). */
   delete<TD extends AnyTable>(
     table: TD,
-    ...rest: IdArgs<TD, []>
+    ...rest: [id?: TargetId<TD>]
   ): DeleteQuery<TD, undefined> {
     return remove(
       table,
-      ...([rest[0], this.session] as unknown as IdArgs<TD, [Queryable?]>),
+      ...([rest[0], this.session] as [TargetId<TD>?, Queryable?]),
     );
   }
 

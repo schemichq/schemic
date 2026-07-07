@@ -22,10 +22,10 @@ import {
 import { BoundQuery, escapeIdent, type RecordId } from "surrealdb";
 import type { App, Create, TableDef, Update, Wire } from "../pure";
 import { isParamRef } from "../pure";
+import { type Expr, lowerExpr, type Predicate, toExpr } from "./expr";
 import {
   type FieldRefOps,
   FRAGMENT,
-  type IdArgs,
   type Operand,
   type Out,
   type Queryable,
@@ -33,10 +33,11 @@ import {
   refCol,
   refsFor,
   splitIdArgs,
+  type TargetId,
   thingOf,
   toFragment,
 } from "./index";
-import { type Ctx, operandText, refState } from "./render";
+import { type Ctx, operandText, refState, stripOuterParens } from "./render";
 
 export type { TargetId } from "./index";
 
@@ -300,7 +301,8 @@ export class UpdateQuery<
 > extends WriteQuery<TD, Res, Single> {
   constructor(
     table: TD,
-    private readonly target: RecordId,
+    /** A `RecordId` (by-id single target) or `undefined` (BULK — the whole table `UPDATE t …`). */
+    private readonly target: RecordId | undefined,
     private readonly mode: UpdateMode | undefined,
     private readonly payload: Record<string, unknown> | undefined,
     ret: Ret = "after",
@@ -308,6 +310,8 @@ export class UpdateQuery<
     conn?: Queryable,
     /** `.set` callback entries whose value is an EXPRESSION (spliced, not bound). */
     private readonly exprSet?: readonly { col: string; value: unknown }[],
+    /** `.where(…)` filter (bulk updates; also a conditional guard on a by-id target). */
+    private readonly filter?: Expr,
     only = false,
   ) {
     super(table, ret, decode, conn, only);
@@ -327,7 +331,25 @@ export class UpdateQuery<
       this.decode,
       this.conn,
       this.exprSet,
+      this.filter,
       true,
+    );
+  }
+
+  /** Filter which rows the update touches — `UPDATE t SET … WHERE …`. On a bulk `update(T)` this
+   *  scopes a whole-table update; on `update(T, id)` it is a conditional guard (optimistic write). */
+  where(fn: (row: Row<TD>) => Predicate): UpdateQuery<TD, Res, Single> {
+    return new UpdateQuery<TD, Res, Single>(
+      this.table,
+      this.target,
+      this.mode,
+      this.payload,
+      this.ret,
+      this.decode,
+      this.conn,
+      this.exprSet,
+      toExpr(fn(refsFor(this.table))),
+      this.onlyMode,
     );
   }
 
@@ -345,6 +367,7 @@ export class UpdateQuery<
       this.decode,
       this.conn,
       exprSet,
+      this.filter,
       this.onlyMode,
     );
   }
@@ -419,6 +442,7 @@ export class UpdateQuery<
       this.decode,
       this.conn,
       this.exprSet,
+      this.filter,
       this.onlyMode,
     );
   }
@@ -434,6 +458,7 @@ export class UpdateQuery<
       false,
       this.conn,
       this.exprSet,
+      this.filter,
       this.onlyMode,
     );
   }
@@ -443,7 +468,10 @@ export class UpdateQuery<
       throw new Error(
         "update() has no patch yet — call `.merge(patch)`, `.content(row)`, or `.set(patch)` before running it.",
       );
-    const vars: Record<string, unknown> = { __thing: this.target };
+    const vars: Record<string, unknown> = {};
+    // BULK (no `.target`) writes to the whole table by name; a by-id target binds as `$__thing`.
+    const tgt = this.target ? "$__thing" : escapeIdent(this.table.name);
+    if (this.target) vars.__thing = this.target;
     let clause: string;
     if (this.mode === "set") {
       const parts = Object.keys(this.payload).map((k, i) => {
@@ -464,8 +492,11 @@ export class UpdateQuery<
       vars.__payload = this.payload;
       clause = `${this.mode.toUpperCase()} $__payload`;
     }
+    const where = this.filter
+      ? ` WHERE ${stripOuterParens(lowerExpr(this.filter, { vars }))}`
+      : "";
     return {
-      sql: `UPDATE ${this.onlyKw()}$__thing ${clause} ${retClause(this.ret)}`,
+      sql: `UPDATE ${this.onlyKw()}${tgt} ${clause}${where} ${retClause(this.ret)}`,
       vars,
     };
   }
@@ -480,10 +511,13 @@ export class DeleteQuery<
 > extends WriteQuery<TD, Res, Single> {
   constructor(
     table: TD,
-    private readonly target: RecordId,
+    /** A `RecordId` (by-id single target) or `undefined` (BULK — the whole table `DELETE t …`). */
+    private readonly target: RecordId | undefined,
     ret: Ret = "none",
     decode = true,
     conn?: Queryable,
+    /** `.where(…)` filter (bulk deletes; also a conditional guard on a by-id target). */
+    private readonly filter?: Expr,
     only = false,
   ) {
     super(table, ret, decode, conn, only);
@@ -500,7 +534,22 @@ export class DeleteQuery<
       this.ret,
       this.decode,
       this.conn,
+      this.filter,
       true,
+    );
+  }
+
+  /** Filter which rows the delete removes — `DELETE t WHERE …`. On a bulk `remove(T)` this scopes a
+   *  whole-table delete; on `remove(T, id)` it is a conditional guard. */
+  where(fn: (row: Row<TD>) => Predicate): DeleteQuery<TD, Res, Single> {
+    return new DeleteQuery<TD, Res, Single>(
+      this.table,
+      this.target,
+      this.ret,
+      this.decode,
+      this.conn,
+      toExpr(fn(refsFor(this.table))),
+      this.onlyMode,
     );
   }
 
@@ -524,6 +573,7 @@ export class DeleteQuery<
       ret,
       this.decode,
       this.conn,
+      this.filter,
       this.onlyMode,
     );
   }
@@ -536,14 +586,22 @@ export class DeleteQuery<
       this.ret,
       false,
       this.conn,
+      this.filter,
       this.onlyMode,
     );
   }
 
   toSQL(): Lowered {
+    const vars: Record<string, unknown> = {};
+    // BULK (no `.target`) deletes the whole table by name; a by-id target binds as `$__thing`.
+    const tgt = this.target ? "$__thing" : escapeIdent(this.table.name);
+    if (this.target) vars.__thing = this.target;
+    const where = this.filter
+      ? ` WHERE ${stripOuterParens(lowerExpr(this.filter, { vars }))}`
+      : "";
     return {
-      sql: `DELETE ${this.onlyKw()}$__thing ${retClause(this.ret)}`,
-      vars: { __thing: this.target },
+      sql: `DELETE ${this.onlyKw()}${tgt}${where} ${retClause(this.ret)}`,
+      vars,
     };
   }
 }
@@ -570,16 +628,31 @@ export function create<TD extends AnyTableDef>(
   );
 }
 
-/** Start an `UPDATE` of one record — `update(User, id).merge({ … })`. `id` is the app-typed
- *  `RecordId` or its plain string id part. Returns the updated row (decoded `App<TD>`). */
+/** Resolve a write factory's `[id?, conn?]` args to a target + connection. An omitted id means the
+ *  SINGLETON's fixed record, or — for a normal table — a BULK target (`undefined`, the whole table). */
+function writeTarget(
+  table: AnyTableDef,
+  rest: readonly unknown[],
+): [RecordId | undefined, Queryable | undefined] {
+  const [id, conn] = splitIdArgs(rest);
+  const target =
+    id !== undefined || table.singletonId !== undefined
+      ? thingOf(table, id)
+      : undefined;
+  return [target, conn];
+}
+
+/** Start an `UPDATE` — `update(User, id).merge({ … })` for one record, or `update(User).set(…)
+ *  [.where(…)]` for a BULK whole-table / filtered update (SurrealDB-faithful). `id` is the app-typed
+ *  `RecordId` or its plain string id part. Returns the updated rows (array; `.only()` for single). */
 export function update<TD extends AnyTableDef>(
   table: TD,
-  ...rest: IdArgs<TD, [conn?: Queryable]>
+  ...rest: [id?: TargetId<TD>, conn?: Queryable]
 ): UpdateQuery<TD, App<TD>> {
-  const [id, conn] = splitIdArgs(rest);
+  const [target, conn] = writeTarget(table, rest);
   return new UpdateQuery<TD, App<TD>>(
     table,
-    thingOf(table, id),
+    target,
     undefined,
     undefined,
     "after",
@@ -588,19 +661,14 @@ export function update<TD extends AnyTableDef>(
   );
 }
 
-/** Start a `DELETE` of one record — `remove(User, id)` (named `remove` because `delete` is a
- *  reserved word; the bound client exposes it as `db.delete(User, id)`). Returns nothing by
- *  default; `.return("before")` hands back the deleted row. */
+/** Start a `DELETE` — `remove(User, id)` for one record, or `remove(User) [.where(…)]` for a BULK
+ *  whole-table / filtered delete (named `remove` because `delete` is a reserved word; the bound
+ *  client exposes it as `db.delete(…)`). Returns nothing by default; `.return("before")` hands back
+ *  the deleted rows. */
 export function remove<TD extends AnyTableDef>(
   table: TD,
-  ...rest: IdArgs<TD, [conn?: Queryable]>
+  ...rest: [id?: TargetId<TD>, conn?: Queryable]
 ): DeleteQuery<TD, undefined> {
-  const [id, conn] = splitIdArgs(rest);
-  return new DeleteQuery<TD, undefined>(
-    table,
-    thingOf(table, id),
-    "none",
-    true,
-    conn,
-  );
+  const [target, conn] = writeTarget(table, rest);
+  return new DeleteQuery<TD, undefined>(table, target, "none", true, conn);
 }
