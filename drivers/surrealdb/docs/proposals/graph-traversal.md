@@ -17,8 +17,8 @@ Everything below is on branch `feat/surrealdb-graph-traversal`. The two showcase
 | `.return` projection (flat / destructure / alias / computed / nested) | ✅ shipped |
 | `.all()` (`.*`) | ✅ shipped |
 | Composition (traversals + columns + subqueries in one `.return`) | ✅ shipped |
-| Edge steps `.outEdges`/`.inEdges`/`.bothEdges` + `.node()` bridge | ⬜ not built |
-| Edge fields (`contains.amount`) + edge filters (`->(E WHERE …)->`) | ⬜ not built |
+| Edge steps `.outEdges`/`.inEdges`/`.bothEdges` + `.node()` bridge | ✅ shipped |
+| Edge fields (`->contains.amount`) + edge filters (`->(E WHERE …)->`) | ✅ shipped |
 | Target filter `.out(E).where(n => …)` (`->E->(node WHERE …)`) | ⬜ not built |
 | WHERE set-ops on a traversal (`u.out(Owns).contains(x)` → `x IN …`) | ⬜ not built |
 | `select([A, B])` multi-table roots | ⬜ not built |
