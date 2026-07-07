@@ -112,7 +112,10 @@ describe.skipIf(!URL)("singleton live", () => {
 
     // create/get/update sugar, no id anywhere.
     const db = connect(c);
-    const created = await db.create(Config).content({ motd: "hello" });
+    const created = (await db
+      .create(Config)
+      .content({ motd: "hello" })
+      .only())!;
     expect(String(created.id)).toBe("sg_config:default");
     expect(created.maintenance).toBe(false); // DB default
     const got = await db.get(Config);

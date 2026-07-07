@@ -226,7 +226,7 @@ interface State {
 }
 
 /** The result shape of a run: an array, or (in `.one()`/`.only()` single mode) a row-or-`undefined`. */
-type Out<Res, Single extends boolean> = Single extends true
+export type Out<Res, Single extends boolean> = Single extends true
   ? Res | undefined
   : Res[];
 

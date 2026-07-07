@@ -166,7 +166,10 @@ describe.skipIf(!URL)("orm client (P2 writes)", () => {
     const db = connect(c);
 
     // CREATE: validated via User.create, returns the decoded created row.
-    const ada = await db.create(User).content({ name: "cara", age: 30 });
+    const ada = (await db
+      .create(User)
+      .content({ name: "cara", age: 30 })
+      .only())!;
     expect(String(ada.id.table.name)).toBe("orm_user");
     expect(ada.name).toBe("cara");
 
@@ -176,12 +179,15 @@ describe.skipIf(!URL)("orm client (P2 writes)", () => {
     expect(await db.get(User, "missing")).toBeUndefined();
 
     // UPDATE .merge: deep-merge patch, returns the updated row.
-    const older = await db.update(User, ada.id).merge({ age: 31 });
+    const older = (await db.update(User, ada.id).merge({ age: 31 }).only())!;
     expect(older.age).toBe(31);
     expect(older.name).toBe("cara"); // merge preserved the rest
 
     // UPDATE .set: explicit per-field assignment.
-    const renamed = await db.update(User, ada.id).set({ name: "cara l." });
+    const renamed = (await db
+      .update(User, ada.id)
+      .set({ name: "cara l." })
+      .only())!;
     expect(renamed.name).toBe("cara l.");
     expect(renamed.age).toBe(31);
 
@@ -189,11 +195,12 @@ describe.skipIf(!URL)("orm client (P2 writes)", () => {
     const picked = await db
       .update(User, ada.id)
       .merge({ age: 32 })
-      .return((u) => ({ years: u.age }));
+      .return((u) => ({ years: u.age }))
+      .only();
     expect(picked).toEqual({ years: 32 });
 
     // DELETE: nothing by default; .return("before") hands back the deleted row.
-    const gone = await db.delete(User, ada.id).return("before");
+    const gone = (await db.delete(User, ada.id).return("before").only())!;
     expect(gone.name).toBe("cara l.");
     const rows = await db.select(User).where((u) => u.name.eq("cara l."));
     expect(rows).toHaveLength(0);
@@ -205,7 +212,7 @@ describe.skipIf(!URL)("orm client (P2 writes)", () => {
     const c = await conn("orm_writes_ids");
     const db = connect(c);
     await c.query("CREATE orm_user:s1 SET name = 'sid', age = 5;");
-    const updated = await db.update(User, "s1").merge({ age: 99 });
+    const updated = (await db.update(User, "s1").merge({ age: 99 }).only())!;
     expect(updated.age).toBe(99);
     await db.delete(User, "s1");
     expect(await db.select(User)).toHaveLength(2); // the two numeric-id seeds remain
@@ -218,7 +225,10 @@ describe.skipIf(!URL)("orm client (P2 writes)", () => {
     {
       // Inner scope: the fork disposes BEFORE the parent connection closes.
       await using session = await db.forkSession();
-      const row = await session.create(User).content({ name: "sess", age: 1 });
+      const row = (await session
+        .create(User)
+        .content({ name: "sess", age: 1 })
+        .only())!;
       expect(row.name).toBe("sess");
       await session.delete(User, row.id);
     }

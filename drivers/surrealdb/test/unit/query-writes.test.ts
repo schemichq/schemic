@@ -23,27 +23,32 @@ type Equal<A, B> =
     : false;
 type Expect<T extends true> = T;
 
+// Array by default (SurrealDB-faithful): every write returns an array; `.only()` unwraps to single.
 const createQ = create(Post).content({ title: "hi" });
 type CreateRes = Awaited<ReturnType<(typeof createQ)["run"]>>;
-type _create = Expect<Equal<CreateRes, App<typeof Post>>>; // create -> the decoded created row
+type _create = Expect<Equal<CreateRes, App<typeof Post>[]>>; // create -> array of created rows
+
+const createOnlyQ = create(Post).content({ title: "hi" }).only();
+type CreateOnlyRes = Awaited<ReturnType<(typeof createOnlyQ)["run"]>>;
+type _createOnly = Expect<Equal<CreateOnlyRes, App<typeof Post> | undefined>>; // .only() -> single
 
 const noneQ = create(Post).content({ title: "hi" }).return("none");
 type NoneRes = Awaited<ReturnType<(typeof noneQ)["run"]>>;
-type _none = Expect<Equal<NoneRes, undefined>>; // RETURN NONE -> undefined
+type _none = Expect<Equal<NoneRes, undefined[]>>; // RETURN NONE -> empty array (no per-row data)
 
 const projQ = update(Post, "p1")
   .merge({ title: "yo" })
   .return((p) => ({ t: p.title }));
 type ProjRes = Awaited<ReturnType<(typeof projQ)["run"]>>;
-type _proj = Expect<Equal<ProjRes, { t: string }>>; // projection -> decoded shape
+type _proj = Expect<Equal<ProjRes, { t: string }[]>>; // projection -> array of decoded shapes
 
 const delQ = remove(Post, "p1");
 type DelRes = Awaited<ReturnType<(typeof delQ)["run"]>>;
-type _del = Expect<Equal<DelRes, undefined>>; // delete -> nothing by default
+type _del = Expect<Equal<DelRes, undefined[]>>; // delete -> nothing by default
 
 const delBeforeQ = remove(Post, "p1").return("before");
 type DelBeforeRes = Awaited<ReturnType<(typeof delBeforeQ)["run"]>>;
-type _delBefore = Expect<Equal<DelBeforeRes, App<typeof Post>>>; // -> the deleted row
+type _delBefore = Expect<Equal<DelBeforeRes, App<typeof Post>[]>>; // -> the deleted rows
 
 // The Update codec shape excludes readonly fields at the type level:
 // @ts-expect-error — createdAt is $readonly, not part of the Update patch
@@ -147,20 +152,20 @@ describe("write builders — execution mechanics", () => {
       views: 0,
       createdAt: new DateTime("2026-01-01T00:00:00Z"),
     };
-    const row = q.decodeRows([wire]) as App<typeof Post>;
+    const [row] = q.decodeRows([wire]);
     expect(row.title).toBe("hi");
     expect(row.createdAt).toBeInstanceOf(Date);
   });
 
-  test("decodeRows: RETURN NONE yields undefined; a projection decodes the picked fields", () => {
+  test("decodeRows: RETURN NONE yields an empty array; a projection decodes the picked fields", () => {
     expect(
       create(Post).content({ title: "x" }).return("none").decodeRows([]),
-    ).toBeUndefined();
+    ).toEqual([]);
 
     const q = update(Post, "p1")
       .merge({ title: "x" })
       .return((p) => ({ t: p.title }));
-    expect(q.decodeRows([{ t: "hello" }])).toEqual({ t: "hello" });
+    expect(q.decodeRows([{ t: "hello" }])).toEqual([{ t: "hello" }]);
   });
 });
 
@@ -224,6 +229,7 @@ describe.skipIf(!LIVE_URL)(".set callback live", () => {
     await c.query("CREATE post:p1 SET title = 'hi', views = 41;");
     const row = await update(Post, "p1")
       .set((p) => ({ views: p.views.plus(1) }))
+      .only()
       .run(c);
     expect(row?.views).toBe(42);
     await c.query("REMOVE TABLE IF EXISTS post;");

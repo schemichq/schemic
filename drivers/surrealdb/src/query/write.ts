@@ -27,12 +27,12 @@ import {
   FRAGMENT,
   type IdArgs,
   type Operand,
+  type Out,
   type Queryable,
   type Row,
   refCol,
   refsFor,
   splitIdArgs,
-  type TargetId,
   thingOf,
   toFragment,
 } from "./index";
@@ -65,8 +65,13 @@ const retClause = (ret: Ret): string =>
         .join(", ")}`
     : `RETURN ${ret.toUpperCase()}`;
 
-/** Shared execute/decode/thenable core of the three write builders. */
-abstract class WriteQuery<TD extends AnyTableDef, Res> {
+/** Shared execute/decode/thenable core of the three write builders. Array by default (SurrealDB-
+ *  faithful); `.only()` emits `ONLY` and re-types the result to a single row (`Single = true`). */
+abstract class WriteQuery<
+  TD extends AnyTableDef,
+  Res,
+  Single extends boolean = false,
+> {
   /** Interpolate this write into a `surql` template — it splices as `(CREATE/UPDATE/DELETE ...)`. */
   [FRAGMENT](): BoundQuery {
     return this.toQuery();
@@ -84,7 +89,14 @@ abstract class WriteQuery<TD extends AnyTableDef, Res> {
     protected readonly ret: Ret,
     protected readonly decode: boolean,
     protected readonly conn?: Queryable,
+    /** `.only()` -> emit the `ONLY` keyword + return a single row instead of an array. */
+    protected readonly onlyMode: boolean = false,
   ) {}
+
+  /** `"ONLY "` when in single mode (else `""`) — placed right after the verb. */
+  protected onlyKw(): string {
+    return this.onlyMode ? "ONLY " : "";
+  }
 
   /** The SurrealQL + named binds this builder lowers to. */
   abstract toSQL(): Lowered;
@@ -100,24 +112,32 @@ abstract class WriteQuery<TD extends AnyTableDef, Res> {
     }));
   }
 
-  /** Decode the statement's single result row per the current `RETURN` mode. */
-  decodeRows(rows: readonly unknown[]): Res {
-    if (this.ret === "none") return undefined as Res;
-    const row = rows[0];
-    if (row === undefined) return undefined as Res;
+  /** Decode the statement's result rows per the current `RETURN` mode (`Res` is the element type). */
+  decodeRows(rows: readonly unknown[]): Res[] {
+    if (this.ret === "none") return [];
     if (Array.isArray(this.ret)) {
       const fields: ProjectionField[] = this.ret.map((p) => ({
         as: p.as,
         schema: this.table.object.shape[p.col],
       }));
-      return decodeProjection(fields, [row])[0] as Res;
+      return decodeProjection(fields, rows as unknown[]) as Res[];
     }
-    if (this.ret === "diff" || !this.decode) return row as Res;
-    return this.table.decode(row) as Res;
+    if (this.ret === "diff" || !this.decode) return rows as Res[];
+    return rows.map((r) => this.table.decode(r)) as Res[];
   }
 
-  /** Execute against `conn` (or the pre-bound connection, if this builder came from a client). */
-  async run(conn?: Queryable): Promise<Res> {
+  /** INTERNAL: decode this write's value when PROJECTED inside another builder. */
+  decodeValue(raw: unknown): unknown {
+    if (this.onlyMode) {
+      if (raw === undefined || raw === null) return undefined;
+      return this.decodeRows([raw])[0];
+    }
+    return this.decodeRows((raw ?? []) as unknown[]);
+  }
+
+  /** Execute against `conn` (or the pre-bound connection, if this builder came from a client).
+   *  Array by default; a single row (or `undefined`) in `.only()` mode. */
+  async run(conn?: Queryable): Promise<Out<Res, Single>> {
     const c = conn ?? this.conn;
     if (!c)
       throw new Error(
@@ -125,12 +145,21 @@ abstract class WriteQuery<TD extends AnyTableDef, Res> {
       );
     const { sql, vars } = this.toSQL();
     const out = (await c.query(sql, vars)) as unknown[];
-    return this.decodeRows((out[0] ?? []) as unknown[]);
+    const first = out[0];
+    if (this.onlyMode) {
+      const decoded = this.decodeRows(
+        first === undefined || first === null ? [] : [first],
+      );
+      return decoded[0] as Out<Res, Single>;
+    }
+    return this.decodeRows((first ?? []) as unknown[]) as Out<Res, Single>;
   }
 
   /** PromiseLike: awaiting a **bound** builder runs it. */
-  then<TResult1 = Res, TResult2 = never>(
-    onfulfilled?: ((value: Res) => TResult1 | PromiseLike<TResult1>) | null,
+  then<TResult1 = Out<Res, Single>, TResult2 = never>(
+    onfulfilled?:
+      | ((value: Out<Res, Single>) => TResult1 | PromiseLike<TResult1>)
+      | null,
     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
   ): Promise<TResult1 | TResult2> {
     return this.run().then(onfulfilled, onrejected);
@@ -142,7 +171,8 @@ abstract class WriteQuery<TD extends AnyTableDef, Res> {
 export class CreateQuery<
   TD extends AnyTableDef,
   Res = App<TD>,
-> extends WriteQuery<TD, Res> {
+  Single extends boolean = false,
+> extends WriteQuery<TD, Res, Single> {
   constructor(
     table: TD,
     private readonly payload: Record<string, unknown> | undefined,
@@ -151,39 +181,54 @@ export class CreateQuery<
     conn?: Queryable,
     /** A fixed CREATE target — a SINGLETON table creates ITS record (`CREATE config:default`). */
     private readonly target?: RecordId,
+    only = false,
   ) {
-    super(table, ret, decode, conn);
+    super(table, ret, decode, conn, only);
   }
   protected kind(): string {
     return "create";
   }
 
+  /** Output mode — emit `CREATE ONLY …`, returning the single created row (not an array). */
+  only(): CreateQuery<TD, Res, true> {
+    return new CreateQuery<TD, Res, true>(
+      this.table,
+      this.payload,
+      this.ret,
+      this.decode,
+      this.conn,
+      this.target,
+      true,
+    );
+  }
+
   /** The row to create — validated + encoded via the table's `Create` codec (DB-filled fields
    *  optional; invalid input throws the aggregated `z.ZodError` here, not at `await`). */
-  content(data: Create<TD>): CreateQuery<TD, Res> {
-    return new CreateQuery<TD, Res>(
+  content(data: Create<TD>): CreateQuery<TD, Res, Single> {
+    return new CreateQuery<TD, Res, Single>(
       this.table,
       this.table.encode(data) as Record<string, unknown>,
       this.ret,
       this.decode,
       this.conn,
       this.target,
+      this.onlyMode,
     );
   }
 
   /** What the statement returns: `after` (default — the created row), a projection callback
    *  (`.return(r => ({ name: r.name }))`), or the surreal-native `before`/`none`/`diff`. */
-  return(mode: "none"): CreateQuery<TD, undefined>;
-  return(mode: "before" | "after"): CreateQuery<TD, App<TD>>;
-  return(mode: "diff"): CreateQuery<TD, unknown>;
+  return(mode: "none"): CreateQuery<TD, undefined, Single>;
+  return(mode: "before" | "after"): CreateQuery<TD, App<TD>, Single>;
+  return(mode: "diff"): CreateQuery<TD, unknown, Single>;
   return<P extends Record<string, FieldRefOps<unknown>>>(
     fn: (row: Row<TD>) => P,
-  ): CreateQuery<TD, Project<P>>;
+  ): CreateQuery<TD, Project<P>, Single>;
   return(
     mode:
       | WriteReturn
       | ((row: Row<TD>) => Record<string, FieldRefOps<unknown>>),
-  ): CreateQuery<TD, unknown> {
+  ): CreateQuery<TD, unknown, Single> {
     const ret = typeof mode === "function" ? this.projOf(mode) : mode;
     return new CreateQuery(
       this.table,
@@ -192,18 +237,20 @@ export class CreateQuery<
       this.decode,
       this.conn,
       this.target,
+      this.onlyMode,
     );
   }
 
   /** Skip decode — return the raw wire row. */
-  raw(): CreateQuery<TD, Wire<TD>> {
-    return new CreateQuery<TD, Wire<TD>>(
+  raw(): CreateQuery<TD, Wire<TD>, Single> {
+    return new CreateQuery<TD, Wire<TD>, Single>(
       this.table,
       this.payload,
       this.ret,
       false,
       this.conn,
       this.target,
+      this.onlyMode,
     );
   }
 
@@ -214,11 +261,11 @@ export class CreateQuery<
       );
     if (this.target)
       return {
-        sql: `CREATE $__thing CONTENT $__content ${retClause(this.ret)}`,
+        sql: `CREATE ${this.onlyKw()}$__thing CONTENT $__content ${retClause(this.ret)}`,
         vars: { __thing: this.target, __content: this.payload },
       };
     return {
-      sql: `CREATE ${escapeIdent(this.table.name)} CONTENT $__content ${retClause(this.ret)}`,
+      sql: `CREATE ${this.onlyKw()}${escapeIdent(this.table.name)} CONTENT $__content ${retClause(this.ret)}`,
       vars: { __content: this.payload },
     };
   }
@@ -249,7 +296,8 @@ function isSetExpr(v: unknown): boolean {
 export class UpdateQuery<
   TD extends AnyTableDef,
   Res = App<TD>,
-> extends WriteQuery<TD, Res> {
+  Single extends boolean = false,
+> extends WriteQuery<TD, Res, Single> {
   constructor(
     table: TD,
     private readonly target: RecordId,
@@ -260,11 +308,27 @@ export class UpdateQuery<
     conn?: Queryable,
     /** `.set` callback entries whose value is an EXPRESSION (spliced, not bound). */
     private readonly exprSet?: readonly { col: string; value: unknown }[],
+    only = false,
   ) {
-    super(table, ret, decode, conn);
+    super(table, ret, decode, conn, only);
   }
   protected kind(): string {
     return "update";
+  }
+
+  /** Output mode — emit `UPDATE ONLY …`, returning the single updated row (not an array). */
+  only(): UpdateQuery<TD, Res, true> {
+    return new UpdateQuery<TD, Res, true>(
+      this.table,
+      this.target,
+      this.mode,
+      this.payload,
+      this.ret,
+      this.decode,
+      this.conn,
+      this.exprSet,
+      true,
+    );
   }
 
   private with(
@@ -272,7 +336,7 @@ export class UpdateQuery<
     payload: Record<string, unknown>,
     exprSet?: readonly { col: string; value: unknown }[],
   ) {
-    return new UpdateQuery<TD, Res>(
+    return new UpdateQuery<TD, Res, Single>(
       this.table,
       this.target,
       mode,
@@ -281,12 +345,13 @@ export class UpdateQuery<
       this.decode,
       this.conn,
       exprSet,
+      this.onlyMode,
     );
   }
 
   /** Deep-`MERGE` a partial patch — validated + encoded via the table's `Update` codec
    *  (id/readonly excluded at the type level; nested objects merge recursively in the DB). */
-  merge(patch: Update<TD>): UpdateQuery<TD, Res> {
+  merge(patch: Update<TD>): UpdateQuery<TD, Res, Single> {
     return this.with(
       "merge",
       this.table.encodePartial(patch) as Record<string, unknown>,
@@ -294,7 +359,7 @@ export class UpdateQuery<
   }
 
   /** Replace the row (`CONTENT`) — the full row, validated via the `Create` codec. */
-  content(data: Create<TD>): UpdateQuery<TD, Res> {
+  content(data: Create<TD>): UpdateQuery<TD, Res, Single> {
     return this.with(
       "content",
       this.table.encode(data) as Record<string, unknown>,
@@ -306,9 +371,11 @@ export class UpdateQuery<
    *  CALLBACK form takes typed row expressions per field —
    *  `.set((p) => ({ views: p.views.plus(1) }))` lowers to `SET views = views + $n` — mixing
    *  freely with literal values (codec-encoded + bound) and `surql` fragments. */
-  set(patch: Update<TD>): UpdateQuery<TD, Res>;
-  set(fn: (row: Row<TD>) => SetSpec<TD>): UpdateQuery<TD, Res>;
-  set(arg: Update<TD> | ((row: Row<TD>) => SetSpec<TD>)): UpdateQuery<TD, Res> {
+  set(patch: Update<TD>): UpdateQuery<TD, Res, Single>;
+  set(fn: (row: Row<TD>) => SetSpec<TD>): UpdateQuery<TD, Res, Single>;
+  set(
+    arg: Update<TD> | ((row: Row<TD>) => SetSpec<TD>),
+  ): UpdateQuery<TD, Res, Single> {
     if (typeof arg === "function") {
       const spec = arg(refsFor(this.table)) as Record<string, unknown>;
       const literals: Record<string, unknown> = {};
@@ -331,17 +398,17 @@ export class UpdateQuery<
 
   /** What the statement returns: `after` (default — the updated row), a projection callback,
    *  or the surreal-native `before`/`none`/`diff`. */
-  return(mode: "none"): UpdateQuery<TD, undefined>;
-  return(mode: "before" | "after"): UpdateQuery<TD, App<TD>>;
-  return(mode: "diff"): UpdateQuery<TD, unknown>;
+  return(mode: "none"): UpdateQuery<TD, undefined, Single>;
+  return(mode: "before" | "after"): UpdateQuery<TD, App<TD>, Single>;
+  return(mode: "diff"): UpdateQuery<TD, unknown, Single>;
   return<P extends Record<string, FieldRefOps<unknown>>>(
     fn: (row: Row<TD>) => P,
-  ): UpdateQuery<TD, Project<P>>;
+  ): UpdateQuery<TD, Project<P>, Single>;
   return(
     mode:
       | WriteReturn
       | ((row: Row<TD>) => Record<string, FieldRefOps<unknown>>),
-  ): UpdateQuery<TD, unknown> {
+  ): UpdateQuery<TD, unknown, Single> {
     const ret = typeof mode === "function" ? this.projOf(mode) : mode;
     return new UpdateQuery(
       this.table,
@@ -352,12 +419,13 @@ export class UpdateQuery<
       this.decode,
       this.conn,
       this.exprSet,
+      this.onlyMode,
     );
   }
 
   /** Skip decode — return the raw wire row. */
-  raw(): UpdateQuery<TD, Wire<TD>> {
-    return new UpdateQuery<TD, Wire<TD>>(
+  raw(): UpdateQuery<TD, Wire<TD>, Single> {
+    return new UpdateQuery<TD, Wire<TD>, Single>(
       this.table,
       this.target,
       this.mode,
@@ -366,6 +434,7 @@ export class UpdateQuery<
       false,
       this.conn,
       this.exprSet,
+      this.onlyMode,
     );
   }
 
@@ -396,7 +465,7 @@ export class UpdateQuery<
       clause = `${this.mode.toUpperCase()} $__payload`;
     }
     return {
-      sql: `UPDATE $__thing ${clause} ${retClause(this.ret)}`,
+      sql: `UPDATE ${this.onlyKw()}$__thing ${clause} ${retClause(this.ret)}`,
       vars,
     };
   }
@@ -407,33 +476,47 @@ export class UpdateQuery<
 export class DeleteQuery<
   TD extends AnyTableDef,
   Res = undefined,
-> extends WriteQuery<TD, Res> {
+  Single extends boolean = false,
+> extends WriteQuery<TD, Res, Single> {
   constructor(
     table: TD,
     private readonly target: RecordId,
     ret: Ret = "none",
     decode = true,
     conn?: Queryable,
+    only = false,
   ) {
-    super(table, ret, decode, conn);
+    super(table, ret, decode, conn, only);
   }
   protected kind(): string {
     return "delete";
   }
 
+  /** Output mode — emit `DELETE ONLY …`, returning a single row (not an array). */
+  only(): DeleteQuery<TD, Res, true> {
+    return new DeleteQuery<TD, Res, true>(
+      this.table,
+      this.target,
+      this.ret,
+      this.decode,
+      this.conn,
+      true,
+    );
+  }
+
   /** What the statement returns: `none` (default), `before` (the deleted row), a projection
    *  callback (over the deleted row's fields), or `diff`. */
-  return(mode: "none"): DeleteQuery<TD, undefined>;
-  return(mode: "before"): DeleteQuery<TD, App<TD>>;
-  return(mode: "diff"): DeleteQuery<TD, unknown>;
+  return(mode: "none"): DeleteQuery<TD, undefined, Single>;
+  return(mode: "before"): DeleteQuery<TD, App<TD>, Single>;
+  return(mode: "diff"): DeleteQuery<TD, unknown, Single>;
   return<P extends Record<string, FieldRefOps<unknown>>>(
     fn: (row: Row<TD>) => P,
-  ): DeleteQuery<TD, Project<P>>;
+  ): DeleteQuery<TD, Project<P>, Single>;
   return(
     mode:
       | Exclude<WriteReturn, "after">
       | ((row: Row<TD>) => Record<string, FieldRefOps<unknown>>),
-  ): DeleteQuery<TD, unknown> {
+  ): DeleteQuery<TD, unknown, Single> {
     const ret = typeof mode === "function" ? this.projOf(mode) : mode;
     return new DeleteQuery(
       this.table,
@@ -441,23 +524,25 @@ export class DeleteQuery<
       ret,
       this.decode,
       this.conn,
+      this.onlyMode,
     );
   }
 
   /** Skip decode — return the raw wire row. */
-  raw(): DeleteQuery<TD, Wire<TD>> {
-    return new DeleteQuery<TD, Wire<TD>>(
+  raw(): DeleteQuery<TD, Wire<TD>, Single> {
+    return new DeleteQuery<TD, Wire<TD>, Single>(
       this.table,
       this.target,
       this.ret,
       false,
       this.conn,
+      this.onlyMode,
     );
   }
 
   toSQL(): Lowered {
     return {
-      sql: `DELETE $__thing ${retClause(this.ret)}`,
+      sql: `DELETE ${this.onlyKw()}$__thing ${retClause(this.ret)}`,
       vars: { __thing: this.target },
     };
   }
