@@ -3,6 +3,31 @@
 Status: **RATIFIED** (design signed off by Manuel). Grounded in the empirical grammar map at
 `docs/graph-syntax-map.md` (every form live-probed against surreal 3.1.4).
 
+## Implementation status (what's built vs pending)
+
+Everything below is on branch `feat/surrealdb-graph-traversal`. The two showcase files in
+`docs/examples/` only exercise SHIPPED rows.
+
+| Feature | Status |
+|---|---|
+| `RelationDef` endpoint-type capture (foundation) | ✅ shipped |
+| `.out` / `.in` / `.both` + chaining | ✅ shipped |
+| Polymorphic union target emission `->edge->(a, b)` | ✅ shipped |
+| Target narrowing `.out(E, Target)` / subset | ✅ shipped |
+| `.return` projection (flat / destructure / alias / computed / nested) | ✅ shipped |
+| `.all()` (`.*`) | ✅ shipped |
+| Composition (traversals + columns + subqueries in one `.return`) | ✅ shipped |
+| Edge steps `.outEdges`/`.inEdges`/`.bothEdges` + `.node()` bridge | ⬜ not built |
+| Edge fields (`contains.amount`) + edge filters (`->(E WHERE …)->`) | ⬜ not built |
+| Target filter `.out(E).where(n => …)` (`->E->(node WHERE …)`) | ⬜ not built |
+| WHERE set-ops on a traversal (`u.out(Owns).contains(x)` → `x IN …`) | ⬜ not built |
+| `select([A, B])` multi-table roots | ⬜ not built |
+| `.match(Member, …)` member primitive (union `.where`/`.return`) | ⬜ not built |
+| Recursion `.repeat("1..3", t => …)` (+collect/+path/+shortest) | ⬜ phase 2 |
+| RELATE writes | ⬜ fast-follow |
+
+Until `.match` ships, projecting a polymorphic/unconstrained target **throws** ("narrow first").
+
 ## Thesis
 
 Graph traversal is the marquee query-builder feature. The design principle: **the traversal is
