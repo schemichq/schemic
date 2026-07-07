@@ -8,7 +8,7 @@
 // Empirical grammar backing every form: `docs/graph-syntax-map.md`.
 
 import type { FieldRefBase } from "@schemic/core/query";
-import { BoundQuery, escapeIdent } from "surrealdb";
+import { BoundQuery, escapeIdent, type RecordId } from "surrealdb";
 import {
   type App,
   type Ctx,
@@ -104,11 +104,16 @@ type FlatResult<V> =
 /** The typed ref for an EDGE record — its own fields (`amount`, `since`) plus `in`/`out`/`id`. */
 export type EdgeRef<E extends AnyRelation> = Row<E>;
 
+/** A recursion depth — TYPED, no magic strings: a number for an exact depth (`.{2}`), or `{ min, max }`
+ *  for a range (`.{1..3}` / `.{..3}` / `.{2..}` / `.{..}` when both are omitted). */
+export type Depth = number | { readonly min?: number; readonly max?: number };
+
 /** `.out` / `.in` / `.both` — hop along an edge to its target NODE(s). `.outEdges` / `.inEdges` /
  *  `.bothEdges` stop AT the edge records (for edge fields / edge filters), then `.node()` continues.
- *  Without a target arg the edge's declared endpoint type flows through (a polymorphic edge yields a
- *  union); pass a `TableDef` or array to narrow (`->edge->user` / `->edge->(user, agent)`). */
-export interface GraphSteps {
+ *  `.repeat(depth, t => …)` recurses the body over a depth range. Without a target arg an edge's
+ *  declared endpoint type flows through (a polymorphic edge yields a union); pass a `TableDef` or
+ *  array to narrow (`->edge->user` / `->edge->(user, agent)`). `Cur` is the current node type. */
+export interface GraphSteps<Cur extends AnyTableDef> {
   out<E extends AnyRelation>(edge: E): NodeTraversal<OutNodes<E>>;
   out<E extends AnyRelation, T extends TargetArg>(
     edge: E,
@@ -127,6 +132,10 @@ export interface GraphSteps {
   outEdges<E extends AnyRelation>(edge: E): EdgeTraversal<E, OutNodes<E>>;
   inEdges<E extends AnyRelation>(edge: E): EdgeTraversal<E, InNodes<E>>;
   bothEdges<E extends AnyRelation>(edge: E): EdgeTraversal<E, BothNodes<E>>;
+  repeat<T extends AnyTableDef>(
+    depth: Depth,
+    body: (node: NodeRef<Cur>) => NodeTraversal<T>,
+  ): RecursionTraversal<T, TraversalIds<T>>;
 }
 
 /** True only for the `any` type — used to keep the widened `NodeRef<any>` from imposing `Row<any>`'s
@@ -140,7 +149,7 @@ export type NodeRef<TD extends AnyTableDef> =
   IsAny<TD> extends true
     ? // biome-ignore lint/suspicious/noExplicitAny: widened row is fully permissive by design.
       any
-    : Row<TD> & GraphSteps;
+    : Row<TD> & GraphSteps<TD>;
 
 // --- multi-table (union) roots: `select([A, B])` ---------------------------------------------------
 
@@ -362,7 +371,7 @@ export class NodeTraversal<Cur extends AnyTableDef, Res = TraversalIds<Cur>> {
   /** Filter the target node (`->E->(node WHERE …)`); successive calls AND together. */
   where(fn: (node: NodeRef<Cur>) => Predicate): NodeTraversal<Cur, Res> {
     const target = this.soleTarget("where");
-    const nodeRef = attachGraphSteps(refsFor(target)) as NodeRef<Cur>;
+    const nodeRef = attachGraphSteps(refsFor(target), target) as NodeRef<Cur>;
     const pred = toExpr(fn(nodeRef));
     const combined = this.filter ? and(this.filter, pred) : pred;
     return new NodeTraversal(
@@ -384,7 +393,7 @@ export class NodeTraversal<Cur extends AnyTableDef, Res = TraversalIds<Cur>> {
   ): NodeTraversal<Cur, FlatResult<V>>;
   return(fn: (node: NodeRef<Cur>) => unknown): NodeTraversal<Cur, unknown> {
     const target = this.soleTarget("project");
-    const nodeRef = attachGraphSteps(refsFor(target)) as NodeRef<Cur>;
+    const nodeRef = attachGraphSteps(refsFor(target), target) as NodeRef<Cur>;
     const shape = fn(nodeRef);
     return new NodeTraversal(
       this.head,
@@ -417,6 +426,23 @@ export class NodeTraversal<Cur extends AnyTableDef, Res = TraversalIds<Cur>> {
   /** WHERE set-op — do the traversed nodes include all of these? `(->…->node) CONTAINSALL [ … ]`. */
   containsAll(values: Operand<NodeId<Cur>[]>): Expr {
     return fragCmp(this, "CONTAINSALL", values);
+  }
+
+  /** Recurse a body over a depth — `@.{1..3}(->pairs_with->product)`. The body is built from a fresh
+   *  node ref and must be node-terminal (yields record ids). Depth is TYPED (a number or `{min,max}`);
+   *  chain `.collect()` / `.paths()` / `.shortest(target)` for the recursion instructions. */
+  repeat<T extends AnyTableDef>(
+    depth: Depth,
+    body: (node: NodeRef<Cur>) => NodeTraversal<T>,
+  ): RecursionTraversal<T, TraversalIds<T>> {
+    const target = this.soleTarget("repeat");
+    const bodyTrav = body(
+      attachGraphSteps(refsFor(target), target) as NodeRef<Cur>,
+    );
+    const base: (ctx: Ctx) => string = this.isRoot
+      ? () => "@"
+      : (ctx) => this.nodePath(ctx);
+    return new RecursionTraversal(base, depth, bodyTrav, undefined);
   }
 
   /** The single target def — `.where`/`.return`/`.all` need exactly one (narrow a polymorphic edge). */
@@ -590,6 +616,80 @@ export class EdgeTraversal<
   }
 }
 
+/** Render a typed {@link Depth} to the SurQL range inside `.{ … }`. */
+function depthStr(d: Depth): string {
+  if (typeof d === "number") return String(d);
+  const { min, max } = d;
+  if (min !== undefined && max !== undefined) return `${min}..${max}`;
+  if (min !== undefined) return `${min}..`;
+  if (max !== undefined) return `..${max}`;
+  return "..";
+}
+
+type RecursionMod = "collect" | "path" | { readonly shortest: RecordId };
+
+/**
+ * A recursive traversal — `@.{depth}(body)` (or `<path>.{depth}(body)` mid-chain). Bare it yields the
+ * reached nodes' ids; `.collect()` gathers every visited node, `.paths()` returns the paths, and
+ * `.shortest(target)` the shortest path to a record. A `FRAGMENT`, projectable like NodeTraversal.
+ */
+export class RecursionTraversal<Target extends AnyTableDef, Res> {
+  declare readonly _t: Target;
+  declare readonly _res: Res;
+  constructor(
+    private readonly base: (ctx: Ctx) => string,
+    private readonly depth: Depth,
+    private readonly body: NodeTraversal<Target>,
+    private readonly mod: RecursionMod | undefined,
+  ) {}
+
+  /** Gather every visited node, not just the endpoints (`.{…+collect}`). */
+  collect(): RecursionTraversal<Target, TraversalIds<Target>> {
+    return new RecursionTraversal(this.base, this.depth, this.body, "collect");
+  }
+  /** Return the paths themselves (`.{…+path}`) — an array of node-id paths. */
+  paths(): RecursionTraversal<Target, TraversalIds<Target>[]> {
+    return new RecursionTraversal(this.base, this.depth, this.body, "path");
+  }
+  /** The shortest path to a target record (`.{…+shortest=$t}`) — the target binds as a param. */
+  shortest(target: RecordId): RecursionTraversal<Target, TraversalIds<Target>> {
+    return new RecursionTraversal(this.base, this.depth, this.body, {
+      shortest: target,
+    });
+  }
+
+  /** The instruction suffix inside the braces, binding a `+shortest` target if present. */
+  private instr(ctx: Ctx): string {
+    if (this.mod === "collect") return "+collect";
+    if (this.mod === "path") return "+path";
+    if (this.mod) {
+      const name = `b${Object.keys(ctx.vars).length}`;
+      ctx.vars[name] = this.mod.shortest;
+      return `+shortest=$${name}`;
+    }
+    return "";
+  }
+
+  [FRAGMENT](): BoundQuery {
+    const ctx: Ctx = { vars: {} };
+    const bodyText = this.body.renderPath(ctx);
+    const text = `${this.base(ctx)}.{${depthStr(this.depth)}${this.instr(ctx)}}(${bodyText})`;
+    return new BoundQuery(text, ctx.vars);
+  }
+
+  /** Projection decode — passthrough. */
+  decode(raw: unknown): unknown {
+    return raw;
+  }
+}
+
+/** Is this value a recursion traversal? */
+export function isRecursion(
+  v: unknown,
+): v is RecursionTraversal<AnyTableDef, unknown> {
+  return v instanceof RecursionTraversal;
+}
+
 /** Is this value a NODE traversal? (projection/where dispatch). */
 export function isTraversal(v: unknown): v is NodeTraversal<AnyTableDef> {
   return v instanceof NodeTraversal;
@@ -618,7 +718,7 @@ export function makeUnionRef(
   const refs: Record<string, unknown> = {};
   for (const t of tables) Object.assign(refs, refsFor(t, token));
   const match = (member: AnyTableDef, fn: (m: unknown) => unknown): unknown => {
-    const shape = fn(attachGraphSteps(refsFor(member, token)));
+    const shape = fn(attachGraphSteps(refsFor(member, token), member));
     return isExpr(shape) || shape instanceof BoundQuery
       ? and(tbGuard(member.name), toExpr(shape as Predicate))
       : shape;
@@ -627,14 +727,16 @@ export function makeUnionRef(
   return Object.assign(refs, { match }) as UnionRef<any>;
 }
 
-/** Augment a table's row refs with the graph steps, anchored at the row (empty path prefix). */
+/** Augment a table's row refs with the graph steps, anchored at the row. The anchor knows its own
+ *  `table` (so `.repeat` can build a fresh body ref) but renders an empty path prefix. */
 export function attachGraphSteps<TD extends AnyTableDef>(
   row: Row<TD>,
+  table: TD,
 ): NodeRef<TD> {
   const anchor = new NodeTraversal<TD>(
     () => "",
-    [],
-    [],
+    [table.name],
+    [table],
     undefined,
     undefined,
     true,
@@ -646,5 +748,6 @@ export function attachGraphSteps<TD extends AnyTableDef>(
     outEdges: anchor.outEdges.bind(anchor),
     inEdges: anchor.inEdges.bind(anchor),
     bothEdges: anchor.bothEdges.bind(anchor),
+    repeat: anchor.repeat.bind(anchor),
   }) as NodeRef<TD>;
 }

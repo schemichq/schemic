@@ -475,3 +475,91 @@ describe("graph traversal — select([A, B]) union roots + .match", () => {
     expect(true).toBe(true);
   });
 });
+
+describe("graph traversal — recursion (.repeat, typed depth)", () => {
+  const PairsWith = defineRelation("g_pairs").from(Product).to(Product);
+
+  test("range depth {min, max} -> .{min..max}", () => {
+    expect(
+      sqlOf(
+        select(Product).return((p) => ({
+          net: p.repeat({ min: 1, max: 3 }, (t) => t.out(PairsWith)),
+        })),
+      ),
+    ).toBe("SELECT @.{1..3}(->g_pairs->g_product) AS net FROM g_product");
+  });
+
+  test("exact depth (number) -> .{N}", () => {
+    expect(
+      sqlOf(
+        select(Product).return((p) => ({
+          net: p.repeat(2, (t) => t.out(PairsWith)),
+        })),
+      ),
+    ).toBe("SELECT @.{2}(->g_pairs->g_product) AS net FROM g_product");
+  });
+
+  test("open-ended depths: {max} -> ..N, {min} -> N.., {} -> ..", () => {
+    expect(
+      sqlOf(
+        select(Product).return((p) => ({
+          n: p.repeat({ max: 3 }, (t) => t.out(PairsWith)),
+        })),
+      ),
+    ).toContain("@.{..3}(");
+    expect(
+      sqlOf(
+        select(Product).return((p) => ({
+          n: p.repeat({ min: 2 }, (t) => t.out(PairsWith)),
+        })),
+      ),
+    ).toContain("@.{2..}(");
+    expect(
+      sqlOf(
+        select(Product).return((p) => ({
+          n: p.repeat({}, (t) => t.out(PairsWith)),
+        })),
+      ),
+    ).toContain("@.{..}(");
+  });
+
+  test(".collect() / .paths() instructions", () => {
+    expect(
+      sqlOf(
+        select(Product).return((p) => ({
+          n: p.repeat({}, (t) => t.out(PairsWith)).collect(),
+        })),
+      ),
+    ).toContain("@.{..+collect}(->g_pairs->g_product)");
+    expect(
+      sqlOf(
+        select(Product).return((p) => ({
+          n: p.repeat({}, (t) => t.out(PairsWith)).paths(),
+        })),
+      ),
+    ).toContain("@.{..+path}(->g_pairs->g_product)");
+  });
+
+  test(".shortest(target) binds the target as a param", () => {
+    const target = new RecordId("g_product", "c");
+    const q = select(Product).return((p) => ({
+      n: p.repeat({}, (t) => t.out(PairsWith)).shortest(target),
+    }));
+    const { sql, vars } = q.toSQL();
+    expect(sql).toContain("@.{..+shortest=$b0}(->g_pairs->g_product)");
+    expect(Object.values(vars)).toContain(target);
+  });
+
+  test("types: recursion result infers the body's target ids; .paths() nests", () => {
+    const q = select(Product).return((p) => ({
+      reachable: p.repeat({ max: 3 }, (t) => t.out(PairsWith)),
+      paths: p.repeat({ max: 3 }, (t) => t.out(PairsWith)).paths(),
+    }));
+    type Res = Awaited<ReturnType<typeof q.run>>[number];
+    const _reachable: Res["reachable"] = [] as RecordId<"g_product">[];
+    const _paths: Res["paths"] = [] as RecordId<"g_product">[][];
+    void _reachable;
+    void _paths;
+    expect(true).toBe(true);
+  });
+});

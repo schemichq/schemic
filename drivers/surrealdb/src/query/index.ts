@@ -28,9 +28,11 @@ import {
   attachGraphSteps,
   type EdgeTraversal,
   isEdgeTraversal,
+  isRecursion,
   isTraversal,
   makeUnionRef,
   type NodeTraversal,
+  type RecursionTraversal,
   type RowFor,
 } from "./graph";
 import {
@@ -120,6 +122,8 @@ export type ProjectionValue =
   | NodeTraversal<any>
   // biome-ignore lint/suspicious/noExplicitAny: any edge can be traversed / projected.
   | EdgeTraversal<any, any, any>
+  // biome-ignore lint/suspicious/noExplicitAny: any recursion result can be projected.
+  | RecursionTraversal<any, any>
   | BoundQuery;
 
 /** The decoded result type of a projection shape: refs decode to their app value, a nested
@@ -139,11 +143,14 @@ type ProjectedValue<E> = E extends CountQuery
         : // biome-ignore lint/suspicious/noExplicitAny: matching any edge traversal + its result.
           E extends EdgeTraversal<any, any, infer R>
           ? R
-          : E extends BoundQuery<[infer T]>
-            ? T
-            : E extends FieldRefBase<infer T>
+          : // biome-ignore lint/suspicious/noExplicitAny: matching any recursion + its result.
+            E extends RecursionTraversal<any, infer R>
+            ? R
+            : E extends BoundQuery<[infer T]>
               ? T
-              : unknown;
+              : E extends FieldRefBase<infer T>
+                ? T
+                : unknown;
 
 /** One lowered projection entry: a plain column (schema-decoded) or a rendered expression /
  *  subquery (custom or identity decode). */
@@ -170,7 +177,7 @@ function projEntry(as: string, v: unknown): ProjEntry {
       render: (ctx) => mergeRaw(v.toQuery(), ctx.vars),
       decode: (raw) => v.decodeValue(raw),
     };
-  if (isTraversal(v) || isEdgeTraversal(v))
+  if (isTraversal(v) || isEdgeTraversal(v) || isRecursion(v))
     return {
       kind: "expr",
       as,
@@ -237,7 +244,7 @@ class Select<TD extends AnyTableDef, Res> {
       ? (table as readonly AnyTableDef[])
       : [table as AnyTableDef];
     this.row = (this.tables.length === 1
-      ? attachGraphSteps(refsFor(this.tables[0], this.token))
+      ? attachGraphSteps(refsFor(this.tables[0], this.token), this.tables[0])
       : makeUnionRef([...this.tables], this.token)) as unknown as Row<TD>;
   }
 
