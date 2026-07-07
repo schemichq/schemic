@@ -29,7 +29,7 @@ import {
   type Predicate,
   toExpr,
 } from "./expr";
-import { CountQuery, Select, type SelectOne } from "./index";
+import { CountQuery, Select } from "./index";
 import {
   type Ctx,
   FRAGMENT,
@@ -73,12 +73,12 @@ interface ToQuery {
 export type ValueOf<X> = X extends Expr
   ? boolean
   : X extends CountQuery
-  ? number
-  : X extends SelectOne<infer R>
-    ? R | undefined
-    : // biome-ignore lint/suspicious/noExplicitAny: matching any table's builder.
-      X extends Select<any, infer R>
-      ? R[]
+    ? number
+    : // biome-ignore lint/suspicious/noExplicitAny: matching any table's builder + its output mode.
+      X extends Select<any, infer R, infer S extends boolean>
+      ? S extends true
+        ? R | undefined
+        : R[]
       : // biome-ignore lint/suspicious/noExplicitAny: matching any block.
         X extends Block<any, infer R>
         ? R
@@ -151,9 +151,7 @@ const VAR_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
  *  expression (`RETURN $res.id != NONE`); everything else goes through operand lowering.
  *  Redundant whole-wrap parens are stripped (canonical printer parity). */
 function valueText(v: unknown, ctx: Ctx): string {
-  return stripOuterParens(
-    isExpr(v) ? lowerExpr(v, ctx) : operandText(v, ctx),
-  );
+  return stripOuterParens(isExpr(v) ? lowerExpr(v, ctx) : operandText(v, ctx));
 }
 
 export class Block<V extends Record<string, unknown>, R> {
@@ -237,10 +235,11 @@ export class Block<V extends Record<string, unknown>, R> {
     for (const [name, v] of entries) {
       Block.checkName("let", name);
       const { kind, elem } = kindOfValue(v);
-      out = out.next(
-        (ctx) => `LET $${name} = ${valueText(v, ctx)}`,
-        { name, kind, elem },
-      );
+      out = out.next((ctx) => `LET $${name} = ${valueText(v, ctx)}`, {
+        name,
+        kind,
+        elem,
+      });
     }
     return out as Block<V & { [K in keyof O]: ValueOf<O[K]> }, R>;
   }

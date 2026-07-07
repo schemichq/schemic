@@ -25,9 +25,7 @@ describe("call args — refs and builders", () => {
     const b = block()
       .let({ code: surql`rand::string(6)`.as<string>() })
       .do((sv) => Stamp.call({ who: surql.$.after.email, code: sv.code }));
-    expect(b.toQuery().query).toContain(
-      "fn::cra_stamp($after.email, $code)",
-    );
+    expect(b.toQuery().query).toContain("fn::cra_stamp($after.email, $code)");
   });
 
   test("a builder as an arg splices parenthesized with its binds", () => {
@@ -38,7 +36,7 @@ describe("call args — refs and builders", () => {
       code: "y",
     });
     expect(q.query).toMatch(
-      /^fn::cra_stamp\(\(\(SELECT \* FROM cra_audit WHERE code = \$sub__\d+_b0 LIMIT 1\)\[0\]\), \$call__\d+_code\)$/,
+      /^fn::cra_stamp\(\(\(SELECT \* FROM ONLY cra_audit WHERE code = \$sub__\d+_b0 LIMIT 1\)\), \$call__\d+_code\)$/,
     );
     expect(Object.values(q.bindings)).toEqual(
       expect.arrayContaining(["x", "y"]),
@@ -89,9 +87,9 @@ describe.skipIf(!URL)("call-ref-args live", () => {
     await c.query(emitTable(UserV, { exists: "overwrite" }));
 
     await c.query("CREATE cra_user:1 SET email = 'a@x.dev';");
-    const [rows] = (await c.query(
-      "SELECT who, code FROM cra_audit",
-    )) as [{ who: string; code: string }[]];
+    const [rows] = (await c.query("SELECT who, code FROM cra_audit")) as [
+      { who: string; code: string }[],
+    ];
     expect(rows).toHaveLength(1);
     expect(rows[0]?.who).toBe("a@x.dev");
     expect(rows[0]?.code).toMatch(/^[A-Z0-9]{6}$/i);

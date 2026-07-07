@@ -50,7 +50,7 @@ describe("authoring + DDL", () => {
 describe("query sugar — the id argument is optional (and only for singletons)", () => {
   test("get(Config) targets the fixed record", () => {
     const { sql, vars } = get(Config).toSQL();
-    expect(sql).toBe("SELECT * FROM $__thing LIMIT 1");
+    expect(sql).toBe("SELECT * FROM ONLY $__thing LIMIT 1");
     expect(String(vars.__thing)).toBe("sg_config:default");
   });
 
@@ -136,7 +136,9 @@ describe.skipIf(!URL)("singleton live", () => {
     const { renderSchemaToTS } = await import("../../src/cli/pull.ts");
     const { introspectStructured } = await import("../../src/cli/structure");
     const { normalizeDb } = await import("../../src/cli/struct");
-    const rendered = renderSchemaToTS(normalizeDb(await introspectStructured(c)));
+    const rendered = renderSchemaToTS(
+      normalizeDb(await introspectStructured(c)),
+    );
     expect(rendered).toContain('defineSingleton("sg_config", {');
     expect(rendered).not.toContain("id: s.string()");
 

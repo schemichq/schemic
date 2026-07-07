@@ -114,9 +114,7 @@ export function splitIdArgs(
 export type ProjectionValue =
   | FieldRefBase<unknown>
   // biome-ignore lint/suspicious/noExplicitAny: any table's builder can be projected.
-  | Select<any, any>
-  // biome-ignore lint/suspicious/noExplicitAny: any row shape.
-  | SelectOne<any>
+  | Select<any, any, any>
   | CountQuery
   // biome-ignore lint/suspicious/noExplicitAny: any node union can be traversed to.
   | NodeTraversal<any>
@@ -132,25 +130,23 @@ export type ProjectionValue =
 export type Projected<P> = { [K in keyof P]: ProjectedValue<P[K]> };
 type ProjectedValue<E> = E extends CountQuery
   ? number
-  : E extends SelectOne<infer R>
-    ? R | undefined
-    : // biome-ignore lint/suspicious/noExplicitAny: matching any table's builder.
-      E extends Select<any, infer R>
-      ? R[]
-      : // biome-ignore lint/suspicious/noExplicitAny: matching any node union + its result.
-        E extends NodeTraversal<infer _C extends TableDef<string, any>, infer R>
+  : // biome-ignore lint/suspicious/noExplicitAny: matching any table's builder + its output mode.
+    E extends Select<any, infer R, infer S extends boolean>
+    ? Out<R, S>
+    : // biome-ignore lint/suspicious/noExplicitAny: matching any node union + its result.
+      E extends NodeTraversal<infer _C extends TableDef<string, any>, infer R>
+      ? R
+      : // biome-ignore lint/suspicious/noExplicitAny: matching any edge traversal + its result.
+        E extends EdgeTraversal<any, any, infer R>
         ? R
-        : // biome-ignore lint/suspicious/noExplicitAny: matching any edge traversal + its result.
-          E extends EdgeTraversal<any, any, infer R>
+        : // biome-ignore lint/suspicious/noExplicitAny: matching any recursion + its result.
+          E extends RecursionTraversal<any, infer R>
           ? R
-          : // biome-ignore lint/suspicious/noExplicitAny: matching any recursion + its result.
-            E extends RecursionTraversal<any, infer R>
-            ? R
-            : E extends BoundQuery<[infer T]>
+          : E extends BoundQuery<[infer T]>
+            ? T
+            : E extends FieldRefBase<infer T>
               ? T
-              : E extends FieldRefBase<infer T>
-                ? T
-                : unknown;
+              : unknown;
 
 /** One lowered projection entry: a plain column (schema-decoded) or a rendered expression /
  *  subquery (custom or identity decode). */
@@ -170,7 +166,7 @@ function projEntry(as: string, v: unknown): ProjEntry {
       return { kind: "col", as, col: rs.root.col };
     return { kind: "expr", as, render: (ctx) => renderRef(rs, ctx) };
   }
-  if (v instanceof Select || v instanceof SelectOne || v instanceof CountQuery)
+  if (v instanceof Select || v instanceof CountQuery)
     return {
       kind: "expr",
       as,
@@ -219,14 +215,22 @@ interface State {
   start?: number;
   proj?: ProjEntry[]; // projection (undefined => SELECT *)
   decode: boolean;
-  /** A single-record target (`get(T, id)`) — `FROM $__thing` instead of the table. */
+  /** The `ONLY` output mode: `"one"` = `FROM ONLY … LIMIT 1` (lenient, first-or-NONE); `"only"` =
+   *  `FROM ONLY …` (strict — the DB errors unless exactly one). Absent => array (the faithful default). */
+  only?: "one" | "only";
+  /** A single-record target (`select(T, id)`) — `FROM $__thing` instead of the table. */
   target?: RecordId;
   /** A pre-bound connection (set by the ORM client) — makes the builder awaitable (`then`) and lets
    *  `.run()` be called with no argument. Absent for the standalone `select(table).run(conn)` path. */
   conn?: Queryable;
 }
 
-class Select<TD extends AnyTableDef, Res> {
+/** The result shape of a run: an array, or (in `.one()`/`.only()` single mode) a row-or-`undefined`. */
+type Out<Res, Single extends boolean> = Single extends true
+  ? Res | undefined
+  : Res[];
+
+class Select<TD extends AnyTableDef, Res, Single extends boolean = false> {
   /** The source table(s) — one for `select(T)`, several for a `select([A, B])` union root. */
   private readonly tables: readonly AnyTableDef[];
   // Typed `Row<TD>` so `Select<any, any>`'s structural identity is unchanged (the graph steps / union
@@ -248,8 +252,10 @@ class Select<TD extends AnyTableDef, Res> {
       : makeUnionRef([...this.tables], this.token)) as unknown as Row<TD>;
   }
 
-  private next<R>(patch: Partial<State>): Select<TD, R> {
-    return new Select<TD, R>(
+  private next<R, S extends boolean = Single>(
+    patch: Partial<State>,
+  ): Select<TD, R, S> {
+    return new Select<TD, R, S>(
       this.tables as unknown as TD,
       { ...this.state, ...patch },
       this.token,
@@ -276,25 +282,25 @@ class Select<TD extends AnyTableDef, Res> {
     return undefined;
   }
 
-  where(fn: (row: RowFor<TD>) => Predicate): Select<TD, Res> {
+  where(fn: (row: RowFor<TD>) => Predicate): Select<TD, Res, Single> {
     return this.next<Res>({ where: toExpr(fn(this.row as RowFor<TD>)) });
   }
 
   orderBy(
     fn: (row: RowFor<TD>) => FieldRefOps<unknown>,
     dir: "asc" | "desc" = "asc",
-  ): Select<TD, Res> {
+  ): Select<TD, Res, Single> {
     return this.next<Res>({
       order: { col: refCol(fn(this.row as RowFor<TD>)), dir },
     });
   }
 
-  limit(n: number): Select<TD, Res> {
+  limit(n: number): Select<TD, Res, Single> {
     return this.next<Res>({ limit: n });
   }
 
   /** Skip the first `n` matching rows (`START n`) — pair with `limit` for pagination. */
-  start(n: number): Select<TD, Res> {
+  start(n: number): Select<TD, Res, Single> {
     return this.next<Res>({ start: n });
   }
 
@@ -304,20 +310,25 @@ class Select<TD extends AnyTableDef, Res> {
    *  `select(User).return((u) => ({ posts: select(Post).where((p) => p.author.eq(u.id)) }))`. */
   return<P extends Record<string, ProjectionValue>>(
     fn: (row: RowFor<TD>) => P,
-  ): Select<TD, Projected<P>> {
+  ): Select<TD, Projected<P>, Single> {
     const shape = fn(this.row as RowFor<TD>);
     const proj = Object.entries(shape).map(([as, v]) => projEntry(as, v));
     return this.next<Projected<P>>({ proj });
   }
 
-  /** Skip decode — return raw wire rows. */
-  raw(): Select<TD, Wire<TD>> {
+  /** Output mode — skip decode, return raw wire rows. Composes with `.one()`/`.only()`. */
+  raw(): Select<TD, Wire<TD>, Single> {
     return this.next<Wire<TD>>({ decode: false });
   }
 
-  /** Take the FIRST matching row (forces `LIMIT 1`) — resolves to the row or `undefined`. */
-  one(): SelectOne<Res> {
-    return new SelectOne<Res>(this.next<Res>({ limit: 1 }));
+  /** Output mode — a single row (`FROM ONLY … LIMIT 1`): the FIRST match, `undefined` if none. */
+  one(): Select<TD, Res, true> {
+    return this.next<Res, true>({ only: "one" });
+  }
+
+  /** Output mode — the SOLE row (`FROM ONLY …`): the DB errors unless there is exactly one. */
+  only(): Select<TD, Res, true> {
+    return this.next<Res, true>({ only: "only" });
   }
 
   /** Count the matching rows (`SELECT count() … GROUP ALL`) — `where` applies; order/limit/projection
@@ -358,18 +369,21 @@ class Select<TD extends AnyTableDef, Res> {
           )
           .join(", ")
       : "*";
+    const only = s.only ? "ONLY " : "";
     let from: string;
     if (s.target) {
       vars.__thing = s.target;
-      from = "$__thing";
+      from = `${only}$__thing`;
     } else {
-      from = this.fromList();
+      from = `${only}${this.fromList()}`;
     }
     let sql = `SELECT ${cols} FROM ${from}`;
     if (s.where) sql += ` WHERE ${stripOuterParens(lowerExpr(s.where, ctx))}`;
     if (s.order)
       sql += ` ORDER BY ${escapeIdent(s.order.col)} ${s.order.dir.toUpperCase()}`;
-    if (s.limit !== undefined) sql += ` LIMIT ${Number(s.limit)}`;
+    // `.one()` (lenient ONLY) caps to a single row; an explicit `.limit()` wins.
+    const limit = s.limit ?? (s.only === "one" ? 1 : undefined);
+    if (limit !== undefined) sql += ` LIMIT ${Number(limit)}`;
     if (s.start !== undefined) sql += ` START ${Number(s.start)}`;
     return { sql, vars };
   }
@@ -399,13 +413,18 @@ class Select<TD extends AnyTableDef, Res> {
     return rows.map((r) => this.tableFor(r).decode(r)) as Res[];
   }
 
-  /** INTERNAL: decode this builder's value when PROJECTED inside another builder (its rows). */
+  /** INTERNAL: decode this builder's value when PROJECTED inside another builder. In single mode the
+   *  subquery yields one object (or NONE); otherwise its rows. */
   decodeValue(raw: unknown): unknown {
+    if (this.state.only) {
+      if (raw === undefined || raw === null) return undefined;
+      return this.decodeRows([raw])[0];
+    }
     return this.decodeRows((raw ?? []) as unknown[]);
   }
 
   /** Execute against `conn` (or the pre-bound connection, if this builder came from a client). */
-  async run(conn?: Queryable): Promise<Res[]> {
+  async run(conn?: Queryable): Promise<Out<Res, Single>> {
     const c = conn ?? this.state.conn;
     if (!c)
       throw new Error(
@@ -413,54 +432,21 @@ class Select<TD extends AnyTableDef, Res> {
       );
     const { sql, vars } = this.toSQL();
     const out = (await c.query(sql, vars)) as unknown[];
-    const rows = (out[0] ?? []) as unknown[];
-    return this.decodeRows(rows);
+    const first = out[0];
+    if (this.state.only) {
+      const decoded = this.decodeRows(
+        first === undefined || first === null ? [] : [first],
+      );
+      return decoded[0] as Out<Res, Single>;
+    }
+    return this.decodeRows((first ?? []) as unknown[]) as Out<Res, Single>;
   }
 
   /** PromiseLike: awaiting a **bound** builder runs it (drizzle-style `await db.select(User)…`). An
    *  unbound builder rejects with the same guidance as {@link Select.run}. */
-  then<TResult1 = Res[], TResult2 = never>(
-    onfulfilled?: ((value: Res[]) => TResult1 | PromiseLike<TResult1>) | null,
-    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
-  ): Promise<TResult1 | TResult2> {
-    return this.run().then(onfulfilled, onrejected);
-  }
-}
-
-/** A single-row terminal over a {@link Select} — resolves to the first row or `undefined`. */
-export class SelectOne<Res> {
-  // biome-ignore lint/suspicious/noExplicitAny: the wrapped Select's table shape is irrelevant here.
-  constructor(private readonly sel: Select<any, Res>) {}
-
-  /** Interpolates as the FIRST ROW of the `(SELECT ... LIMIT 1)` subquery. */
-  [FRAGMENT](): BoundQuery {
-    return this.toQuery();
-  }
-
-  /** This terminal as a composable fragment: `(SELECT ... LIMIT 1)[0]`. */
-  toQuery(): BoundQuery {
-    return toFragment(this.sel.toSQL(), (sql) => `(${sql})[0]`);
-  }
-
-  /** The SurrealQL + named binds the wrapped select lowers to. */
-  toSQL(): Lowered {
-    return this.sel.toSQL();
-  }
-
-  /** INTERNAL: decode this terminal's value when PROJECTED inside another builder (one row). */
-  decodeValue(raw: unknown): unknown {
-    if (raw === undefined || raw === null) return undefined;
-    return (this.sel.decodeRows([raw]) as unknown[])[0];
-  }
-
-  async run(conn?: Queryable): Promise<Res | undefined> {
-    const rows = await this.sel.run(conn);
-    return rows[0];
-  }
-
-  then<TResult1 = Res | undefined, TResult2 = never>(
+  then<TResult1 = Out<Res, Single>, TResult2 = never>(
     onfulfilled?:
-      | ((value: Res | undefined) => TResult1 | PromiseLike<TResult1>)
+      | ((value: Out<Res, Single>) => TResult1 | PromiseLike<TResult1>)
       | null,
     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
   ): Promise<TResult1 | TResult2> {
@@ -533,6 +519,14 @@ export function select<TD extends AnyTableDef>(
   table: TD,
   conn?: Queryable,
 ): Select<TD, App<TD>>;
+/** Target a single record — `select(User, id)` reads `FROM user:id` (still an array `[row]`; add
+ *  `.one()`/`.only()` for the single). Replaces the old `get`. `id` is the app-typed `RecordId` or
+ *  its plain string id part. */
+export function select<TD extends AnyTableDef>(
+  table: TD,
+  id: TargetId<TD>,
+  conn?: Queryable,
+): Select<TD, App<TD>>;
 /** Start a multi-table (union) SELECT — `select([A, B])` reads `FROM a, b`. The row is the union
  *  `App<A> | App<B>` (discriminated by its record id); the callback sees the COMMON fields plus
  *  `.match(Member, m => …)` for member-specific access. */
@@ -542,25 +536,26 @@ export function select<const TDs extends readonly AnyTableDef[]>(
 ): Select<TDs[number], App<TDs[number]>>;
 export function select(
   table: AnyTableDef | readonly AnyTableDef[],
+  // biome-ignore lint/suspicious/noExplicitAny: impl signature; callers see the typed overloads.
+  arg2?: any,
   conn?: Queryable,
   // biome-ignore lint/suspicious/noExplicitAny: impl signature; callers see the typed overloads.
-): Select<any, any> {
-  return new Select(table, { decode: true, conn });
+): Select<any, any, any> {
+  const [id, boundConn] = splitIdArgs([arg2, conn]);
+  const state: State = { decode: true, conn: boundConn };
+  if (id !== undefined && !Array.isArray(table))
+    state.target = thingOf(table as AnyTableDef, id);
+  return new Select(table, state);
 }
 
-/** Fetch ONE record by id — `get(User, id)` resolves to the decoded row or `undefined`. `id` is the
- *  app-typed `RecordId` or its plain string id part. The read half of id-chaining: `create` hands you
- *  an id, `get` fetches it back. */
+/** Sugar for `select(T, id).one()` — fetch ONE record (row-or-`undefined`), singleton-aware (the id
+ *  is optional for a `defineSingleton` table, resolving its fixed key). */
 export function get<TD extends AnyTableDef>(
   table: TD,
   ...rest: IdArgs<TD, [conn?: Queryable]>
-): SelectOne<App<TD>> {
+): Select<TD, App<TD>, true> {
   const [id, conn] = splitIdArgs(rest);
-  return new Select<TD, App<TD>>(table, {
-    decode: true,
-    conn,
-    target: thingOf(table, id),
-  }).one();
+  return select(table, thingOf(table, id) as TargetId<TD>, conn).one();
 }
 
 export { Select };

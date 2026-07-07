@@ -56,7 +56,7 @@ describe("$parent lowering", () => {
       "((SELECT count() FROM ps_post WHERE author = $parent.name GROUP ALL)[0].count OR 0) AS postCount",
     );
     expect(sql).toContain(
-      "(SELECT * FROM ps_post WHERE author = $parent.name LIMIT 1)[0] AS latest",
+      "(SELECT * FROM ONLY ps_post WHERE author = $parent.name LIMIT 1) AS latest",
     );
   });
 

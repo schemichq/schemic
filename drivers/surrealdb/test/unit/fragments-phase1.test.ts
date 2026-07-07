@@ -125,7 +125,7 @@ describe("builders interpolate as fragments", () => {
     );
     const first = select(User).one();
     expect(surql`RETURN ${first};`.query).toMatch(
-      /\(SELECT \* FROM p1_user LIMIT 1\)\[0\]/,
+      /\(SELECT \* FROM ONLY p1_user LIMIT 1\)/,
     );
   });
 

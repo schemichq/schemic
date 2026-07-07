@@ -108,10 +108,10 @@ describe("phase-1 lowering", () => {
     expect(sql).toContain("LIMIT 10 START 20");
   });
 
-  test("one() forces LIMIT 1; get() targets $__thing", () => {
+  test("one() -> FROM ONLY … LIMIT 1; get() targets ONLY $__thing", () => {
     expect(select(Post).one().toSQL().sql).toContain("LIMIT 1");
     const { sql, vars } = get(Post, "a1").toSQL();
-    expect(sql).toContain("FROM $__thing");
+    expect(sql).toContain("FROM ONLY $__thing");
     expect(sql).toContain("LIMIT 1");
     expect(vars.__thing).toBeInstanceOf(RecordId);
     expect((vars.__thing as RecordId).table.name).toBe("p1_post");
