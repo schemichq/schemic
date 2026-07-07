@@ -313,14 +313,16 @@ export class UpdateQuery<
     /** `.where(…)` filter (bulk updates; also a conditional guard on a by-id target). */
     private readonly filter?: Expr,
     only = false,
+    /** `UPDATE` or `UPSERT` — the same builder shape lowers both (see the `upsert` factory). */
+    private readonly verb: "UPDATE" | "UPSERT" = "UPDATE",
   ) {
     super(table, ret, decode, conn, only);
   }
   protected kind(): string {
-    return "update";
+    return this.verb.toLowerCase();
   }
 
-  /** Output mode — emit `UPDATE ONLY …`, returning the single updated row (not an array). */
+  /** Output mode — emit `UPDATE/UPSERT ONLY …`, returning the single row (not an array). */
   only(): UpdateQuery<TD, Res, true> {
     return new UpdateQuery<TD, Res, true>(
       this.table,
@@ -333,6 +335,7 @@ export class UpdateQuery<
       this.exprSet,
       this.filter,
       true,
+      this.verb,
     );
   }
 
@@ -350,6 +353,7 @@ export class UpdateQuery<
       this.exprSet,
       toExpr(fn(refsFor(this.table))),
       this.onlyMode,
+      this.verb,
     );
   }
 
@@ -369,6 +373,7 @@ export class UpdateQuery<
       exprSet,
       this.filter,
       this.onlyMode,
+      this.verb,
     );
   }
 
@@ -444,6 +449,7 @@ export class UpdateQuery<
       this.exprSet,
       this.filter,
       this.onlyMode,
+      this.verb,
     );
   }
 
@@ -460,13 +466,14 @@ export class UpdateQuery<
       this.exprSet,
       this.filter,
       this.onlyMode,
+      this.verb,
     );
   }
 
   toSQL(): Lowered {
     if (!this.mode || !this.payload)
       throw new Error(
-        "update() has no patch yet — call `.merge(patch)`, `.content(row)`, or `.set(patch)` before running it.",
+        `${this.kind()}() has no patch yet — call \`.merge(patch)\`, \`.content(row)\`, or \`.set(patch)\` before running it.`,
       );
     const vars: Record<string, unknown> = {};
     // BULK (no `.target`) writes to the whole table by name; a by-id target binds as `$__thing`.
@@ -496,7 +503,7 @@ export class UpdateQuery<
       ? ` WHERE ${stripOuterParens(lowerExpr(this.filter, { vars }))}`
       : "";
     return {
-      sql: `UPDATE ${this.onlyKw()}${tgt} ${clause}${where} ${retClause(this.ret)}`,
+      sql: `${this.verb} ${this.onlyKw()}${tgt} ${clause}${where} ${retClause(this.ret)}`,
       vars,
     };
   }
@@ -658,6 +665,30 @@ export function update<TD extends AnyTableDef>(
     "after",
     true,
     conn,
+  );
+}
+
+/** Start an `UPSERT` (create-or-update) — `upsert(User, id).merge({ … })` / `.content(row)` /
+ *  `.set(patch)` upserts THAT record; `upsert(User)` (no id) mints a new row like `create`; a
+ *  bulk `upsert(User).set(…).where(…)` upserts the matching rows. Same builder shape as `update`.
+ *  Returns the upserted rows (array; `.only()` for single). */
+export function upsert<TD extends AnyTableDef>(
+  table: TD,
+  ...rest: [id?: TargetId<TD>, conn?: Queryable]
+): UpdateQuery<TD, App<TD>> {
+  const [target, conn] = writeTarget(table, rest);
+  return new UpdateQuery<TD, App<TD>>(
+    table,
+    target,
+    undefined,
+    undefined,
+    "after",
+    true,
+    conn,
+    undefined,
+    undefined,
+    false,
+    "UPSERT",
   );
 }
 

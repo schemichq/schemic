@@ -8,7 +8,7 @@ import { DateTime, escapeIdent, RecordId } from "surrealdb";
 import { z } from "zod";
 import { defineTable, s, surql } from "../../src/index";
 import type { App } from "../../src/pure";
-import { create, remove, update } from "../../src/query";
+import { create, remove, update, upsert } from "../../src/query";
 
 const Post = defineTable("post", {
   title: s.string(),
@@ -167,6 +167,50 @@ describe("bulk writes — whole-table + filtered (no id)", () => {
     );
     expect(vars.__thing).toBeInstanceOf(RecordId);
     expect(vars.b2).toBe(5);
+  });
+});
+
+describe("upsert — create-or-update (same builder shape as update)", () => {
+  test("upsert(T, id) lowers to UPSERT with each patch mode", () => {
+    expect(upsert(Post, "p1").merge({ title: "x" }).toSQL().sql).toBe(
+      "UPSERT $__thing MERGE $__payload RETURN AFTER",
+    );
+    expect(upsert(Post, "p1").content({ title: "x" }).toSQL().sql).toBe(
+      "UPSERT $__thing CONTENT $__payload RETURN AFTER",
+    );
+    expect(upsert(Post, "p1").set({ title: "a", views: 2 }).toSQL().sql).toBe(
+      `UPSERT $__thing SET ${escapeIdent("title")} = $__s0, ${escapeIdent("views")} = $__s1 RETURN AFTER`,
+    );
+  });
+
+  test("upsert(T) (no id) targets the table by name — mints a new row", () => {
+    const { sql, vars } = upsert(Post)
+      .set((p) => ({ views: p.views.plus(1) }))
+      .toSQL();
+    expect(sql).toMatch(
+      new RegExp(
+        `^UPSERT ${escapeIdent("post")} SET views = views \\+ \\$r\\d+ RETURN AFTER$`,
+      ),
+    );
+    expect(vars.__thing).toBeUndefined();
+  });
+
+  test("upsert(T).where(...) filters a bulk upsert; .only() -> UPSERT ONLY", () => {
+    expect(
+      upsert(Post)
+        .set({ title: "hot" })
+        .where((p) => p.views.gt(10))
+        .toSQL().sql,
+    ).toBe(
+      `UPSERT ${escapeIdent("post")} SET ${escapeIdent("title")} = $__s0 WHERE views > $b1 RETURN AFTER`,
+    );
+    expect(upsert(Post, "p1").set({ title: "z" }).only().toSQL().sql).toBe(
+      `UPSERT ONLY $__thing SET ${escapeIdent("title")} = $__s0 RETURN AFTER`,
+    );
+  });
+
+  test("upsert() without a patch throws — the error names upsert, not update", () => {
+    expect(() => upsert(Post, "p1").toSQL()).toThrow(/upsert\(\) has no patch/);
   });
 });
 

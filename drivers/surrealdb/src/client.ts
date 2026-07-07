@@ -33,6 +33,7 @@ import {
   thingOf,
   type UpdateQuery,
   update,
+  upsert,
 } from "./query";
 
 // biome-ignore lint/suspicious/noExplicitAny: TableDef's Shape varies per call site.
@@ -188,6 +189,19 @@ export class Client implements OrmClientBase {
     );
   }
 
+  /** A connection-bound UPSERT (create-or-update) — `await db.upsert(User, id).merge({ … })`
+   *  upserts that record; `db.upsert(User)` mints a new row; `db.upsert(User).set(…).where(…)`
+   *  upserts the matching rows. Returns the upserted rows. */
+  upsert<TD extends AnyTable>(
+    table: TD,
+    ...rest: [id?: TargetId<TD>]
+  ): UpdateQuery<TD, App<TD>> {
+    return upsert(
+      table,
+      ...([rest[0], this.conn] as [TargetId<TD>?, Queryable?]),
+    );
+  }
+
   /** A connection-bound DELETE — `await db.delete(User, id)` for one record, or `db.delete(User)
    *  [.where(…)]` for a BULK whole-table / filtered delete; `.return("before")` hands back the
    *  deleted rows. */
@@ -287,6 +301,18 @@ export class Session implements OrmClientBase {
     ...rest: [id?: TargetId<TD>]
   ): UpdateQuery<TD, App<TD>> {
     return update(
+      table,
+      ...([rest[0], this.session] as [TargetId<TD>?, Queryable?]),
+    );
+  }
+
+  /** A session-bound UPSERT — one record (`upsert(User, id)`), a new row (`upsert(User)`), or a
+   *  filtered bulk upsert (`upsert(User).set(…).where(…)`). */
+  upsert<TD extends AnyTable>(
+    table: TD,
+    ...rest: [id?: TargetId<TD>]
+  ): UpdateQuery<TD, App<TD>> {
+    return upsert(
       table,
       ...([rest[0], this.session] as [TargetId<TD>?, Queryable?]),
     );
