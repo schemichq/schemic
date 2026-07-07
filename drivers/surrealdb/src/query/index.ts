@@ -3,7 +3,7 @@
  * Driver-OWNED surface: the operators + the lowering to SurrealQL live here; the cross-driver machinery
  * (projection inference + the projection decode) is reused from core.
  *
- * Scope: single-table `SELECT` — `where` (comparisons, `in`/`notIn`, `contains*`,
+ * Scope: `SELECT` over one table or a `select([A, B])` union — `where` (comparisons, `in`/`notIn`, `contains*`,
  * `startsWith`/`endsWith`, NONE checks, and/or, raw fragments), the per-kind stdlib on refs
  * (`u.name.length().gt(3)`), `orderBy`, `limit`/`start`, a `return` projection (columns, derived
  * expressions, and SUBQUERIES — an outer-row ref inside a nested builder lowers to
@@ -29,8 +29,9 @@ import {
   type EdgeTraversal,
   isEdgeTraversal,
   isTraversal,
-  type NodeRef,
+  makeUnionRef,
   type NodeTraversal,
+  type RowFor,
 } from "./graph";
 import {
   type Ctx,
@@ -219,38 +220,65 @@ interface State {
 }
 
 class Select<TD extends AnyTableDef, Res> {
-  // Typed `Row<TD>` so `Select<any, any>`'s structural identity is unchanged (the graph steps would
-  // break `Row<any>`'s string-index signature). At runtime it carries `.out/.in/.both` — callbacks
-  // see it as `NodeRef<TD>` via `nodeRow()`.
+  /** The source table(s) — one for `select(T)`, several for a `select([A, B])` union root. */
+  private readonly tables: readonly AnyTableDef[];
+  // Typed `Row<TD>` so `Select<any, any>`'s structural identity is unchanged (the graph steps / union
+  // `.match` would break `Row<any>`'s string-index signature). At runtime it carries `.out/.in/.both`
+  // (single) or `.match` (union) — callbacks see it as `RowFor<TD>` via a cast.
   private readonly row: Row<TD>;
   constructor(
-    private readonly table: TD,
+    table: TD | readonly AnyTableDef[],
     private readonly state: State,
     /** This CHAIN's row-scope token (persists across the immutable chain) — a ref lowered
      *  inside a DIFFERENT chain's builder renders as `$parent.<col>`. */
     private readonly token: symbol = Symbol("row"),
   ) {
-    this.row = attachGraphSteps(refsFor(table, this.token));
+    this.tables = Array.isArray(table)
+      ? (table as readonly AnyTableDef[])
+      : [table as AnyTableDef];
+    this.row = (this.tables.length === 1
+      ? attachGraphSteps(refsFor(this.tables[0], this.token))
+      : makeUnionRef([...this.tables], this.token)) as unknown as Row<TD>;
   }
 
   private next<R>(patch: Partial<State>): Select<TD, R> {
     return new Select<TD, R>(
-      this.table,
+      this.tables as unknown as TD,
       { ...this.state, ...patch },
       this.token,
     );
   }
 
-  where(fn: (row: NodeRef<TD>) => Predicate): Select<TD, Res> {
-    return this.next<Res>({ where: toExpr(fn(this.row as NodeRef<TD>)) });
+  /** The FROM source: one escaped name, or the union list `a, b`. */
+  private fromList(): string {
+    return this.tables.map((t) => escapeIdent(t.name)).join(", ");
+  }
+
+  /** The member table for a decoded row — the sole table, or matched by the row's id table. */
+  private tableFor(row: unknown): AnyTableDef {
+    if (this.tables.length === 1) return this.tables[0];
+    const id = (row as { id?: RecordId }).id;
+    const tb = id?.table?.name;
+    return this.tables.find((t) => t.name === tb) ?? this.tables[0];
+  }
+
+  /** The Zod schema for a projected column, found across the union's members. */
+  private colSchema(col: string): z.ZodType | undefined {
+    for (const t of this.tables)
+      if (col in t.object.shape) return t.object.shape[col] as z.ZodType;
+    return undefined;
+  }
+
+  where(fn: (row: RowFor<TD>) => Predicate): Select<TD, Res> {
+    return this.next<Res>({ where: toExpr(fn(this.row as RowFor<TD>)) });
   }
 
   orderBy(
-    fn: (row: NodeRef<TD>) => FieldRefOps<unknown>,
+    fn: (row: RowFor<TD>) => FieldRefOps<unknown>,
     dir: "asc" | "desc" = "asc",
   ): Select<TD, Res> {
     return this.next<Res>({
-      order: { col: refCol(fn(this.row as NodeRef<TD>)), dir },
+      order: { col: refCol(fn(this.row as RowFor<TD>)), dir },
     });
   }
 
@@ -268,9 +296,9 @@ class Select<TD extends AnyTableDef, Res> {
    *  `$parent.<col>` (correlated subquery):
    *  `select(User).return((u) => ({ posts: select(Post).where((p) => p.author.eq(u.id)) }))`. */
   return<P extends Record<string, ProjectionValue>>(
-    fn: (row: NodeRef<TD>) => P,
+    fn: (row: RowFor<TD>) => P,
   ): Select<TD, Projected<P>> {
-    const shape = fn(this.row as NodeRef<TD>);
+    const shape = fn(this.row as RowFor<TD>);
     const proj = Object.entries(shape).map(([as, v]) => projEntry(as, v));
     return this.next<Projected<P>>({ proj });
   }
@@ -289,7 +317,7 @@ class Select<TD extends AnyTableDef, Res> {
    *  don't. Awaitable when bound; `.run(conn)` standalone. */
   count(): CountQuery {
     return new CountQuery(
-      this.table.name,
+      this.tables.map((t) => t.name),
       this.state.where,
       this.state.conn,
       this.token,
@@ -328,7 +356,7 @@ class Select<TD extends AnyTableDef, Res> {
       vars.__thing = s.target;
       from = "$__thing";
     } else {
-      from = escapeIdent(this.table.name);
+      from = this.fromList();
     }
     let sql = `SELECT ${cols} FROM ${from}`;
     if (s.where) sql += ` WHERE ${stripOuterParens(lowerExpr(s.where, ctx))}`;
@@ -351,17 +379,17 @@ class Select<TD extends AnyTableDef, Res> {
         const rec = r as Record<string, unknown>;
         const out: Record<string, unknown> = {};
         for (const e of proj) {
-          if (e.kind === "col")
-            out[e.as] = z.decode(
-              this.table.object.shape[e.col] as z.ZodType,
-              rec[e.as] as never,
-            );
-          else out[e.as] = e.decode ? e.decode(rec[e.as]) : rec[e.as];
+          if (e.kind === "col") {
+            const schema = this.colSchema(e.col);
+            out[e.as] = schema
+              ? z.decode(schema, rec[e.as] as never)
+              : rec[e.as];
+          } else out[e.as] = e.decode ? e.decode(rec[e.as]) : rec[e.as];
         }
         return out;
       }) as Res[];
     }
-    return rows.map((r) => this.table.decode(r)) as Res[];
+    return rows.map((r) => this.tableFor(r).decode(r)) as Res[];
   }
 
   /** INTERNAL: decode this builder's value when PROJECTED inside another builder (its rows). */
@@ -435,12 +463,15 @@ export class SelectOne<Res> {
 
 /** A count terminal — `SELECT count() FROM <table> [WHERE …] GROUP ALL`, resolves to a number. */
 export class CountQuery {
+  private readonly tables: readonly string[];
   constructor(
-    private readonly table: string,
+    table: string | readonly string[],
     private readonly where: Expr | undefined,
     private readonly conn?: Queryable,
     private readonly token?: symbol,
-  ) {}
+  ) {
+    this.tables = typeof table === "string" ? [table] : table;
+  }
 
   /** Interpolates as the SCALAR count: `((SELECT count() ... GROUP ALL)[0].count OR 0)` —
    *  spelled `OR` (the canonical printer's form for `||`, so DDL round-trips stay drift-free). */
@@ -455,7 +486,8 @@ export class CountQuery {
 
   toSQL(): Lowered {
     const vars: Record<string, unknown> = {};
-    let sql = `SELECT count() FROM ${escapeIdent(this.table)}`;
+    const from = this.tables.map((t) => escapeIdent(t)).join(", ");
+    let sql = `SELECT count() FROM ${from}`;
     if (this.where)
       sql += ` WHERE ${stripOuterParens(lowerExpr(this.where, { vars, row: this.token }))}`;
     sql += " GROUP ALL";
@@ -493,8 +525,20 @@ export class CountQuery {
 export function select<TD extends AnyTableDef>(
   table: TD,
   conn?: Queryable,
-): Select<TD, App<TD>> {
-  return new Select<TD, App<TD>>(table, { decode: true, conn });
+): Select<TD, App<TD>>;
+/** Start a multi-table (union) SELECT — `select([A, B])` reads `FROM a, b`. The row is the union
+ *  `App<A> | App<B>` (discriminated by its record id); the callback sees the COMMON fields plus
+ *  `.match(Member, m => …)` for member-specific access. */
+export function select<const TDs extends readonly AnyTableDef[]>(
+  tables: TDs,
+  conn?: Queryable,
+): Select<TDs[number], App<TDs[number]>>;
+export function select(
+  table: AnyTableDef | readonly AnyTableDef[],
+  conn?: Queryable,
+  // biome-ignore lint/suspicious/noExplicitAny: impl signature; callers see the typed overloads.
+): Select<any, any> {
+  return new Select(table, { decode: true, conn });
 }
 
 /** Fetch ONE record by id — `get(User, id)` resolves to the decoded row or `undefined`. `id` is the

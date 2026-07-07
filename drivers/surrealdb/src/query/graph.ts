@@ -24,6 +24,7 @@ import {
   and,
   type Expr,
   fragCmp,
+  isExpr,
   lowerExpr,
   type Operand,
   type Predicate,
@@ -140,6 +141,38 @@ export type NodeRef<TD extends AnyTableDef> =
     ? // biome-ignore lint/suspicious/noExplicitAny: widened row is fully permissive by design.
       any
     : Row<TD> & GraphSteps;
+
+// --- multi-table (union) roots: `select([A, B])` ---------------------------------------------------
+
+/** Detect a union of table defs (a multi-table `select([A, B])` source). */
+type IsUnion<T, U = T> = T extends unknown
+  ? [U] extends [T]
+    ? false
+    : true
+  : never;
+
+/** Member-field access on a union row: `.match(Member, m => …)` unlocks that member's own fields.
+ *  In WHERE it also emits the `record::tb(id)` guard so the NONE-leak on negation can't bite; in a
+ *  projection it passes the value through (a member-only field is naturally NONE for other members). */
+export interface UnionMatch<TDs extends AnyTableDef> {
+  match<M extends TDs, V extends ProjectionValue>(
+    member: M,
+    fn: (m: NodeRef<M>) => V,
+  ): V;
+  match<M extends TDs>(member: M, fn: (m: NodeRef<M>) => Predicate): Expr;
+}
+
+/** A multi-table row: the COMMON fields (the union's shared columns) + `.match` for member access. */
+export type UnionRef<TDs extends AnyTableDef> = Row<TDs> & UnionMatch<TDs>;
+
+/** The row a callback sees: a single table → `NodeRef`; a union (`select([A, B])`) → `UnionRef`. */
+export type RowFor<TD extends AnyTableDef> =
+  IsAny<TD> extends true
+    ? // biome-ignore lint/suspicious/noExplicitAny: widened row is fully permissive by design.
+      any
+    : IsUnion<TD> extends true
+      ? UnionRef<TD>
+      : NodeRef<TD>;
 
 // --- runtime --------------------------------------------------------------------------------------
 
@@ -567,6 +600,31 @@ export function isEdgeTraversal(
   v: unknown,
 ): v is EdgeTraversal<AnyRelation, AnyTableDef> {
   return v instanceof EdgeTraversal;
+}
+
+/** `record::tb(id) = 'name'` as an Expr — the table discriminant guard for `.match` in WHERE. */
+function tbGuard(name: string): Expr {
+  return toExpr(new BoundQuery(`record::tb(id) = '${name}'`, {}));
+}
+
+/** Build a multi-table union row: the members' field refs merged (common columns coincide), plus
+ *  `.match(Member, m => …)`. `.match` runs the callback on a member ref; a returned predicate is
+ *  guarded by `record::tb(id)` and returned as an Expr, a returned value passes straight through. */
+export function makeUnionRef(
+  tables: AnyTableDef[],
+  token?: symbol,
+  // biome-ignore lint/suspicious/noExplicitAny: the runtime row is member-permissive; types gate it.
+): UnionRef<any> {
+  const refs: Record<string, unknown> = {};
+  for (const t of tables) Object.assign(refs, refsFor(t, token));
+  const match = (member: AnyTableDef, fn: (m: unknown) => unknown): unknown => {
+    const shape = fn(attachGraphSteps(refsFor(member, token)));
+    return isExpr(shape) || shape instanceof BoundQuery
+      ? and(tbGuard(member.name), toExpr(shape as Predicate))
+      : shape;
+  };
+  // biome-ignore lint/suspicious/noExplicitAny: bridged to the typed UnionRef at the call site.
+  return Object.assign(refs, { match }) as UnionRef<any>;
 }
 
 /** Augment a table's row refs with the graph steps, anchored at the row (empty path prefix). */

@@ -389,3 +389,89 @@ describe("graph traversal — WHERE set-ops (traversal as an array)", () => {
     );
   });
 });
+
+describe("graph traversal — select([A, B]) union roots + .match", () => {
+  const Person = defineTable("g_person", {
+    name: s.string(),
+    email: s.string(),
+  });
+  const Bot = defineTable("g_bot", { name: s.string(), model: s.string() });
+
+  test("bare union reads FROM a, b", () => {
+    expect(sqlOf(select([Person, Bot]))).toBe("SELECT * FROM g_person, g_bot");
+  });
+
+  test("common field projects across both", () => {
+    expect(sqlOf(select([Person, Bot]).return((r) => ({ n: r.name })))).toBe(
+      "SELECT name AS n FROM g_person, g_bot",
+    );
+  });
+
+  test(".match in WHERE guards by record::tb(id) then the member predicate", () => {
+    const q = select([Person, Bot]).where((r) =>
+      r.match(Person, (p) => p.email.eq("x")),
+    );
+    const { sql, vars } = q.toSQL();
+    expect(sql).toBe(
+      "SELECT * FROM g_person, g_bot WHERE (record::tb(id) = 'g_person') AND email = $b0",
+    );
+    expect(Object.values(vars)).toContain("x");
+  });
+
+  test("per-member .match branches compose with .or()", () => {
+    expect(
+      sqlOf(
+        select([Person, Bot]).where((r) =>
+          r
+            .match(Person, (p) => p.email.eq("x"))
+            .or(r.match(Bot, (b) => b.model.eq("gpt"))),
+        ),
+      ),
+    ).toBe(
+      "SELECT * FROM g_person, g_bot WHERE ((record::tb(id) = 'g_person') AND email = $b0) OR ((record::tb(id) = 'g_bot') AND model = $b1)",
+    );
+  });
+
+  test(".match in a projection passes the member field through", () => {
+    expect(
+      sqlOf(
+        select([Person, Bot]).return((r) => ({
+          name: r.name,
+          email: r.match(Person, (p) => p.email),
+        })),
+      ),
+    ).toBe("SELECT name, email FROM g_person, g_bot");
+  });
+
+  test("union count reads FROM a, b", () => {
+    expect(select([Person, Bot]).count().toSQL().sql).toBe(
+      "SELECT count() FROM g_person, g_bot GROUP ALL",
+    );
+  });
+
+  test("decode routes each row to its member table by record id", () => {
+    const q = select([Person, Bot]) as unknown as {
+      decodeRows(rows: unknown[]): { id: RecordId }[];
+    };
+    const decoded = q.decodeRows([
+      { id: new RecordId("g_person", "a"), name: "A", email: "a@x" },
+      { id: new RecordId("g_bot", "b"), name: "B", model: "gpt" },
+    ]);
+    expect(Object.keys(decoded[0]).sort()).toEqual(["email", "id", "name"]);
+    expect(Object.keys(decoded[1]).sort()).toEqual(["id", "model", "name"]);
+  });
+
+  test("types: bare union is App<A> | App<B>; common field access is allowed", () => {
+    const q = select([Person, Bot]);
+    type Row = Awaited<ReturnType<typeof q.run>>[number];
+    // `name` is common to both members.
+    const _name: Row["name"] = "x";
+    void _name;
+    // The projection sees the common field directly.
+    const proj = select([Person, Bot]).return((r) => ({ n: r.name }));
+    type PRow = Awaited<ReturnType<typeof proj.run>>[number];
+    const _n: PRow["n"] = "x";
+    void _n;
+    expect(true).toBe(true);
+  });
+});
