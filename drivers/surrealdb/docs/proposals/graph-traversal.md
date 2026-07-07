@@ -21,12 +21,14 @@ Everything below is on branch `feat/surrealdb-graph-traversal`. The two showcase
 | Edge fields (`->contains.amount`) + edge filters (`->(E WHERE …)->`) | ✅ shipped |
 | Target filter `.out(E).where(n => …)` (`->E->(node WHERE …)`) | ✅ shipped |
 | WHERE set-ops on a traversal (`.contains`/`.containsAny`/`.containsAll`) | ✅ shipped |
-| `select([A, B])` multi-table roots | ⬜ not built |
-| `.match(Member, …)` member primitive (union `.where`/`.return`) | ⬜ not built |
+| `select([A, B])` multi-table roots | ✅ shipped |
+| `.match(Member, …)` member primitive (union `.where`/`.return`) | ✅ shipped |
 | Recursion `.repeat("1..3", t => …)` (+collect/+path/+shortest) | ⬜ phase 2 |
 | RELATE writes | ⬜ fast-follow |
 
-Until `.match` ships, projecting a polymorphic/unconstrained target **throws** ("narrow first").
+Only **recursion** and **RELATE writes** remain. Note: projecting a polymorphic *traversal* target
+(`u.out(Knows).return(…)`) still throws "narrow first" — `.match` covers `select([…])` union rows,
+not yet polymorphic traversal targets (a follow-up can share the same machinery).
 
 ## Thesis
 
