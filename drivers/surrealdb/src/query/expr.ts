@@ -17,6 +17,7 @@ import {
   argRenderer,
   type Ctx,
   FRAGMENT,
+  fragOf,
   mergeRaw,
   operandText,
   REF_STATE,
@@ -55,6 +56,14 @@ type ExprNode =
       readonly value: unknown;
     }
   | { readonly kind: "none"; readonly lhs: RefState; readonly negated: boolean }
+  | {
+      // LHS is a fragment (a graph traversal): `(<path>) CONTAINS $bind` etc. Lowered with ctx so
+      // the traversal's own binds (edge/target filters) merge in.
+      readonly kind: "fragcmp";
+      readonly lhs: unknown;
+      readonly op: BinOp;
+      readonly value: unknown;
+    }
   | { readonly kind: "and" | "or"; readonly parts: readonly Expr[] }
   | { readonly kind: "not"; readonly part: Expr }
   | { readonly kind: "raw"; readonly q: BoundQuery };
@@ -101,6 +110,16 @@ function mkExpr(node: ExprNode): Expr {
 /** Coerce a raw `surql` fragment into an Expr leaf (an Expr passes through). */
 export function toExpr(p: Predicate): Expr {
   return p instanceof BoundQuery ? mkExpr({ kind: "raw", q: p }) : p;
+}
+
+/** Build a fragment-LHS comparison — a graph traversal used as an array in WHERE
+ *  (`(->owns->product) CONTAINS $x`). `op` is the containment spelling. */
+export function fragCmp(
+  lhs: unknown,
+  op: "CONTAINS" | "CONTAINSANY" | "CONTAINSALL",
+  value: unknown,
+): Expr {
+  return mkExpr({ kind: "fragcmp", lhs, op, value });
 }
 
 export const and = (...parts: Predicate[]): Expr =>
@@ -473,6 +492,11 @@ export function lowerExpr(e: Expr, ctx: Ctx): string {
     return `${e.fn}(${renderRef(e.lhs, ctx)}, ${operandText(e.value, ctx)})`;
   if (e.kind === "none")
     return `${renderRef(e.lhs, ctx)} ${e.negated ? "!=" : "="} NONE`;
+  if (e.kind === "fragcmp") {
+    const frag = fragOf(e.lhs);
+    const lhs = frag ? mergeRaw(frag, ctx.vars) : String(e.lhs);
+    return `(${lhs}) ${e.op} ${operandText(e.value, ctx)}`;
+  }
   if (e.kind === "raw") return `(${mergeRaw(e.q, ctx.vars)})`;
   if (e.kind === "not") return `!(${lowerExpr(e.part, ctx)})`;
   const joined = e.parts

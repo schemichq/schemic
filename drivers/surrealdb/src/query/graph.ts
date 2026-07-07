@@ -23,7 +23,9 @@ import {
 import {
   and,
   type Expr,
+  fragCmp,
   lowerExpr,
+  type Operand,
   type Predicate,
   type Row,
   refsFor,
@@ -81,6 +83,10 @@ type NarrowTo<T> = T extends readonly (infer E)[]
 /** The projected value of a BARE traversal (no `.return`): the target nodes' record ids. */
 export type TraversalIds<Cur extends AnyTableDef> =
   App<Cur> extends { id: infer I } ? I[] : unknown[];
+
+/** A single target-node record id (for the WHERE set-ops `.contains`/`.containsAny`/`.containsAll`). */
+type NodeId<Cur extends AnyTableDef> =
+  App<Cur> extends { id: infer I } ? I : unknown;
 
 /** The result of a FLAT `.return(node => value)`: a nested traversal keeps its own result; a field
  *  ref becomes an array of that field's values. */
@@ -367,6 +373,19 @@ export class NodeTraversal<Cur extends AnyTableDef, Res = TraversalIds<Cur>> {
     );
   }
 
+  /** WHERE set-op — is this record among the traversed nodes? `(->…->node) CONTAINS $x`. */
+  contains(value: Operand<NodeId<Cur>>): Expr {
+    return fragCmp(this, "CONTAINS", value);
+  }
+  /** WHERE set-op — do the traversed nodes overlap these? `(->…->node) CONTAINSANY [ … ]`. */
+  containsAny(values: Operand<NodeId<Cur>[]>): Expr {
+    return fragCmp(this, "CONTAINSANY", values);
+  }
+  /** WHERE set-op — do the traversed nodes include all of these? `(->…->node) CONTAINSALL [ … ]`. */
+  containsAll(values: Operand<NodeId<Cur>[]>): Expr {
+    return fragCmp(this, "CONTAINSALL", values);
+  }
+
   /** The single target def — `.where`/`.return`/`.all` need exactly one (narrow a polymorphic edge). */
   private soleTarget(op: string): AnyTableDef {
     if (this.targets.length === 1) return this.targets[0];
@@ -544,10 +563,9 @@ export function isTraversal(v: unknown): v is NodeTraversal<AnyTableDef> {
 }
 
 /** Is this value an EDGE traversal? */
-// biome-ignore lint/suspicious/noExplicitAny: shape-agnostic guard.
 export function isEdgeTraversal(
   v: unknown,
-): v is EdgeTraversal<any, AnyTableDef> {
+): v is EdgeTraversal<AnyRelation, AnyTableDef> {
   return v instanceof EdgeTraversal;
 }
 

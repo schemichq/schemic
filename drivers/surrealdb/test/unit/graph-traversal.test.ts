@@ -2,7 +2,7 @@
 // verified 3.1.4 grammar (docs/graph-syntax-map.md): the atomic `->edge->node`, chaining, direction,
 // polymorphic union targets `->edge->(a, b)`, narrowing `->edge->node`, unconstrained `->edge->?`.
 import { describe, expect, test } from "bun:test";
-import type { RecordId } from "surrealdb";
+import { RecordId } from "surrealdb";
 import { defineRelation, defineTable, s, surql } from "../../src/index";
 import { select } from "../../src/query";
 
@@ -333,6 +333,59 @@ describe("graph traversal — target filter (.out(E).where(node => …))", () =>
       ),
     ).toBe(
       "SELECT ->g_contains->(g_ingredient WHERE sulfate = $b0)->g_treats->g_concern AS x FROM g_product",
+    );
+  });
+});
+
+describe("graph traversal — WHERE set-ops (traversal as an array)", () => {
+  const serum = new RecordId("g_product", "serum");
+  const cream = new RecordId("g_product", "cream");
+
+  test(".contains -> (->…->node) CONTAINS x", () => {
+    const q = select(User).where((u) => u.out(Owns).contains(serum));
+    const { sql, vars } = q.toSQL();
+    expect(sql).toBe(
+      "SELECT * FROM g_user WHERE (->g_owns->g_product) CONTAINS $b0",
+    );
+    expect(Object.values(vars)).toContain(serum);
+  });
+
+  test(".containsAny -> CONTAINSANY [ … ]", () => {
+    expect(
+      sqlOf(select(User).where((u) => u.out(Owns).containsAny([serum, cream]))),
+    ).toBe("SELECT * FROM g_user WHERE (->g_owns->g_product) CONTAINSANY $b0");
+  });
+
+  test(".containsAll -> CONTAINSALL [ … ]", () => {
+    expect(
+      sqlOf(select(User).where((u) => u.out(Owns).containsAll([serum, cream]))),
+    ).toBe("SELECT * FROM g_user WHERE (->g_owns->g_product) CONTAINSALL $b0");
+  });
+
+  test("combines with other predicates via .and()", () => {
+    expect(
+      sqlOf(
+        select(User).where((u) =>
+          u.out(Owns).contains(serum).and(u.name.eq("Alice")),
+        ),
+      ),
+    ).toBe(
+      "SELECT * FROM g_user WHERE (->g_owns->g_product) CONTAINS $b0 AND name = $b1",
+    );
+  });
+
+  test("the LHS traversal's own filter binds merge with the value bind", () => {
+    expect(
+      sqlOf(
+        select(User).where((u) =>
+          u
+            .out(Owns)
+            .where((p) => p.name.eq("Serum"))
+            .contains(serum),
+        ),
+      ),
+    ).toBe(
+      "SELECT * FROM g_user WHERE (->g_owns->(g_product WHERE name = $b0)) CONTAINS $b1",
     );
   });
 });
