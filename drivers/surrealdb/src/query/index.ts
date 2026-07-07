@@ -25,6 +25,13 @@ import {
   toExpr,
 } from "./expr";
 import {
+  attachGraphSteps,
+  isTraversal,
+  type NodeRef,
+  type NodeTraversal,
+  type TraversalIds,
+} from "./graph";
+import {
   type Ctx,
   FRAGMENT,
   fragOf,
@@ -107,6 +114,8 @@ export type ProjectionValue =
   // biome-ignore lint/suspicious/noExplicitAny: any row shape.
   | SelectOne<any>
   | CountQuery
+  // biome-ignore lint/suspicious/noExplicitAny: any node union can be traversed to.
+  | NodeTraversal<any>
   | BoundQuery;
 
 /** The decoded result type of a projection shape: refs decode to their app value, a nested
@@ -120,11 +129,14 @@ type ProjectedValue<E> = E extends CountQuery
     : // biome-ignore lint/suspicious/noExplicitAny: matching any table's builder.
       E extends Select<any, infer R>
       ? R[]
-      : E extends BoundQuery<[infer T]>
-        ? T
-        : E extends FieldRefBase<infer T>
+      : // biome-ignore lint/suspicious/noExplicitAny: matching any node union.
+        E extends NodeTraversal<infer C extends TableDef<string, any>>
+        ? TraversalIds<C>
+        : E extends BoundQuery<[infer T]>
           ? T
-          : unknown;
+          : E extends FieldRefBase<infer T>
+            ? T
+            : unknown;
 
 /** One lowered projection entry: a plain column (schema-decoded) or a rendered expression /
  *  subquery (custom or identity decode). */
@@ -150,6 +162,13 @@ function projEntry(as: string, v: unknown): ProjEntry {
       as,
       render: (ctx) => mergeRaw(v.toQuery(), ctx.vars),
       decode: (raw) => v.decodeValue(raw),
+    };
+  if (isTraversal(v))
+    return {
+      kind: "expr",
+      as,
+      render: (ctx) => mergeRaw(v[FRAGMENT](), ctx.vars),
+      decode: (raw) => v.decode(raw),
     };
   const frag = fragOf(v);
   if (frag)
@@ -194,6 +213,9 @@ interface State {
 }
 
 class Select<TD extends AnyTableDef, Res> {
+  // Typed `Row<TD>` so `Select<any, any>`'s structural identity is unchanged (the graph steps would
+  // break `Row<any>`'s string-index signature). At runtime it carries `.out/.in/.both` — callbacks
+  // see it as `NodeRef<TD>` via `nodeRow()`.
   private readonly row: Row<TD>;
   constructor(
     private readonly table: TD,
@@ -202,7 +224,7 @@ class Select<TD extends AnyTableDef, Res> {
      *  inside a DIFFERENT chain's builder renders as `$parent.<col>`. */
     private readonly token: symbol = Symbol("row"),
   ) {
-    this.row = refsFor(table, this.token);
+    this.row = attachGraphSteps(refsFor(table, this.token));
   }
 
   private next<R>(patch: Partial<State>): Select<TD, R> {
@@ -213,15 +235,17 @@ class Select<TD extends AnyTableDef, Res> {
     );
   }
 
-  where(fn: (row: Row<TD>) => Predicate): Select<TD, Res> {
-    return this.next<Res>({ where: toExpr(fn(this.row)) });
+  where(fn: (row: NodeRef<TD>) => Predicate): Select<TD, Res> {
+    return this.next<Res>({ where: toExpr(fn(this.row as NodeRef<TD>)) });
   }
 
   orderBy(
-    fn: (row: Row<TD>) => FieldRefOps<unknown>,
+    fn: (row: NodeRef<TD>) => FieldRefOps<unknown>,
     dir: "asc" | "desc" = "asc",
   ): Select<TD, Res> {
-    return this.next<Res>({ order: { col: refCol(fn(this.row)), dir } });
+    return this.next<Res>({
+      order: { col: refCol(fn(this.row as NodeRef<TD>)), dir },
+    });
   }
 
   limit(n: number): Select<TD, Res> {
@@ -238,9 +262,9 @@ class Select<TD extends AnyTableDef, Res> {
    *  `$parent.<col>` (correlated subquery):
    *  `select(User).return((u) => ({ posts: select(Post).where((p) => p.author.eq(u.id)) }))`. */
   return<P extends Record<string, ProjectionValue>>(
-    fn: (row: Row<TD>) => P,
+    fn: (row: NodeRef<TD>) => P,
   ): Select<TD, Projected<P>> {
-    const shape = fn(this.row);
+    const shape = fn(this.row as NodeRef<TD>);
     const proj = Object.entries(shape).map(([as, v]) => projEntry(as, v));
     return this.next<Projected<P>>({ proj });
   }
