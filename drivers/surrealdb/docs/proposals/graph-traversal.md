@@ -19,8 +19,8 @@ Everything below is on branch `feat/surrealdb-graph-traversal`. The two showcase
 | Composition (traversals + columns + subqueries in one `.return`) | ✅ shipped |
 | Edge steps `.outEdges`/`.inEdges`/`.bothEdges` + `.node()` bridge | ✅ shipped |
 | Edge fields (`->contains.amount`) + edge filters (`->(E WHERE …)->`) | ✅ shipped |
-| Target filter `.out(E).where(n => …)` (`->E->(node WHERE …)`) | ⬜ not built |
-| WHERE set-ops on a traversal (`u.out(Owns).contains(x)` → `x IN …`) | ⬜ not built |
+| Target filter `.out(E).where(n => …)` (`->E->(node WHERE …)`) | ✅ shipped |
+| WHERE set-ops on a traversal (`.contains`/`.containsAny`/`.containsAll`) | ✅ shipped |
 | `select([A, B])` multi-table roots | ⬜ not built |
 | `.match(Member, …)` member primitive (union `.where`/`.return`) | ⬜ not built |
 | Recursion `.repeat("1..3", t => …)` (+collect/+path/+shortest) | ⬜ phase 2 |
