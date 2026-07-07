@@ -3513,6 +3513,11 @@ export class RelationDef<
   S extends Shape,
   In extends string = string,
   Out extends string = string,
+  // Phantom endpoint captures for the graph query builder: the `TableRef` passed to `.from()`/`.to()`,
+  // lossless (single def / array / bare name). `In`/`Out` keep the name-string links (unchanged); these
+  // carry the endpoint TableDef *types* so `.out(E)`/`.in(E)` can infer the target node type + fields.
+  FromRef = unknown,
+  ToRef = unknown,
 > extends TableDef<Name, RelationShape<Name, S, In, Out>> {
   constructor(
     name: Name,
@@ -3538,35 +3543,35 @@ export class RelationDef<
   }
   /** Restrict the source endpoint(s) (`in`) — a `TableDef`, a SurrealDB `Table`, a bare name string, or
    *  an array mixing them for a `FROM a | b` union. Endpoint names flow into the typed `in` record link. */
-  from<F extends TableRef>(ref: F): RelationDef<Name, S, NamesOf<F>, Out> {
+  from<F extends TableRef>(ref: F): RelationDef<Name, S, NamesOf<F>, Out, F, ToRef> {
     return new RelationDef(
       this.name,
       this.edge,
       tableNames(ref),
       this.toNames,
       this.isEnforced,
-    ) as unknown as RelationDef<Name, S, NamesOf<F>, Out>;
+    ) as unknown as RelationDef<Name, S, NamesOf<F>, Out, F, ToRef>;
   }
   /** Restrict the target endpoint(s) (`out`) — a `TableDef`, a SurrealDB `Table`, a bare name string, or
    *  an array mixing them for a `TO a | b` union. Endpoint names flow into the typed `out` record link. */
-  to<T extends TableRef>(ref: T): RelationDef<Name, S, In, NamesOf<T>> {
+  to<T extends TableRef>(ref: T): RelationDef<Name, S, In, NamesOf<T>, FromRef, T> {
     return new RelationDef(
       this.name,
       this.edge,
       this.fromNames,
       tableNames(ref),
       this.isEnforced,
-    ) as unknown as RelationDef<Name, S, In, NamesOf<T>>;
+    ) as unknown as RelationDef<Name, S, In, NamesOf<T>, FromRef, T>;
   }
   /** Require both endpoints to exist on RELATE (`TYPE RELATION … ENFORCED`). */
-  enforced(): RelationDef<Name, S, In, Out> {
+  enforced(): RelationDef<Name, S, In, Out, FromRef, ToRef> {
     return new RelationDef(
       this.name,
       this.edge,
       this.fromNames,
       this.toNames,
       true,
-    ) as unknown as RelationDef<Name, S, In, Out>;
+    ) as unknown as RelationDef<Name, S, In, Out, FromRef, ToRef>;
   }
 }
 
