@@ -26,6 +26,8 @@ import {
 } from "./expr";
 import {
   attachGraphSteps,
+  type EdgeTraversal,
+  isEdgeTraversal,
   isTraversal,
   type NodeRef,
   type NodeTraversal,
@@ -115,6 +117,8 @@ export type ProjectionValue =
   | CountQuery
   // biome-ignore lint/suspicious/noExplicitAny: any node union can be traversed to.
   | NodeTraversal<any>
+  // biome-ignore lint/suspicious/noExplicitAny: any edge can be traversed / projected.
+  | EdgeTraversal<any, any, any>
   | BoundQuery;
 
 /** The decoded result type of a projection shape: refs decode to their app value, a nested
@@ -131,11 +135,14 @@ type ProjectedValue<E> = E extends CountQuery
       : // biome-ignore lint/suspicious/noExplicitAny: matching any node union + its result.
         E extends NodeTraversal<infer _C extends TableDef<string, any>, infer R>
         ? R
-        : E extends BoundQuery<[infer T]>
-          ? T
-          : E extends FieldRefBase<infer T>
+        : // biome-ignore lint/suspicious/noExplicitAny: matching any edge traversal + its result.
+          E extends EdgeTraversal<any, any, infer R>
+          ? R
+          : E extends BoundQuery<[infer T]>
             ? T
-            : unknown;
+            : E extends FieldRefBase<infer T>
+              ? T
+              : unknown;
 
 /** One lowered projection entry: a plain column (schema-decoded) or a rendered expression /
  *  subquery (custom or identity decode). */
@@ -162,7 +169,7 @@ function projEntry(as: string, v: unknown): ProjEntry {
       render: (ctx) => mergeRaw(v.toQuery(), ctx.vars),
       decode: (raw) => v.decodeValue(raw),
     };
-  if (isTraversal(v))
+  if (isTraversal(v) || isEdgeTraversal(v))
     return {
       kind: "expr",
       as,

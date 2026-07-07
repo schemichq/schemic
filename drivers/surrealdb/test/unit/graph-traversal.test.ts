@@ -23,7 +23,9 @@ const Concern = defineTable("g_concern", { name: s.string() });
 const Owns = defineRelation("g_owns").from(User).to(Product);
 const MadeBy = defineRelation("g_made_by").from(Product).to(Brand);
 const Knows = defineRelation("g_knows").from(User).to([User, Agent]);
-const Contains = defineRelation("g_contains").from(Product).to(Ingredient);
+const Contains = defineRelation("g_contains", { amount: s.string() })
+  .from(Product)
+  .to(Ingredient);
 const Treats = defineRelation("g_treats").from(Ingredient).to(Concern);
 const Loose = defineRelation("g_loose"); // endpoints undeclared
 
@@ -182,6 +184,96 @@ describe("graph traversal — .return projection", () => {
     const _names: Res["names"] = [] as string[];
     void _detail;
     void _names;
+    expect(true).toBe(true);
+  });
+});
+
+describe("graph traversal — edge steps (.outEdges/.node/edge fields/filters)", () => {
+  test("bare edge -> the edge records", () => {
+    expect(
+      sqlOf(select(Product).return((p) => ({ e: p.outEdges(Contains) }))),
+    ).toBe("SELECT ->g_contains AS e FROM g_product");
+  });
+
+  test("edge field (flat) -> ->edge.field", () => {
+    expect(
+      sqlOf(
+        select(Product).return((p) => ({
+          amt: p.outEdges(Contains).return((e) => e.amount),
+        })),
+      ),
+    ).toBe("SELECT ->g_contains.amount AS amt FROM g_product");
+  });
+
+  test("edge destructure with the endpoint (->edge.{ field, out })", () => {
+    expect(
+      sqlOf(
+        select(Product).return((p) => ({
+          e: p
+            .outEdges(Contains)
+            .return((e) => ({ amount: e.amount, ing: e.out })),
+        })),
+      ),
+    ).toBe("SELECT ->g_contains.{ amount, ing: out } AS e FROM g_product");
+  });
+
+  test(".node() bridges the edge to its target node (->edge->node)", () => {
+    expect(
+      sqlOf(
+        select(Product).return((p) => ({ ings: p.outEdges(Contains).node() })),
+      ),
+    ).toBe("SELECT ->g_contains->g_ingredient AS ings FROM g_product");
+  });
+
+  test("edge filter then node (->(edge WHERE …)->node) with a bound value", () => {
+    const q = select(Product).return((p) => ({
+      ings: p
+        .outEdges(Contains)
+        .where((e) => e.amount.eq("5%"))
+        .node(),
+    }));
+    const { sql, vars } = q.toSQL();
+    expect(sql).toBe(
+      "SELECT ->(g_contains WHERE amount = $b0)->g_ingredient AS ings FROM g_product",
+    );
+    expect(Object.values(vars)).toContain("5%");
+  });
+
+  test("edge filter -> node -> project the node field", () => {
+    expect(
+      sqlOf(
+        select(Product).return((p) => ({
+          ings: p
+            .outEdges(Contains)
+            .where((e) => e.amount.eq("5%"))
+            .node()
+            .return((i) => i.name),
+        })),
+      ),
+    ).toBe(
+      "SELECT ->(g_contains WHERE amount = $b0)->g_ingredient.name AS ings FROM g_product",
+    );
+  });
+
+  test("edge .all() materializes the full edge record", () => {
+    expect(
+      sqlOf(select(Product).return((p) => ({ e: p.outEdges(Contains).all() }))),
+    ).toBe("SELECT ->g_contains.* AS e FROM g_product");
+  });
+
+  test("types: edge projection infers the shape; the node bridge keeps the target type", () => {
+    const q = select(Product).return((p) => ({
+      amounts: p.outEdges(Contains).return((e) => e.amount),
+      ings: p
+        .outEdges(Contains)
+        .node()
+        .return((i) => i.name),
+    }));
+    type Res = Awaited<ReturnType<typeof q.run>>[number];
+    const _amounts: Res["amounts"] = [] as string[];
+    const _ings: Res["ings"] = [] as string[];
+    void _amounts;
+    void _ings;
     expect(true).toBe(true);
   });
 });
