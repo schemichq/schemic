@@ -22,7 +22,7 @@ import type {
 } from "./pure";
 import {
   type AnyRelation,
-  type CreateQuery,
+  type CreateStart,
   create,
   type DeleteQuery,
   type Endpoint,
@@ -180,7 +180,7 @@ export class Client implements OrmClientBase {
   create<TD extends AnyTable>(
     table: TD,
     ...rest: [id?: TargetId<TD>]
-  ): CreateQuery<TD, App<TD>> {
+  ): CreateStart<TD> {
     return create(
       table,
       ...([rest[0], this.conn] as [TargetId<TD>?, Queryable?]),
@@ -314,7 +314,7 @@ export class Session implements OrmClientBase {
   create<TD extends AnyTable>(
     table: TD,
     ...rest: [id?: TargetId<TD>]
-  ): CreateQuery<TD, App<TD>> {
+  ): CreateStart<TD> {
     return create(
       table,
       ...([rest[0], this.session] as [TargetId<TD>?, Queryable?]),

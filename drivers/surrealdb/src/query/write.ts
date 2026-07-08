@@ -280,6 +280,29 @@ export class CreateQuery<
   }
 }
 
+/** The keys of `T` that are REQUIRED (present, no `?`). */
+type RequiredKeys<T> = {
+  [K in keyof T]-?: {} extends Pick<T, K> ? never : K;
+}[keyof T];
+
+/** A CREATE that still needs `.content()` — the table has a required, non-defaulted field, so a
+ *  contentless `CREATE` would be rejected by the DB. Deliberately NOT awaitable and without `toSQL`
+ *  / `.raw()`: call `.content(data)` to get the runnable {@link CreateQuery}. Because of this, a
+ *  pending create is (correctly) not an `AnyStatement` until content is supplied. */
+export interface PendingCreate<TD extends AnyTableDef> {
+  readonly kind: "create";
+  content(data: Create<TD>): CreateQuery<TD, App<TD>>;
+}
+
+/** What `create(T)` returns: a ready {@link CreateQuery} when every field is optional/defaulted (a
+ *  contentless `CREATE` is valid), else a {@link PendingCreate} that must be `.content()`-ed first —
+ *  so forgetting the body on a table with a required field is a COMPILE error, not a DB error. */
+export type CreateStart<TD extends AnyTableDef> = [
+  RequiredKeys<Create<TD>>,
+] extends [never]
+  ? CreateQuery<TD, App<TD>>
+  : PendingCreate<TD>;
+
 // --- UPDATE --------------------------------------------------------------------------------------
 
 type UpdateMode = "merge" | "content" | "set";
@@ -911,10 +934,12 @@ export class RelateQuery<
 export function create<TD extends AnyTableDef>(
   table: TD,
   ...rest: [id?: TargetId<TD>, conn?: Queryable]
-): CreateQuery<TD, App<TD>> {
+): CreateStart<TD> {
   // A given id creates THAT record; omitted, a SINGLETON creates its fixed record (`CREATE
   // config:default`) and a normal table mints a random id (`target` stays undefined).
   const [target, conn] = writeTarget(table, rest);
+  // Runtime is always a CreateQuery; the return TYPE narrows to PendingCreate when the table has a
+  // required field (so a contentless create won't type-check until `.content()` is supplied).
   return new CreateQuery<TD, App<TD>>(
     table,
     undefined,
@@ -922,7 +947,7 @@ export function create<TD extends AnyTableDef>(
     true,
     conn,
     target,
-  );
+  ) as CreateStart<TD>;
 }
 
 /** Resolve a write factory's `[id?, conn?]` args to a target + connection. An omitted id means the

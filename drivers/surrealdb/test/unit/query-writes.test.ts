@@ -29,6 +29,12 @@ const Post = defineTable("post", {
   createdAt: s.datetime().$default(surql`time::now()`).$readonly(),
 });
 
+// Every field optional/defaulted -> a contentless CREATE is valid, so `create(Note)` is runnable.
+const Note = defineTable("note", {
+  body: s.string().optional(),
+  views: s.int().$default(surql`0`),
+});
+
 // --- type-level assertions -----------------------------------------------------------------------
 type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
@@ -88,15 +94,28 @@ describe("write builders — lowering", () => {
     );
   });
 
-  test("create() without .content -> a contentless CREATE (empty record; schema defaults fill in)", () => {
-    // .content() is optional — `CREATE t` / `CREATE t:id` with no CONTENT is valid SurrealDB.
-    expect(create(Post).toSQL().sql).toBe(
-      `CREATE ${escapeIdent("post")} RETURN AFTER`,
+  test("contentless CREATE on an all-optional table (empty record; schema defaults fill in)", () => {
+    // Note is all-optional -> create(Note) is a ready CreateQuery; .content() is optional.
+    expect(create(Note).toSQL().sql).toBe(
+      `CREATE ${escapeIdent("note")} RETURN AFTER`,
     );
-    const { sql, vars } = create(Post, "p1").toSQL();
+    const { sql, vars } = create(Note, "n1").toSQL();
     expect(sql).toBe("CREATE $__thing RETURN AFTER");
-    expect(String(vars.__thing)).toBe("post:p1");
+    expect(String(vars.__thing)).toBe("note:n1");
     expect(vars.__content).toBeUndefined(); // no CONTENT clause, no bind
+  });
+
+  test("required-field table: a contentless create is a COMPILE error until .content()", () => {
+    // Post has a required `title`, so create(Post) is a PendingCreate — not runnable yet.
+    // @ts-expect-error — no `.toSQL()` on a pending create (must supply .content() first)
+    const _pending = () => create(Post).toSQL();
+    // @ts-expect-error — a pending create is not a complete AnyStatement
+    const _notStmt: AnyStatement = create(Post);
+    // .content() unlocks the runnable CreateQuery
+    const ok: AnyStatement = create(Post).content({ title: "x" });
+    expect(ok.toSQL().sql).toContain("CONTENT");
+    expect(typeof _pending).toBe("function");
+    void _notStmt;
   });
 
   test("update(T, id).merge -> UPDATE $__thing MERGE $__payload; string id becomes a RecordId", () => {
