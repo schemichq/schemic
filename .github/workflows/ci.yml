@@ -51,3 +51,36 @@ jobs:
       # when no server is reachable — add a surrealdb service container later to exercise them in CI.
       - name: Test
         run: bun run --filter '*' test
+
+  # Type-completeness + instantiation-budget suites (@ark/attest). SEPARATE job because attest runs
+  # under node/tsx (not bun — see packages/core/docs/TYPE-PERF-TESTING.md) and its own TS program is
+  # slower; kept out of the hot land gate. Runs off src/ via tsx, so no build step.
+  type-perf:
+    name: type-perf (attest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+
+      # node runs the attest suites; the pinned typescript devDep (not node) fixes instantiation counts.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+            **/node_modules
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Type-perf suites
+        run: bun run scripts/type-perf.ts
