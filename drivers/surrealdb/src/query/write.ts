@@ -33,6 +33,7 @@ import {
   type Row,
   refCol,
   refsFor,
+  type StatementKind,
   splitIdArgs,
   type TargetId,
   thingOf,
@@ -108,7 +109,8 @@ abstract class WriteQuery<
 
   /** The SurrealQL + named binds this builder lowers to. */
   abstract toSQL(): Lowered;
-  protected abstract kind(): string; // for error messages
+  /** Runtime discriminant (`q.kind`) — also names the verb in teaching errors. */
+  abstract readonly kind: StatementKind;
 
   /** Lower a `.return(row => …)` projection callback to the RETURN column list. */
   protected projOf(
@@ -149,7 +151,7 @@ abstract class WriteQuery<
     const c = conn ?? this.conn;
     if (!c)
       throw new Error(
-        `${this.kind()}() is not bound to a connection — pass one to \`.run(conn)\`, or use a bound client (\`connect()\`).`,
+        `${this.kind}() is not bound to a connection — pass one to \`.run(conn)\`, or use a bound client (\`connect()\`).`,
       );
     const { sql, vars } = this.toSQL();
     const out = (await c.query(sql, vars)) as unknown[];
@@ -193,9 +195,7 @@ export class CreateQuery<
   ) {
     super(table, ret, decode, conn, only);
   }
-  protected kind(): string {
-    return "create";
-  }
+  readonly kind = "create" as const;
 
   /** Output mode — emit `CREATE ONLY …`, returning the single created row (not an array). */
   only(): CreateQuery<TD, Res, true> {
@@ -327,8 +327,9 @@ export class UpdateQuery<
   ) {
     super(table, ret, decode, conn, only);
   }
-  protected kind(): string {
-    return this.verb.toLowerCase();
+  /** `"update"` or `"upsert"` — the discriminant follows the verb (they share this builder). */
+  get kind(): "update" | "upsert" {
+    return this.verb === "UPSERT" ? "upsert" : "update";
   }
 
   /** Output mode — emit `UPDATE/UPSERT ONLY …`, returning the single row (not an array). */
@@ -507,7 +508,7 @@ export class UpdateQuery<
   toSQL(): Lowered {
     if (!this.mode || !this.payload)
       throw new Error(
-        `${this.kind()}() has no patch yet — call \`.merge(patch)\`, \`.content(row)\`, or \`.set(patch)\` before running it.`,
+        `${this.kind}() has no patch yet — call \`.merge(patch)\`, \`.content(row)\`, or \`.set(patch)\` before running it.`,
       );
     // Footgun guard: an UNSCOPED table-target write (no id, no `.where`) needs an explicit `.all()`.
     if (!this.target && !this.filter && !this.bulkAll) {
@@ -574,9 +575,7 @@ export class DeleteQuery<
   ) {
     super(table, ret, decode, conn, only);
   }
-  protected kind(): string {
-    return "delete";
-  }
+  readonly kind = "delete" as const;
 
   /** Output mode — emit `DELETE ONLY …`, returning a single row (not an array). */
   only(): DeleteQuery<TD, Res, true> {
@@ -767,9 +766,7 @@ export class RelateQuery<
   ) {
     super(edge, ret, decode, conn, only);
   }
-  protected kind(): string {
-    return "relate";
-  }
+  readonly kind = "relate" as const;
 
   /** Clone with a patched output mode + relate-specific state. */
   private rel<R, S extends boolean>(

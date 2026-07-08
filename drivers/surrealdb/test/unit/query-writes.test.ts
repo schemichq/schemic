@@ -292,6 +292,18 @@ describe("Any* widened aliases — receive a builder regardless of type params",
     expect(_u.toSQL().sql).toContain("UPSERT");
     expect(_c).toBeDefined();
   });
+
+  test(".kind discriminates every builder at runtime (upsert split from update)", () => {
+    expect(select(Post).kind).toBe("select");
+    expect(create(Post).kind).toBe("create");
+    expect(update(Post, "p1").kind).toBe("update");
+    expect(upsert(Post, "p1").kind).toBe("upsert"); // distinct from update
+    expect(remove(Post, "p1").kind).toBe("delete");
+    expect(select(Post).count().kind).toBe("count");
+    // survives output-mode chaining (the discriminant persists through clones)
+    expect(select(Post, "p1").only().kind).toBe("select");
+    expect(update(Post, "p1").merge({ title: "x" }).only().kind).toBe("update");
+  });
 });
 
 describe("relate — RELATE from -> edge -> to", () => {

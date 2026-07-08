@@ -231,6 +231,8 @@ export type Out<Res, Single extends boolean> = Single extends true
   : Res[];
 
 class Select<TD extends AnyTableDef, Res, Single extends boolean = false> {
+  /** Runtime discriminant — `q.kind === "select"`. */
+  readonly kind = "select" as const;
   /** The source table(s) — one for `select(T)`, several for a `select([A, B])` union root. */
   private readonly tables: readonly AnyTableDef[];
   // Typed `Row<TD>` so `Select<any, any>`'s structural identity is unchanged (the graph steps / union
@@ -456,6 +458,8 @@ class Select<TD extends AnyTableDef, Res, Single extends boolean = false> {
 
 /** A count terminal — `SELECT count() FROM <table> [WHERE …] GROUP ALL`, resolves to a number. */
 export class CountQuery {
+  /** Runtime discriminant — `q.kind === "count"`. */
+  readonly kind = "count" as const;
   private readonly tables: readonly string[];
   constructor(
     table: string | readonly string[],
@@ -571,3 +575,15 @@ export type AnySelect = Select<any, any, any>;
 
 /** The COUNT builder (`select(T).count()`) — a scalar aggregate (no `.raw()`; not in `AnyStatement`). */
 export type AnyCount = CountQuery;
+
+/** The runtime discriminant carried by every statement builder (`q.kind`) — `switch` on it to branch
+ *  by statement type (it splits `update` from `upsert`, unlike `instanceof`, and is a plain string so
+ *  it survives dual-instance package loading). See `AnyStatement`. */
+export type StatementKind =
+  | "select"
+  | "create"
+  | "update"
+  | "upsert"
+  | "delete"
+  | "relate"
+  | "count";
