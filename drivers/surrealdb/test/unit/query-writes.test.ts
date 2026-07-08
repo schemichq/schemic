@@ -119,8 +119,9 @@ describe("write builders — lowering", () => {
 });
 
 describe("bulk writes — whole-table + filtered (no id)", () => {
-  test("update(T) targets the whole table by name (not $__thing)", () => {
+  test("update(T).all() targets the whole table by name (not $__thing)", () => {
     const { sql, vars } = update(Post)
+      .all()
       .set((p) => ({ views: p.views.plus(1) }))
       .toSQL();
     expect(sql).toMatch(
@@ -131,7 +132,7 @@ describe("bulk writes — whole-table + filtered (no id)", () => {
     expect(vars.__thing).toBeUndefined(); // no record-id bind — it's a table target
   });
 
-  test("update(T).where(...) filters the whole-table update", () => {
+  test("update(T).where(...) filters the whole-table update (no .all() needed)", () => {
     const { sql, vars } = update(Post)
       .set({ title: "hot" })
       .where((p) => p.views.gt(10))
@@ -143,8 +144,8 @@ describe("bulk writes — whole-table + filtered (no id)", () => {
     expect(vars.b1).toBe(10);
   });
 
-  test("remove(T) deletes the whole table; .where(...) filters it", () => {
-    expect(remove(Post).toSQL().sql).toBe(
+  test("remove(T).all() deletes the whole table; .where(...) filters it", () => {
+    expect(remove(Post).all().toSQL().sql).toBe(
       `DELETE ${escapeIdent("post")} RETURN NONE`,
     );
     const { sql, vars } = remove(Post)
@@ -170,6 +171,42 @@ describe("bulk writes — whole-table + filtered (no id)", () => {
   });
 });
 
+describe("bulk safeguard — unscoped whole-table writes require .all()", () => {
+  test("update(T) with no id and no .where throws (points at .where / .all)", () => {
+    expect(() => update(Post).set({ title: "x" }).toSQL()).toThrow(
+      /rewrite EVERY row.*\.where.*\.all\(\)/s,
+    );
+  });
+
+  test("remove(T) with no id and no .where throws (DELETE every row)", () => {
+    expect(() => remove(Post).toSQL()).toThrow(
+      /DELETE EVERY row.*\.where.*\.all\(\)/s,
+    );
+  });
+
+  test("upsert(T) with no id and no .where throws (would INSERT a new row; steer to create)", () => {
+    expect(() => upsert(Post).set({ title: "x" }).toSQL()).toThrow(
+      /INSERTS a new row.*create\(post\).*\.all\(\)/s,
+    );
+  });
+
+  test(".all() lifts the guard; a .where() scope removes the need for it", () => {
+    expect(() => update(Post).all().set({ title: "x" }).toSQL()).not.toThrow();
+    expect(() => remove(Post).all().toSQL()).not.toThrow();
+    expect(() =>
+      update(Post)
+        .set({ title: "x" })
+        .where((p) => p.views.gt(0))
+        .toSQL(),
+    ).not.toThrow();
+  });
+
+  test("a by-id target is never guarded (it targets one record)", () => {
+    expect(() => update(Post, "p1").set({ title: "x" }).toSQL()).not.toThrow();
+    expect(() => remove(Post, "p1").toSQL()).not.toThrow();
+  });
+});
+
 describe("upsert — create-or-update (same builder shape as update)", () => {
   test("upsert(T, id) lowers to UPSERT with each patch mode", () => {
     expect(upsert(Post, "p1").merge({ title: "x" }).toSQL().sql).toBe(
@@ -183,8 +220,9 @@ describe("upsert — create-or-update (same builder shape as update)", () => {
     );
   });
 
-  test("upsert(T) (no id) targets the table by name — mints a new row", () => {
+  test("upsert(T).all() (no id) targets the table by name — mints a new row", () => {
     const { sql, vars } = upsert(Post)
+      .all()
       .set((p) => ({ views: p.views.plus(1) }))
       .toSQL();
     expect(sql).toMatch(

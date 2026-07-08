@@ -321,6 +321,8 @@ export class UpdateQuery<
     only = false,
     /** `UPDATE` or `UPSERT` — the same builder shape lowers both (see the `upsert` factory). */
     private readonly verb: "UPDATE" | "UPSERT" = "UPDATE",
+    /** `.all()` acknowledgement — lets an UNSCOPED whole-table write run (see the bulk guard). */
+    private readonly bulkAll = false,
   ) {
     super(table, ret, decode, conn, only);
   }
@@ -342,6 +344,7 @@ export class UpdateQuery<
       this.filter,
       true,
       this.verb,
+      this.bulkAll,
     );
   }
 
@@ -360,6 +363,27 @@ export class UpdateQuery<
       toExpr(fn(refsFor(this.table))),
       this.onlyMode,
       this.verb,
+      this.bulkAll,
+    );
+  }
+
+  /** Acknowledge an UNSCOPED whole-table write — `update(T).all().set(…)` updates EVERY row (and
+   *  `upsert(T).all()…`). Required (else the bulk guard throws) so a forgotten id can't silently
+   *  rewrite the whole table. With a `.where(…)` scope you never need this. */
+  all(): UpdateQuery<TD, Res, Single> {
+    return new UpdateQuery<TD, Res, Single>(
+      this.table,
+      this.target,
+      this.mode,
+      this.payload,
+      this.ret,
+      this.decode,
+      this.conn,
+      this.exprSet,
+      this.filter,
+      this.onlyMode,
+      this.verb,
+      true,
     );
   }
 
@@ -380,6 +404,7 @@ export class UpdateQuery<
       this.filter,
       this.onlyMode,
       this.verb,
+      this.bulkAll,
     );
   }
 
@@ -456,6 +481,7 @@ export class UpdateQuery<
       this.filter,
       this.onlyMode,
       this.verb,
+      this.bulkAll,
     );
   }
 
@@ -473,6 +499,7 @@ export class UpdateQuery<
       this.filter,
       this.onlyMode,
       this.verb,
+      this.bulkAll,
     );
   }
 
@@ -481,6 +508,15 @@ export class UpdateQuery<
       throw new Error(
         `${this.kind()}() has no patch yet — call \`.merge(patch)\`, \`.content(row)\`, or \`.set(patch)\` before running it.`,
       );
+    // Footgun guard: an UNSCOPED table-target write (no id, no `.where`) needs an explicit `.all()`.
+    if (!this.target && !this.filter && !this.bulkAll) {
+      const t = this.table.name;
+      throw new Error(
+        this.verb === "UPSERT"
+          ? `upsert(${t}) has no id and no \`.where(…)\` — with nothing to match it INSERTS a new row on every run. Use \`create(${t})\` to insert, add \`.where(…)\` to upsert matching rows, or \`.all()\` to confirm.`
+          : `update(${t}) has no id and no \`.where(…)\` — it would rewrite EVERY row of the \`${t}\` table. Add \`.where(…)\` to scope it, or \`.all()\` to confirm you mean the whole table.`,
+      );
+    }
     const vars: Record<string, unknown> = {};
     // BULK (no `.target`) writes to the whole table by name; a by-id target binds as `$__thing`.
     const tgt = this.target ? "$__thing" : escapeIdent(this.table.name);
@@ -532,6 +568,8 @@ export class DeleteQuery<
     /** `.where(…)` filter (bulk deletes; also a conditional guard on a by-id target). */
     private readonly filter?: Expr,
     only = false,
+    /** `.all()` acknowledgement — lets an UNSCOPED whole-table delete run (see the bulk guard). */
+    private readonly bulkAll = false,
   ) {
     super(table, ret, decode, conn, only);
   }
@@ -549,6 +587,7 @@ export class DeleteQuery<
       this.conn,
       this.filter,
       true,
+      this.bulkAll,
     );
   }
 
@@ -563,6 +602,23 @@ export class DeleteQuery<
       this.conn,
       toExpr(fn(refsFor(this.table))),
       this.onlyMode,
+      this.bulkAll,
+    );
+  }
+
+  /** Acknowledge an UNSCOPED whole-table delete — `remove(T).all()` deletes EVERY row. Required
+   *  (else the bulk guard throws) so a forgotten id can't wipe the table. A `.where(…)` scope
+   *  removes the need for it. */
+  all(): DeleteQuery<TD, Res, Single> {
+    return new DeleteQuery<TD, Res, Single>(
+      this.table,
+      this.target,
+      this.ret,
+      this.decode,
+      this.conn,
+      this.filter,
+      this.onlyMode,
+      true,
     );
   }
 
@@ -588,6 +644,7 @@ export class DeleteQuery<
       this.conn,
       this.filter,
       this.onlyMode,
+      this.bulkAll,
     );
   }
 
@@ -601,10 +658,16 @@ export class DeleteQuery<
       this.conn,
       this.filter,
       this.onlyMode,
+      this.bulkAll,
     );
   }
 
   toSQL(): Lowered {
+    // Footgun guard: an UNSCOPED whole-table delete (no id, no `.where`) needs an explicit `.all()`.
+    if (!this.target && !this.filter && !this.bulkAll)
+      throw new Error(
+        `remove(${this.table.name}) has no id and no \`.where(…)\` — it would DELETE EVERY row of the \`${this.table.name}\` table. Add \`.where(…)\` to scope it, or \`.all()\` to confirm you mean the whole table.`,
+      );
     const vars: Record<string, unknown> = {};
     // BULK (no `.target`) deletes the whole table by name; a by-id target binds as `$__thing`.
     const tgt = this.target ? "$__thing" : escapeIdent(this.table.name);
