@@ -66,6 +66,11 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
   names are neutral; each driver lowers to its native operator (surreal `CONTAINS`, pg `strpos()>0`,
   sqlite `instr()>0`). BREAKING (alpha, unreleased — query P1 is post-`alpha.24`): surreal renamed its
   string `.contains` -> `.includes` (arrays keep `.contains*`).
+- **surrealdb:** query WRITE model + GRAPH traversal — graph reads (`.out`/`.in` edge hops), faithful
+  `ONLY` output modes, the full write surface (bulk writes, `upsert`, `relate`, `create(T, id)`,
+  content-less create with a compile-time content gate), a `.kind` discriminant + `Any*`/`AnyStatement`
+  types, and a schemaless (untyped `string | Table`) query surface. Writes now return an ARRAY by
+  default with `.only()` for the single-row form (and `.all()` as the explicit bulk guard).
 - **surrealdb / postgres:** table PRESETS — `defineTable.preset(...)` reusable table fragments applied
   via the chained single-arg `TableDef.use(a).use(b)` (ratified cross-driver form; columns + indexes).
 - **surrealdb:** TYPED FRAGMENTS (phases 0–3) — the query builder and raw `surql` compose BOTH ways:
