@@ -20,6 +20,8 @@ import {
   style,
 } from "@schemic/core";
 import type { Command } from "commander";
+import { runAction } from "./action";
+import { registerInspectVerbs } from "./inspect";
 import { ensureDriver, type ResolveOpts, resolveOne } from "./resolve";
 
 /** Stdio + prompt helpers handed to a command, so a driver never touches stdio directly. */
@@ -108,31 +110,34 @@ function addCommand(
     verb.option(flag, f.help ?? "");
   }
 
-  verb.action(async (args: string[], opts: Record<string, unknown>) => {
-    const parsed = toParsedArgs(cmd, args, opts);
+  verb.action((args: string[], opts: Record<string, unknown>) =>
+    runAction(async () => {
+      const parsed = toParsedArgs(cmd, args, opts);
 
-    const config = await resolveOne(resolveOpts());
-    const driver = getDriver(config.driver);
-    const conn = await driver.connect(config);
-    const ctx: CommandContext = {
-      conn,
-      config,
-      io,
-      secrets: envSecretProvider,
-    };
-    try {
-      await cmd.run(ctx, parsed);
-    } finally {
-      await driver.close(conn);
-    }
-  });
+      const config = await resolveOne(resolveOpts());
+      const driver = getDriver(config.driver);
+      const conn = await driver.connect(config);
+      const ctx: CommandContext = {
+        conn,
+        config,
+        io,
+        secrets: envSecretProvider,
+      };
+      try {
+        await cmd.run(ctx, parsed);
+      } finally {
+        await driver.close(conn);
+      }
+    }),
+  );
 }
 
 /**
- * Discover + register the active driver's `commands` onto `program` as `sc <kind> <verb>`. Runs before
- * `program.parse()`; no-ops when there's no project config (the driver is unknown) or the driver
- * contributes none. `resolveOpts` reads the global addressing flags (`--connection`/`--config`) off the
- * invoked command at action time.
+ * Register every `sc <kind> <verb>` command from the active driver's project: the CORE-provided
+ * `ls`/`info` for each registered kind (+ the top-level `sc ls` overview) and the driver's own
+ * contributed `commands` on top, grouped per kind. Runs before `program.parse()`; no-ops entirely when
+ * there's no project config (the driver is unknown, e.g. `sc init`). `resolveOpts` reads the global
+ * addressing flags (`--connection`/`--config`) off the invoked command at action time.
  */
 export async function registerDriverCommands(program: Command): Promise<void> {
   let driverName: string;
@@ -156,18 +161,18 @@ export async function registerDriverCommands(program: Command): Promise<void> {
     return;
   }
   const driver = getDriver(driverName);
-  if (!driver.commands?.length) return;
 
-  // Group verbs under a shared kind command, so `sc access rotate` + `sc access check` co-exist.
+  // Group verbs under a shared kind command, so the universal `sc <kind> ls`/`info` and any driver
+  // verbs (`sc access rotate`, `sc access check`) co-exist under one `sc <kind>` group.
   const groups = new Map<string, Command>();
   const groupFor = (kind: string): Command => {
     let g = groups.get(kind);
     if (!g) {
       g = program
         .command(kind)
-        .summary(`${style.bold(driverName)} ${kind} commands`)
+        .summary(`inspect + manage ${style.bold(kind)} resources`)
         .description(
-          `Driver-specific \`${kind}\` commands (from @schemic/${driverName}).`,
+          `\`${kind}\` commands: the universal \`ls\`/\`info\` (any kind) plus any driver verbs from @schemic/${driverName}.`,
         );
       groups.set(kind, g);
     }
@@ -180,7 +185,11 @@ export async function registerDriverCommands(program: Command): Promise<void> {
     return { connection: opts.connection, config: opts.config ?? configPath };
   };
 
-  for (const cmd of driver.commands) {
+  // Core-provided READ inspection for EVERY registered kind (`sc <kind> ls`/`info` + top-level `sc ls`).
+  registerInspectVerbs(program, driver, groupFor, resolveOpts);
+
+  // The driver's own verbs (e.g. `access rotate`) on top of the universal ls/info.
+  for (const cmd of driver.commands ?? []) {
     addCommand(groupFor(cmd.kind), cmd, resolveOpts);
   }
 }
