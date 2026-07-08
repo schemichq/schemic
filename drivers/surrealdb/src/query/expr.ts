@@ -26,6 +26,7 @@ import {
   refState,
   renderRef,
 } from "./render";
+import { SCHEMALESS } from "./schemaless";
 
 // --- the Expr node tree ---------------------------------------------------------------------------
 
@@ -463,6 +464,19 @@ export function refsFor<TD extends TableDef<string, any>>(
   table: TD,
   row?: symbol,
 ): Row<TD> {
+  // SCHEMALESS (untyped) table: any field name resolves to a generic ref via a proxy.
+  if ((table as Record<symbol, unknown>)[SCHEMALESS] === true) {
+    const { kind, elem } = kindOf(undefined); // -> { kind: "other" } (base ref ops)
+    return new Proxy(
+      {},
+      {
+        get: (_t, key) =>
+          typeof key === "string"
+            ? mkRef({ root: { col: key, row }, kind, elem })
+            : undefined,
+      },
+    ) as unknown as Row<TD>;
+  }
   const refs: Record<string, FieldRef<unknown>> = {};
   for (const key of Object.keys(table.object.shape)) {
     const { kind, elem } = kindOf(table.object.shape[key]);

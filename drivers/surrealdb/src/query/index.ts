@@ -11,7 +11,13 @@
  * Decode-by-default; `.raw()` opts out. Writes live in `./write`; `block()` in `./block`.
  */
 import type { FieldRefBase } from "@schemic/core/query";
-import { BoundQuery, escapeIdent, RecordId, type Surreal } from "surrealdb";
+import {
+  BoundQuery,
+  escapeIdent,
+  RecordId,
+  type Surreal,
+  Table,
+} from "surrealdb";
 import { z } from "zod";
 import type { App, SingletonIdOf, TableDef, Wire } from "../pure";
 import {
@@ -45,6 +51,11 @@ import {
   stripOuterParens,
   toFragment,
 } from "./render";
+import {
+  type SchemalessTable,
+  schemaless,
+  type UntypedTable,
+} from "./schemaless";
 
 export type { FnArg, Frag } from "../fn";
 export type {
@@ -538,18 +549,31 @@ export function select<const TDs extends readonly AnyTableDef[]>(
   tables: TDs,
   conn?: Queryable,
 ): Select<TDs[number], App<TDs[number]>>;
+/** UNTYPED SELECT over a table not modeled in Schemic — pass a plain name string or an SDK `Table`.
+ *  The row is `Record<string, unknown>` (no decode); callback rows are a proxy (any field is a
+ *  generic ref). Optionally target a record by id. */
 export function select(
-  table: AnyTableDef | readonly AnyTableDef[],
+  table: UntypedTable,
+  idOrConn?: RecordId | string | Queryable,
+  conn?: Queryable,
+): Select<SchemalessTable, Record<string, unknown>>;
+export function select(
+  table: AnyTableDef | readonly AnyTableDef[] | UntypedTable,
   // biome-ignore lint/suspicious/noExplicitAny: impl signature; callers see the typed overloads.
   arg2?: any,
   conn?: Queryable,
   // biome-ignore lint/suspicious/noExplicitAny: impl signature; callers see the typed overloads.
 ): Select<any, any, any> {
+  // A plain name / SDK `Table` becomes the untyped adapter; a `TableDef` (or array) passes through.
+  const src =
+    typeof table === "string" || table instanceof Table
+      ? schemaless(table)
+      : table;
   const [id, boundConn] = splitIdArgs([arg2, conn]);
   const state: State = { decode: true, conn: boundConn };
-  if (id !== undefined && !Array.isArray(table))
-    state.target = thingOf(table as AnyTableDef, id);
-  return new Select(table, state);
+  if (id !== undefined && !Array.isArray(src))
+    state.target = thingOf(src as AnyTableDef, id);
+  return new Select(src, state);
 }
 
 /** Sugar for `select(T, id).one()` — fetch ONE record (row-or-`undefined`), singleton-aware (the id
