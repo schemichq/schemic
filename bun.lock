@@ -35,11 +35,13 @@
         "@schemic/core": "workspace:*",
       },
       "devDependencies": {
+        "@ark/attest": "0.56.3",
         "@biomejs/biome": "^2.3.11",
         "@schemic/cli": "workspace:*",
         "@types/bun": "latest",
         "surrealdb": "^2.0.3",
         "tsup": "^8",
+        "tsx": "^4.23.0",
         "typescript": "^5",
         "zod": "^4.3.5",
       },
