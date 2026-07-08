@@ -263,18 +263,19 @@ export class CreateQuery<
   }
 
   toSQL(): Lowered {
-    if (!this.payload)
-      throw new Error(
-        "create() has no row yet — call `.content(data)` before running it.",
-      );
-    if (this.target)
-      return {
-        sql: `CREATE ${this.onlyKw()}$__thing CONTENT $__content ${retClause(this.ret)}`,
-        vars: { __thing: this.target, __content: this.payload },
-      };
+    // `.content()` is OPTIONAL — a contentless `CREATE t:id` makes an empty record (the schema's
+    // defaults fill in; the DB still enforces any required-no-default field).
+    const tgt = this.target ? "$__thing" : escapeIdent(this.table.name);
+    const vars: Record<string, unknown> = {};
+    if (this.target) vars.__thing = this.target;
+    let content = "";
+    if (this.payload) {
+      vars.__content = this.payload;
+      content = " CONTENT $__content";
+    }
     return {
-      sql: `CREATE ${this.onlyKw()}${escapeIdent(this.table.name)} CONTENT $__content ${retClause(this.ret)}`,
-      vars: { __content: this.payload },
+      sql: `CREATE ${this.onlyKw()}${tgt}${content} ${retClause(this.ret)}`,
+      vars,
     };
   }
 }

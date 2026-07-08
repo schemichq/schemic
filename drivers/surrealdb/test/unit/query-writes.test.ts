@@ -88,8 +88,15 @@ describe("write builders — lowering", () => {
     );
   });
 
-  test("create() without .content throws a teaching error", () => {
-    expect(() => create(Post).toSQL()).toThrow(/call `.content\(data\)`/);
+  test("create() without .content -> a contentless CREATE (empty record; schema defaults fill in)", () => {
+    // .content() is optional — `CREATE t` / `CREATE t:id` with no CONTENT is valid SurrealDB.
+    expect(create(Post).toSQL().sql).toBe(
+      `CREATE ${escapeIdent("post")} RETURN AFTER`,
+    );
+    const { sql, vars } = create(Post, "p1").toSQL();
+    expect(sql).toBe("CREATE $__thing RETURN AFTER");
+    expect(String(vars.__thing)).toBe("post:p1");
+    expect(vars.__content).toBeUndefined(); // no CONTENT clause, no bind
   });
 
   test("update(T, id).merge -> UPDATE $__thing MERGE $__payload; string id becomes a RecordId", () => {
