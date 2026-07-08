@@ -174,10 +174,17 @@ export class Client implements OrmClientBase {
     ).one();
   }
 
-  /** A connection-bound CREATE — `await db.create(User).content({ … })` returns the created row
-   *  (validated via `User.create`, encoded through the codec). */
-  create<TD extends AnyTable>(table: TD): CreateQuery<TD, App<TD>> {
-    return create(table, this.conn);
+  /** A connection-bound CREATE — `await db.create(User).content({ … })` mints a fresh id, or
+   *  `db.create(User, id).content({ … })` creates that specific record (errors if it already exists;
+   *  use `db.upsert` for create-or-update). Returns the created row. */
+  create<TD extends AnyTable>(
+    table: TD,
+    ...rest: [id?: TargetId<TD>]
+  ): CreateQuery<TD, App<TD>> {
+    return create(
+      table,
+      ...([rest[0], this.conn] as [TargetId<TD>?, Queryable?]),
+    );
   }
 
   /** A connection-bound UPDATE — `await db.update(User, id).merge({ … })` (deep merge, via
@@ -303,9 +310,15 @@ export class Session implements OrmClientBase {
     ).one();
   }
 
-  /** A session-bound CREATE (runs under this session's auth context). */
-  create<TD extends AnyTable>(table: TD): CreateQuery<TD, App<TD>> {
-    return create(table, this.session);
+  /** A session-bound CREATE — `create(User)` mints a fresh id, or `create(User, id)` a specific one. */
+  create<TD extends AnyTable>(
+    table: TD,
+    ...rest: [id?: TargetId<TD>]
+  ): CreateQuery<TD, App<TD>> {
+    return create(
+      table,
+      ...([rest[0], this.session] as [TargetId<TD>?, Queryable?]),
+    );
   }
 
   /** A session-bound UPDATE — one record (`update(User, id)`) or BULK (`update(User).set(…)

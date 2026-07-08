@@ -903,16 +903,17 @@ export class RelateQuery<
 
 // --- factories -----------------------------------------------------------------------------------
 
-/** Start a `CREATE` — `create(User).content({ … })`. Returns the created row (decoded `App<TD>`).
- *  Pass a `conn` to pre-bind (the ORM client does); omit it for `.run(conn)`. */
+/** Start a `CREATE` — `create(User).content({ … })` mints a fresh id; `create(User, id).content({ … })`
+ *  creates THAT record (`CREATE user:id …`, which errors if it already exists — unlike `upsert`).
+ *  `id` is the app-typed `RecordId` or its plain string id part. Returns the created row (decoded
+ *  `App<TD>`). Pass a `conn` to pre-bind (the ORM client does); omit it for `.run(conn)`. */
 export function create<TD extends AnyTableDef>(
   table: TD,
-  conn?: Queryable,
+  ...rest: [id?: TargetId<TD>, conn?: Queryable]
 ): CreateQuery<TD, App<TD>> {
-  // A SINGLETON creates ITS one record (`CREATE config:default`) — a bare CREATE would mint a
-  // random id, which the literal id type rejects.
-  const target =
-    table.singletonId !== undefined ? thingOf(table, undefined) : undefined;
+  // A given id creates THAT record; omitted, a SINGLETON creates its fixed record (`CREATE
+  // config:default`) and a normal table mints a random id (`target` stays undefined).
+  const [target, conn] = writeTarget(table, rest);
   return new CreateQuery<TD, App<TD>>(
     table,
     undefined,

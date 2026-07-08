@@ -77,6 +77,17 @@ describe("write builders — lowering", () => {
     expect(vars.__content).toEqual({ title: "hi" });
   });
 
+  test("create(T, id).content(data) -> CREATE $__thing CONTENT (that specific record)", () => {
+    const { sql, vars } = create(Post, "p1").content({ title: "hi" }).toSQL();
+    expect(sql).toBe("CREATE $__thing CONTENT $__content RETURN AFTER");
+    expect(vars.__thing).toBeInstanceOf(RecordId);
+    expect((vars.__thing as RecordId).table.name).toBe("post");
+    expect(String(vars.__thing)).toBe("post:p1");
+    expect(create(Post, "p1").content({ title: "x" }).only().toSQL().sql).toBe(
+      "CREATE ONLY $__thing CONTENT $__content RETURN AFTER",
+    );
+  });
+
   test("create() without .content throws a teaching error", () => {
     expect(() => create(Post).toSQL()).toThrow(/call `.content\(data\)`/);
   });
