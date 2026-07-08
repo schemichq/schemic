@@ -559,3 +559,15 @@ export function get<TD extends AnyTableDef>(
 }
 
 export { Select };
+
+// --- widened builder aliases ----------------------------------------------------------------------
+// "Any*" helpers for functions that receive a builder regardless of its row type OR output mode
+// (`.one()`/`.only()`/`.raw()` change the type params, so a bare `Select<any, any>` — which pins
+// `Single = false` — rejects a `.only()` result). The write aliases + `AnyStatement` live in `./write`.
+
+/** Any SELECT builder — any row type, any output mode (`.one()`/`.only()`/`.raw()`). */
+// biome-ignore lint/suspicious/noExplicitAny: a widened alias — every type param is intentionally open.
+export type AnySelect = Select<any, any, any>;
+
+/** The COUNT builder (`select(T).count()`) — a scalar aggregate (no `.raw()`; not in `AnyStatement`). */
+export type AnyCount = CountQuery;

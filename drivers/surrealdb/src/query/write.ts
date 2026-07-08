@@ -24,6 +24,7 @@ import type { App, Create, RelationDef, TableDef, Update, Wire } from "../pure";
 import { isParamRef } from "../pure";
 import { type Expr, lowerExpr, type Predicate, toExpr } from "./expr";
 import {
+  type AnySelect,
   type FieldRefOps,
   FRAGMENT,
   type Operand,
@@ -1006,3 +1007,34 @@ export function relate<E extends AnyRelation>(
 ): RelateQuery<E, App<E>> {
   return new RelateQuery<E, App<E>>(edge, from, to, "after", true, conn);
 }
+
+// --- widened write aliases + the statement union --------------------------------------------------
+// "Any*" helpers for functions that receive a WRITE builder regardless of row type / output mode
+// (see the reads' `AnySelect`/`AnyCount` in `./index` for the rationale). `AnyUpdate` also covers
+// `upsert()` — they share the `UpdateQuery` builder.
+
+/** Any CREATE builder — any row type, any output mode. */
+// biome-ignore lint/suspicious/noExplicitAny: a widened alias — every type param is intentionally open.
+export type AnyCreate = CreateQuery<any, any, any>;
+
+/** Any UPDATE or UPSERT builder (they share the builder) — any row type, any output mode. */
+// biome-ignore lint/suspicious/noExplicitAny: a widened alias — every type param is intentionally open.
+export type AnyUpdate = UpdateQuery<any, any, any>;
+
+/** Any DELETE builder — any row type, any output mode. */
+// biome-ignore lint/suspicious/noExplicitAny: a widened alias — every type param is intentionally open.
+export type AnyDelete = DeleteQuery<any, any, any>;
+
+/** Any RELATE builder — any edge, any output mode. */
+// biome-ignore lint/suspicious/noExplicitAny: a widened alias — every type param is intentionally open.
+export type AnyRelate = RelateQuery<any, any, any>;
+
+/** Any ROW-RETURNING statement builder — select or a write. Its common surface is `.toQuery()`
+ *  (composable), `.raw()` (undecoded rows), and awaitability. `count()` is scalar (no `.raw()`), so
+ *  it is intentionally NOT in this union — use `AnyCount` for it. */
+export type AnyStatement =
+  | AnySelect
+  | AnyCreate
+  | AnyUpdate
+  | AnyDelete
+  | AnyRelate;

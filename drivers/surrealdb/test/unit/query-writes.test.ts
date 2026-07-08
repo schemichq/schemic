@@ -8,7 +8,20 @@ import { DateTime, escapeIdent, RecordId } from "surrealdb";
 import { z } from "zod";
 import { defineRelation, defineTable, s, surql } from "../../src/index";
 import type { App } from "../../src/pure";
-import { create, relate, remove, update, upsert } from "../../src/query";
+import type {
+  AnyCount,
+  AnySelect,
+  AnyStatement,
+  AnyUpdate,
+} from "../../src/query";
+import {
+  create,
+  relate,
+  remove,
+  select,
+  update,
+  upsert,
+} from "../../src/query";
 
 const Post = defineTable("post", {
   title: s.string(),
@@ -249,6 +262,35 @@ describe("upsert — create-or-update (same builder shape as update)", () => {
 
   test("upsert() without a patch throws — the error names upsert, not update", () => {
     expect(() => upsert(Post, "p1").toSQL()).toThrow(/upsert\(\) has no patch/);
+  });
+});
+
+describe("Any* widened aliases — receive a builder regardless of type params", () => {
+  test("AnySelect accepts any output mode (the Single-mismatch that broke Select<any,any>)", () => {
+    const sels: AnySelect[] = [
+      select(Post),
+      select(Post, "p1").only(),
+      select(Post).one(),
+      select(Post).raw(),
+    ];
+    for (const s2 of sels) expect(s2.toSQL().sql).toBeTypeOf("string");
+  });
+
+  test("AnyStatement spans select + writes (common surface: .toSQL()/.raw())", () => {
+    const stmts: AnyStatement[] = [
+      select(Post, "p1").only(),
+      create(Post).content({ title: "x" }),
+      update(Post, "p1").merge({ title: "x" }),
+      remove(Post, "p1").return("before"),
+    ];
+    for (const st of stmts) {
+      expect(st.toSQL().sql).toBeTypeOf("string");
+      expect(st.raw()).toBeDefined(); // every member opts out of decode
+    }
+    const _u: AnyUpdate = upsert(Post, "p1").merge({ title: "x" }); // shares the update builder
+    const _c: AnyCount = select(Post).count(); // scalar — kept out of AnyStatement
+    expect(_u.toSQL().sql).toContain("UPSERT");
+    expect(_c).toBeDefined();
   });
 });
 
