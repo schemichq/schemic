@@ -8,13 +8,21 @@ Every statement returns an **array** by default. `.only()` adds the `ONLY` keywo
 errors unless exactly one). `.one()` (select only) = `ONLY … LIMIT 1` (lenient: first, `NONE` if empty).
 `.raw()`/`.one()`/`.only()` are **output-mode flags** that compose in any order — never dead-ends.
 
-## Status
+## Status — COMPLETE
 
 - ✅ **Reads** (`b5cbd65`): `select`/`.one()`/`.only()`/`select(T, id)` emit real `ONLY`; `SelectOne`
   deleted; `Single` type param on `Select`; `get` kept as sugar for `select(T,id).one()`.
-- ⬜ **Writes flip to array-default + bulk** — DECISION **A** (uniform, breaking). See below.
-- ⬜ **`upsert(T, id)`** — mirrors update, emits `UPSERT`.
-- ⬜ **`relate(from, Edge, to)`** — the RELATE write.
+- ✅ **Writes flip to array-default** (`3e6d564`) — DECISION **A** (uniform): `create`/`update`/`remove`
+  return arrays; `.only()` emits `ONLY` + re-types to single; `RETURN NONE` -> `undefined[]`.
+- ✅ **Bulk** (`215422f`): `update(T).set().where()` / `remove(T).where()` — whole-table / filtered;
+  by-id target also accepts `.where` as a conditional guard.
+- ✅ **`upsert`** (`c080510`): shares the update builder via a `verb` param; `upsert(T)` mints new,
+  `upsert(T, id)` create-or-update, `upsert(T).set().where()` filtered bulk.
+- ✅ **`relate(from, Edge, to)`** (`92ce3dd`): endpoint type-checking (record / fan-out array /
+  subquery), `.set`/`.content`/`.id`/`.return`/`.timeout`/`.only`, `in`/`out` from the path.
+
+Deferred (follow-ups, not blocking): a typed `select(...)`-builder endpoint for `relate` (subquery is
+currently the `surql` raw form); optional accidental-bulk guard (see the DX note in the handoff).
 
 **Do NOT touch the dogfood app** — Manuel updates it himself during testing. Scope = `write.ts`,
 `client.ts`, in-repo `test/`, and `test/e2e`.
