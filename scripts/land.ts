@@ -116,9 +116,14 @@ gitIO("merge", "--ff-only", branch);
 
 // --- gate: never ship red --------------------------------------------------------------------
 if (!flag("--no-test")) {
-  console.log("gate: build + typecheck + test workspace...");
+  console.log("gate: install + build + typecheck + test workspace...");
   try {
-    // BUILD FIRST: the e2e suites load each driver from its compiled `lib/` (the CLI loader picks the
+    // INSTALL FIRST: the merged branch may add/bump deps (package.json + bun.lock), so refresh
+    // node_modules before build/typecheck — else a new dependency reads as "cannot find module" and
+    // the gate false-fails. `--frozen-lockfile` installs EXACTLY the committed lockfile (keeps the
+    // surrealdb 2.0.3 pin, matches CI) and fails loud if package.json and bun.lock have drifted.
+    run("bun", ["install", "--frozen-lockfile"]);
+    // BUILD NEXT: the e2e suites load each driver from its compiled `lib/` (the CLI loader picks the
     // `import`/`default` export, not `bun`->src), so a stale lib would let the gate test old code. lib/
     // is gitignored, so this doesn't dirty the tree.
     run("bun", ["run", "--filter", "*", "build"]);
