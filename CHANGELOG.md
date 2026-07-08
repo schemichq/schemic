@@ -12,6 +12,13 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 ## [Unreleased]
 
 ### Added
+- **core / repo:** TYPE-PERF testing standard (`@ark/attest`) — shared type-level test suites across
+  the workspace: type-completeness assertions (`attest<Expected, Actual>()`) and per-expression
+  instantiation BUDGETS (`bench(...).types([N])`) that fail when a hot generic's inference cost
+  regresses. Suites live in `test/types/*.assert.ts` + `*.bench.ts` and run under node/tsx via
+  `scripts/type-perf.ts` (NOT bun — attest locates source files through node stack frames), as a
+  SEPARATE CI job out of the hot land gate. Worked reference in `packages/core/test/types/`; the
+  standard + adoption steps are in `docs/TYPE-PERF-TESTING.md` (drivers adopt).
 - **core:** `@schemic/core/testing` gains a shared COVERAGE RECONCILE — `describeCoverageReconcile`
   (+ the pure `reconcileCoverage` and `KindCoverage`/`FeatureCoverage` types) reconciles a driver's
   declared coverage manifest against the LIVE facts: `registry.names()` must exactly equal the declared
