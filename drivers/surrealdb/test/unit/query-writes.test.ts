@@ -6,9 +6,9 @@
 import { describe, expect, test } from "bun:test";
 import { DateTime, escapeIdent, RecordId } from "surrealdb";
 import { z } from "zod";
-import { defineTable, s, surql } from "../../src/index";
+import { defineRelation, defineTable, s, surql } from "../../src/index";
 import type { App } from "../../src/pure";
-import { create, remove, update, upsert } from "../../src/query";
+import { create, relate, remove, update, upsert } from "../../src/query";
 
 const Post = defineTable("post", {
   title: s.string(),
@@ -214,6 +214,93 @@ describe("upsert — create-or-update (same builder shape as update)", () => {
   });
 });
 
+describe("relate — RELATE from -> edge -> to", () => {
+  const RUser = defineTable("r_user", { name: s.string() });
+  const RPost = defineTable("r_post", { title: s.string() });
+  const Likes = defineRelation("likes", {
+    rating: s.int(),
+    at: s.datetime().optional(),
+  })
+    .from(RUser)
+    .to(RPost);
+  const alice = RUser.record().for("alice");
+  const bob = RUser.record().for("bob");
+  const post = RPost.record().for("p1");
+
+  test("basic RELATE lowers to from->edge->to with SET + RETURN AFTER", () => {
+    const { sql, vars } = relate(alice, Likes, post).set({ rating: 5 }).toSQL();
+    expect(sql).toBe(
+      `RELATE $__from->${escapeIdent("likes")}->$__to SET ${escapeIdent("rating")} = $__s0 RETURN AFTER`,
+    );
+    expect(String(vars.__from)).toBe("r_user:alice");
+    expect(String(vars.__to)).toBe("r_post:p1");
+    expect(vars.__s0).toBe(5);
+  });
+
+  test("CONTENT sets the whole edge body (in/out come from the path)", () => {
+    const { sql, vars } = relate(alice, Likes, post)
+      .content({ rating: 3 })
+      .toSQL();
+    expect(sql).toBe(
+      `RELATE $__from->${escapeIdent("likes")}->$__to CONTENT $__content RETURN AFTER`,
+    );
+    expect(vars.__content).toEqual({ rating: 3 });
+  });
+
+  test(".id(...) pins the edge record id; .only() -> RELATE ONLY", () => {
+    expect(
+      relate(alice, Likes, post).id("custom").set({ rating: 1 }).toSQL().sql,
+    ).toBe(
+      `RELATE $__from->likes:custom->$__to SET ${escapeIdent("rating")} = $__s0 RETURN AFTER`,
+    );
+    expect(
+      relate(alice, Likes, post).set({ rating: 1 }).only().toSQL().sql,
+    ).toBe(
+      `RELATE ONLY $__from->${escapeIdent("likes")}->$__to SET ${escapeIdent("rating")} = $__s0 RETURN AFTER`,
+    );
+  });
+
+  test(".timeout comes AFTER return; .set callback lowers edge expressions", () => {
+    expect(
+      relate(alice, Likes, post).set({ rating: 2 }).timeout("5s").toSQL().sql,
+    ).toBe(
+      `RELATE $__from->${escapeIdent("likes")}->$__to SET ${escapeIdent("rating")} = $__s0 RETURN AFTER TIMEOUT 5s`,
+    );
+    expect(
+      relate(alice, Likes, post)
+        .set((e) => ({ rating: e.rating.plus(1) }))
+        .toSQL().sql,
+    ).toMatch(
+      new RegExp(
+        `^RELATE \\$__from->${escapeIdent("likes")}->\\$__to SET rating = rating \\+ \\$r\\d+ RETURN AFTER$`,
+      ),
+    );
+  });
+
+  test("array endpoints fan out; a surql subquery endpoint splices as (…)", () => {
+    const fan = relate([alice, bob], Likes, post).set({ rating: 1 }).toSQL();
+    expect(Array.isArray(fan.vars.__from)).toBe(true);
+    expect((fan.vars.__from as unknown[]).map(String)).toEqual([
+      "r_user:alice",
+      "r_user:bob",
+    ]);
+
+    const sub = relate(surql`SELECT * FROM r_user`, Likes, post).toSQL();
+    expect(sub.sql).toBe(
+      `RELATE (SELECT * FROM r_user)->${escapeIdent("likes")}->$__to RETURN AFTER`,
+    );
+  });
+
+  test("endpoints are type-checked against the edge's .from()/.to()", () => {
+    // @ts-expect-error — a post can't be the SOURCE (from must be a r_user)
+    const _badFrom = () => relate(post, Likes, post);
+    // @ts-expect-error — a user can't be the TARGET (to must be a r_post)
+    const _badTo = () => relate(alice, Likes, alice);
+    expect(typeof _badFrom).toBe("function");
+    expect(typeof _badTo).toBe("function");
+  });
+});
+
 describe("output mode — .only() emits ONLY (single row instead of an array)", () => {
   test("create/update/remove .only() splice ONLY right after the verb", () => {
     expect(create(Post).content({ title: "x" }).only().toSQL().sql).toBe(
@@ -355,6 +442,53 @@ describe.skipIf(!LIVE_URL)(".set callback live", () => {
       .run(c);
     expect(row?.views).toBe(42);
     await c.query("REMOVE TABLE IF EXISTS post;");
+    await c.close();
+  }, 60_000);
+});
+
+describe.skipIf(!LIVE_URL)("relate live", () => {
+  test("single + fan-out + pinned edge id round-trip", async () => {
+    const { Surreal } = await import("surrealdb");
+    const { emitTable } = await import("../../src/ddl");
+    const RU = defineTable("rl_u", { name: s.string() });
+    const RP = defineTable("rl_p", { title: s.string() });
+    const Likes = defineRelation("rl_likes", { rating: s.int() })
+      .from(RU)
+      .to(RP);
+    const c = new Surreal();
+    await c.connect(LIVE_URL as string);
+    await c.signin({ username: "root", password: "root" });
+    await c.use({ namespace: "qw", database: "qw" });
+    for (const t of ["rl_u", "rl_p", "rl_likes"])
+      await c.query(`REMOVE TABLE IF EXISTS ${t};`);
+    for (const T of [RU, RP, Likes])
+      await c.query(emitTable(T, { exists: "overwrite" }));
+    const alice = (await create(RU).content({ name: "alice" }).only().run(c))!;
+    const bob = (await create(RU).content({ name: "bob" }).only().run(c))!;
+    const p1 = (await create(RP).content({ title: "hi" }).only().run(c))!;
+
+    const edge = await relate(alice.id, Likes, p1.id)
+      .set({ rating: 5 })
+      .only()
+      .run(c);
+    expect(edge?.rating).toBe(5);
+    expect(edge?.in.id).toBe(alice.id.id); // in/out decode to the endpoint records
+    expect(edge?.out.id).toBe(p1.id.id);
+
+    const fan = await relate([alice.id, bob.id], Likes, p1.id)
+      .set({ rating: 3 })
+      .run(c);
+    expect(fan).toHaveLength(2); // one edge per source (fan-out)
+
+    const pinned = await relate(alice.id, Likes, p1.id)
+      .id("special")
+      .set({ rating: 9 })
+      .only()
+      .run(c);
+    expect(String(pinned?.id)).toBe("rl_likes:special");
+
+    for (const t of ["rl_u", "rl_p", "rl_likes"])
+      await c.query(`REMOVE TABLE IF EXISTS ${t};`);
     await c.close();
   }, 60_000);
 });

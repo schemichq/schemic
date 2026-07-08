@@ -21,11 +21,15 @@ import type {
   TableDef,
 } from "./pure";
 import {
+  type AnyRelation,
   type CreateQuery,
   create,
   type DeleteQuery,
+  type Endpoint,
   type IdArgs,
   type Queryable,
+  type RelateQuery,
+  relate,
   remove,
   type Select,
   select,
@@ -215,6 +219,16 @@ export class Client implements OrmClientBase {
     );
   }
 
+  /** A connection-bound RELATE — `await db.relate(alice, Likes, post).set({ rating: 5 })` links the
+   *  endpoints with an edge record (endpoints type-checked against the edge's `.from()`/`.to()`). */
+  relate<E extends AnyRelation>(
+    from: Endpoint<E, "from">,
+    edge: E,
+    to: Endpoint<E, "to">,
+  ): RelateQuery<E, App<E>> {
+    return relate(from, edge, to, this.conn);
+  }
+
   /** A connection-bound function CALL — `await db.call(SendMail, { email, code })` runs
    *  `fn::send_mail(...)` and decodes via the def's `.returns(R)`. Args: literals (encoded+bound),
    *  fragments, or `surql.$` refs. */
@@ -327,6 +341,15 @@ export class Session implements OrmClientBase {
       table,
       ...([rest[0], this.session] as [TargetId<TD>?, Queryable?]),
     );
+  }
+
+  /** A session-bound RELATE (runs under this session's auth context). */
+  relate<E extends AnyRelation>(
+    from: Endpoint<E, "from">,
+    edge: E,
+    to: Endpoint<E, "to">,
+  ): RelateQuery<E, App<E>> {
+    return relate(from, edge, to, this.session);
   }
 
   /** A session-bound function CALL (runs under this session's auth context). */

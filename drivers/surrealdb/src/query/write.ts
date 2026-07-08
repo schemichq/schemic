@@ -19,8 +19,8 @@ import {
   type Project,
   type ProjectionField,
 } from "@schemic/core/query";
-import { BoundQuery, escapeIdent, type RecordId } from "surrealdb";
-import type { App, Create, TableDef, Update, Wire } from "../pure";
+import { BoundQuery, escapeIdent, RecordId } from "surrealdb";
+import type { App, Create, RelationDef, TableDef, Update, Wire } from "../pure";
 import { isParamRef } from "../pure";
 import { type Expr, lowerExpr, type Predicate, toExpr } from "./expr";
 import {
@@ -37,7 +37,13 @@ import {
   thingOf,
   toFragment,
 } from "./index";
-import { type Ctx, operandText, refState, stripOuterParens } from "./render";
+import {
+  type Ctx,
+  mergeRaw,
+  operandText,
+  refState,
+  stripOuterParens,
+} from "./render";
 
 export type { TargetId } from "./index";
 
@@ -613,6 +619,227 @@ export class DeleteQuery<
   }
 }
 
+// --- RELATE --------------------------------------------------------------------------------------
+
+/** Any graph relation (edge) def — the constraint for the `relate` builder. */
+// biome-ignore lint/suspicious/noExplicitAny: any relation's endpoint captures + edge shape vary.
+export type AnyRelation = RelationDef<string, any, string, string, any, any>;
+
+/** The `TableDef` union a captured `.from()/.to()` ref carries (bare-name endpoints drop to `never`). */
+type EndpointDefs<Ref> = Ref extends readonly (infer El)[]
+  ? Extract<El, AnyTableDef>
+  : Extract<Ref, AnyTableDef>;
+
+/** The endpoint node def(s) for a direction — the edge's `.from()` (source) / `.to()` (target). */
+type EndpointNodes<E, Dir extends "from" | "to"> = E extends RelationDef<
+  infer _N,
+  infer _S,
+  infer _In,
+  infer _Out,
+  infer F,
+  infer T
+>
+  ? EndpointDefs<Dir extends "from" ? F : T>
+  : never;
+
+/** The smart record id(s) accepted at an endpoint — the source/target tables' ids. Falls back to any
+ *  `RecordId` when the edge left that side unrestricted (bare-name / no `.from`/`.to`). */
+type EndpointId<E, Dir extends "from" | "to"> = [
+  EndpointNodes<E, Dir>,
+] extends [never]
+  ? RecordId
+  : App<EndpointNodes<E, Dir>> extends { id: infer I }
+    ? I
+    : RecordId;
+
+/** A RELATE endpoint: one record (single edge), an array of records (fan-out — one edge each), or a
+ *  `surql` subquery producing records. NOT a bare table (SurrealDB rejects it). */
+export type Endpoint<E, Dir extends "from" | "to"> =
+  | EndpointId<E, Dir>
+  | readonly EndpointId<E, Dir>[]
+  | BoundQuery;
+
+/** The edge body for RELATE `CONTENT` — the edge's create shape minus the `in`/`out` endpoints,
+ *  which the RELATE path supplies (so you never pass them in the body). */
+type EdgeContent<E extends AnyRelation> = Omit<Create<E>, "in" | "out">;
+
+/** Relate-specific clause state (immutable; cloned via `RelateQuery.rel`). */
+interface RelateExtra {
+  readonly edgeId?: string;
+  readonly mode?: "set" | "content";
+  readonly payload?: Record<string, unknown>;
+  readonly exprSet?: readonly { col: string; value: unknown }[];
+  readonly timeout?: string;
+}
+
+/** Lower a RELATE endpoint: a `surql` subquery splices as `(…)`; a record / record-array binds. */
+function endpointSQL(
+  ep: unknown,
+  key: string,
+  vars: Record<string, unknown>,
+): string {
+  if (ep instanceof BoundQuery) return `(${mergeRaw(ep, vars)})`;
+  vars[key] = ep;
+  return `$${key}`;
+}
+
+/** The RELATE write — `relate(from, Edge, to)` creates the edge record(s) linking the endpoints.
+ *  Same execute/decode/thenable core as the other writes (array by default; `.only()` -> `RELATE ONLY`).
+ *  Endpoints are type-checked against the edge's `.from()`/`.to()` (record / fan-out array / subquery). */
+export class RelateQuery<
+  E extends AnyRelation,
+  Res = App<E>,
+  Single extends boolean = false,
+> extends WriteQuery<E, Res, Single> {
+  constructor(
+    edge: E,
+    private readonly fromEp: unknown,
+    private readonly toEp: unknown,
+    ret: Ret = "after",
+    decode = true,
+    conn?: Queryable,
+    only = false,
+    private readonly x: RelateExtra = {},
+  ) {
+    super(edge, ret, decode, conn, only);
+  }
+  protected kind(): string {
+    return "relate";
+  }
+
+  /** Clone with a patched output mode + relate-specific state. */
+  private rel<R, S extends boolean>(
+    base: { ret?: Ret; decode?: boolean; onlyMode?: boolean },
+    patch: Partial<RelateExtra>,
+  ): RelateQuery<E, R, S> {
+    return new RelateQuery<E, R, S>(
+      this.table,
+      this.fromEp,
+      this.toEp,
+      base.ret ?? this.ret,
+      base.decode ?? this.decode,
+      this.conn,
+      base.onlyMode ?? this.onlyMode,
+      { ...this.x, ...patch },
+    );
+  }
+
+  /** Output mode — emit `RELATE ONLY …`, returning the single edge (not an array). */
+  only(): RelateQuery<E, Res, true> {
+    return this.rel<Res, true>({ onlyMode: true }, {});
+  }
+
+  /** Pin a custom edge record id — `-> edge:<id> ->` (unlike reads, RELATE lets you fix the edge id). */
+  id(edgeId: string): RelateQuery<E, Res, Single> {
+    return this.rel<Res, Single>({}, { edgeId });
+  }
+
+  /** Edge properties via `SET field = value, …`. The CALLBACK form takes typed edge refs (incl the
+   *  `in`/`out` endpoints) for expressions; literals go through the edge's `Update` codec. */
+  set(patch: Update<E>): RelateQuery<E, Res, Single>;
+  set(fn: (edge: Row<E>) => SetSpec<E>): RelateQuery<E, Res, Single>;
+  set(
+    arg: Update<E> | ((edge: Row<E>) => SetSpec<E>),
+  ): RelateQuery<E, Res, Single> {
+    if (typeof arg === "function") {
+      const spec = arg(refsFor(this.table)) as Record<string, unknown>;
+      const literals: Record<string, unknown> = {};
+      const exprs: { col: string; value: unknown }[] = [];
+      for (const [k, v] of Object.entries(spec)) {
+        if (v === undefined) continue;
+        if (isSetExpr(v)) exprs.push({ col: k, value: v });
+        else literals[k] = v;
+      }
+      const encoded = Object.keys(literals).length
+        ? (this.table.encodePartial(literals) as Record<string, unknown>)
+        : {};
+      return this.rel<Res, Single>(
+        {},
+        { mode: "set", payload: encoded, exprSet: exprs },
+      );
+    }
+    return this.rel<Res, Single>(
+      {},
+      {
+        mode: "set",
+        payload: this.table.encodePartial(arg) as Record<string, unknown>,
+      },
+    );
+  }
+
+  /** Edge properties via `CONTENT { … }` — the whole edge body, validated via the edge's `Create`
+   *  codec. The `in`/`out` endpoints come from the RELATE path, so they are NOT part of the body. */
+  content(data: EdgeContent<E>): RelateQuery<E, Res, Single> {
+    return this.rel<Res, Single>(
+      {},
+      {
+        mode: "content",
+        payload: this.table.encode(data as Create<E>) as Record<
+          string,
+          unknown
+        >,
+      },
+    );
+  }
+
+  /** What the statement returns: `after` (default — the edge), a projection callback, or the
+   *  surreal-native `before`/`none`/`diff`. */
+  return(mode: "none"): RelateQuery<E, undefined, Single>;
+  return(mode: "before" | "after"): RelateQuery<E, App<E>, Single>;
+  return(mode: "diff"): RelateQuery<E, unknown, Single>;
+  return<P extends Record<string, FieldRefOps<unknown>>>(
+    fn: (row: Row<E>) => P,
+  ): RelateQuery<E, Project<P>, Single>;
+  return(
+    mode: WriteReturn | ((row: Row<E>) => Record<string, FieldRefOps<unknown>>),
+  ): RelateQuery<E, unknown, Single> {
+    const ret = typeof mode === "function" ? this.projOf(mode) : mode;
+    return this.rel<unknown, Single>({ ret }, {});
+  }
+
+  /** Cap the statement's run time — `RELATE … TIMEOUT 5s` (a duration literal). */
+  timeout(duration: string): RelateQuery<E, Res, Single> {
+    return this.rel<Res, Single>({}, { timeout: duration });
+  }
+
+  /** Skip decode — return the raw wire edge. */
+  raw(): RelateQuery<E, Wire<E>, Single> {
+    return this.rel<Wire<E>, Single>({ decode: false }, {});
+  }
+
+  toSQL(): Lowered {
+    const vars: Record<string, unknown> = {};
+    const from = endpointSQL(this.fromEp, "__from", vars);
+    const to = endpointSQL(this.toEp, "__to", vars);
+    // The edge segment: `edge` or a pinned `edge:<id>` (RecordId escapes the id part correctly).
+    const edgeSeg = this.x.edgeId
+      ? new RecordId(this.table.name, this.x.edgeId).toString()
+      : escapeIdent(this.table.name);
+    let clause = "";
+    if (this.x.mode === "content") {
+      vars.__content = this.x.payload;
+      clause = " CONTENT $__content";
+    } else if (this.x.mode === "set") {
+      const payload = this.x.payload ?? {};
+      const parts = Object.keys(payload).map((k, i) => {
+        vars[`__s${i}`] = payload[k];
+        return `${escapeIdent(k)} = $__s${i}`;
+      });
+      if (this.x.exprSet?.length) {
+        const ctx: Ctx = { vars };
+        for (const e of this.x.exprSet)
+          parts.push(`${escapeIdent(e.col)} = ${operandText(e.value, ctx)}`);
+      }
+      if (parts.length) clause = ` SET ${parts.join(", ")}`;
+    }
+    const timeout = this.x.timeout ? ` TIMEOUT ${this.x.timeout}` : "";
+    return {
+      sql: `RELATE ${this.onlyKw()}${from}->${edgeSeg}->${to}${clause} ${retClause(this.ret)}${timeout}`,
+      vars,
+    };
+  }
+}
+
 // --- factories -----------------------------------------------------------------------------------
 
 /** Start a `CREATE` — `create(User).content({ … })`. Returns the created row (decoded `App<TD>`).
@@ -702,4 +929,17 @@ export function remove<TD extends AnyTableDef>(
 ): DeleteQuery<TD, undefined> {
   const [target, conn] = writeTarget(table, rest);
   return new DeleteQuery<TD, undefined>(table, target, "none", true, conn);
+}
+
+/** Start a `RELATE` — `relate(alice, Likes, post).set({ rating: 5 })` links the endpoints with an
+ *  edge record. `from`/`to` are the app-typed records (or an array to fan out one edge each, or a
+ *  `surql` subquery) — type-checked against the edge's `.from()`/`.to()`. Returns the edge rows
+ *  (array; `.only()` for single). Pass a `conn` to pre-bind (the ORM client does). */
+export function relate<E extends AnyRelation>(
+  from: Endpoint<E, "from">,
+  edge: E,
+  to: Endpoint<E, "to">,
+  conn?: Queryable,
+): RelateQuery<E, App<E>> {
+  return new RelateQuery<E, App<E>>(edge, from, to, "after", true, conn);
 }
