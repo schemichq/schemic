@@ -51,6 +51,14 @@ Each package wires one script (mirrors `packages/core`):
 CI runs it as a **separate `type-perf` job** — deliberately OUT of the hot `land.ts` gate, because
 attest's own TS program is slower and needs node/tsx.
 
+> **Driver suites need a built core.** A driver suite imports `@schemic/core/*` as a *package*, which
+> node/tsx resolves via the node condition (`lib/`), not the bun/`src` one — so `@schemic/core` (and
+> any cross-imported package) must be **built** first (`bun run --filter '*' build`) or the suite
+> throws `ERR_MODULE_NOT_FOUND` at runtime. A package's OWN suite imports its `src/` by relative path
+> and needs no build. The CI job builds before running; build locally too when you run a driver suite.
+> (attest's *type* pass still reads `src` via `customConditions: ["bun"]`, so instantiation counts stay
+> src-based regardless.)
+
 ## Adding a suite to a driver
 
 1. `bun add -d @ark/attest tsx` in your package (pin the same attest version core uses — instantiation
