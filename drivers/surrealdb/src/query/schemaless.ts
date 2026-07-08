@@ -8,7 +8,7 @@
 
 import type { Table } from "surrealdb";
 import { z } from "zod";
-import type { TableDef } from "../pure";
+import type { RelationDef, TableDef } from "../pure";
 
 /** Marker brand for the untyped adapter (a registered symbol so it survives dual-instance loading). */
 export const SCHEMALESS: unique symbol = Symbol.for(
@@ -21,6 +21,17 @@ export type UntypedTable = string | Table;
 /** The synthetic table type for `string | Table`: an index-signature shape, so `App`/`Row`/`Create`/
  *  `Update` all collapse to `Record<string, unknown>` (data) / a proxy of generic refs (callbacks). */
 export type SchemalessTable = TableDef<string, Record<string, z.ZodUnknown>>;
+
+/** The synthetic RELATION type for an untyped `relate(...)` edge — endpoints are unrestricted
+ *  (`unknown` FromRef/ToRef -> any `RecordId`), the edge body is untyped. */
+export type SchemalessRelation = RelationDef<
+  string,
+  Record<string, z.ZodUnknown>,
+  string,
+  string,
+  unknown,
+  unknown
+>;
 
 /** True when a builder's table is the untyped adapter — its callback row is a proxy. */
 export function isSchemaless(table: unknown): boolean {

@@ -10,7 +10,13 @@ import {
   type ResolvedConfig,
   resolveConnection,
 } from "@schemic/core";
-import { type BoundQuery, Surreal, type SurrealSession } from "surrealdb";
+import {
+  type BoundQuery,
+  type RecordId,
+  Surreal,
+  type SurrealSession,
+  Table,
+} from "surrealdb";
 import { surrealDriver } from "./driver";
 import type {
   App,
@@ -22,6 +28,7 @@ import type {
 } from "./pure";
 import {
   type AnyRelation,
+  type CreateQuery,
   type CreateStart,
   create,
   type DeleteQuery,
@@ -31,10 +38,13 @@ import {
   type RelateQuery,
   relate,
   remove,
+  type SchemalessRelation,
+  type SchemalessTable,
   type Select,
   select,
   type TargetId,
   thingOf,
+  type UntypedTable,
   type UpdateQuery,
   update,
   upsert,
@@ -149,91 +159,157 @@ export class Client implements OrmClientBase {
   ) {}
 
   /** A connection-bound SELECT — awaitable (`await db.select(User).where(…).limit(10)`). Pass an id
-   *  to target one record (`db.select(User, id)` -> `FROM user:id`; add `.one()`/`.only()`). */
+   *  to target one record (`db.select(User, id)` -> `FROM user:id`; add `.one()`/`.only()`). An
+   *  untyped `db.select("user")` (name / SDK `Table`) reads `Record<string, unknown>` rows. */
+  select(
+    table: UntypedTable,
+    id?: RecordId | string,
+  ): Select<SchemalessTable, Record<string, unknown>>;
   select<TD extends AnyTable>(table: TD): Select<TD, App<TD>>;
   select<TD extends AnyTable>(table: TD, id: TargetId<TD>): Select<TD, App<TD>>;
-  select<TD extends AnyTable>(
-    table: TD,
-    id?: TargetId<TD>,
-  ): Select<TD, App<TD>> {
+  select(
+    table: AnyTable | UntypedTable,
+    id?: RecordId | string,
+    // biome-ignore lint/suspicious/noExplicitAny: impl; callers see the typed overloads.
+  ): Select<any, any> {
     return id === undefined
-      ? select(table, this.conn)
-      : select(table, id, this.conn);
+      ? select(table as AnyTable, this.conn)
+      : select(table as AnyTable, id, this.conn);
   }
 
   /** Fetch ONE record by id — `await db.get(User, id)` resolves to the decoded row or `undefined`.
-   *  Sugar for `db.select(User, id).one()`. */
+   *  Sugar for `db.select(User, id).one()`. Untyped for a plain name / SDK `Table`. */
+  get(
+    table: UntypedTable,
+    id: RecordId | string,
+  ): Select<SchemalessTable, Record<string, unknown>, true>;
   get<TD extends AnyTable>(
     table: TD,
     ...rest: IdArgs<TD, []>
-  ): Select<TD, App<TD>, true> {
+  ): Select<TD, App<TD>, true>;
+  get(
+    table: AnyTable | UntypedTable,
+    ...rest: [id?: RecordId | string]
+    // biome-ignore lint/suspicious/noExplicitAny: impl; callers see the typed overloads.
+  ): Select<any, any, true> {
+    // A schemaless table has no singleton to resolve — pass the id straight through.
+    if (typeof table === "string" || table instanceof Table)
+      return select(table, rest[0], this.conn).one();
     return select(
       table,
-      thingOf(table, rest[0]) as TargetId<TD>,
+      thingOf(table, rest[0]) as TargetId<AnyTable>,
       this.conn,
     ).one();
   }
 
   /** A connection-bound CREATE — `await db.create(User).content({ … })` mints a fresh id, or
    *  `db.create(User, id).content({ … })` creates that specific record (errors if it already exists;
-   *  use `db.upsert` for create-or-update). Returns the created row. */
+   *  use `db.upsert` for create-or-update). Untyped for a plain name / SDK `Table`. */
+  create(
+    table: UntypedTable,
+    ...rest: [id?: RecordId | string]
+  ): CreateQuery<SchemalessTable, Record<string, unknown>>;
   create<TD extends AnyTable>(
     table: TD,
     ...rest: [id?: TargetId<TD>]
-  ): CreateStart<TD> {
+  ): CreateStart<TD>;
+  create(
+    table: AnyTable | UntypedTable,
+    ...rest: [id?: RecordId | string]
+    // biome-ignore lint/suspicious/noExplicitAny: impl; callers see the typed overloads.
+  ): any {
     return create(
-      table,
-      ...([rest[0], this.conn] as [TargetId<TD>?, Queryable?]),
+      table as AnyTable,
+      ...([rest[0], this.conn] as [TargetId<AnyTable>?, Queryable?]),
     );
   }
 
   /** A connection-bound UPDATE — `await db.update(User, id).merge({ … })` (deep merge, via
    *  `User.update`) / `.content(row)` (replace) / `.set(patch)` for one record, or `db.update(User)
-   *  .set(…) [.where(…)]` for a BULK whole-table / filtered update. Returns the updated rows. */
+   *  .set(…) [.where(…)]` for a BULK whole-table / filtered update. Untyped for a plain name / Table. */
+  update(
+    table: UntypedTable,
+    ...rest: [id?: RecordId | string]
+  ): UpdateQuery<SchemalessTable, Record<string, unknown>>;
   update<TD extends AnyTable>(
     table: TD,
     ...rest: [id?: TargetId<TD>]
-  ): UpdateQuery<TD, App<TD>> {
+  ): UpdateQuery<TD, App<TD>>;
+  update(
+    table: AnyTable | UntypedTable,
+    ...rest: [id?: RecordId | string]
+    // biome-ignore lint/suspicious/noExplicitAny: impl; callers see the typed overloads.
+  ): UpdateQuery<any, any> {
     return update(
-      table,
-      ...([rest[0], this.conn] as [TargetId<TD>?, Queryable?]),
+      table as AnyTable,
+      ...([rest[0], this.conn] as [TargetId<AnyTable>?, Queryable?]),
     );
   }
 
   /** A connection-bound UPSERT (create-or-update) — `await db.upsert(User, id).merge({ … })`
    *  upserts that record; `db.upsert(User)` mints a new row; `db.upsert(User).set(…).where(…)`
-   *  upserts the matching rows. Returns the upserted rows. */
+   *  upserts the matching rows. Untyped for a plain name / SDK `Table`. */
+  upsert(
+    table: UntypedTable,
+    ...rest: [id?: RecordId | string]
+  ): UpdateQuery<SchemalessTable, Record<string, unknown>>;
   upsert<TD extends AnyTable>(
     table: TD,
     ...rest: [id?: TargetId<TD>]
-  ): UpdateQuery<TD, App<TD>> {
+  ): UpdateQuery<TD, App<TD>>;
+  upsert(
+    table: AnyTable | UntypedTable,
+    ...rest: [id?: RecordId | string]
+    // biome-ignore lint/suspicious/noExplicitAny: impl; callers see the typed overloads.
+  ): UpdateQuery<any, any> {
     return upsert(
-      table,
-      ...([rest[0], this.conn] as [TargetId<TD>?, Queryable?]),
+      table as AnyTable,
+      ...([rest[0], this.conn] as [TargetId<AnyTable>?, Queryable?]),
     );
   }
 
   /** A connection-bound DELETE — `await db.delete(User, id)` for one record, or `db.delete(User)
    *  [.where(…)]` for a BULK whole-table / filtered delete; `.return("before")` hands back the
-   *  deleted rows. */
+   *  deleted rows. Untyped for a plain name / SDK `Table`. */
+  delete(
+    table: UntypedTable,
+    ...rest: [id?: RecordId | string]
+  ): DeleteQuery<SchemalessTable, undefined>;
   delete<TD extends AnyTable>(
     table: TD,
     ...rest: [id?: TargetId<TD>]
-  ): DeleteQuery<TD, undefined> {
+  ): DeleteQuery<TD, undefined>;
+  delete(
+    table: AnyTable | UntypedTable,
+    ...rest: [id?: RecordId | string]
+    // biome-ignore lint/suspicious/noExplicitAny: impl; callers see the typed overloads.
+  ): DeleteQuery<any, undefined> {
     return remove(
-      table,
-      ...([rest[0], this.conn] as [TargetId<TD>?, Queryable?]),
+      table as AnyTable,
+      ...([rest[0], this.conn] as [TargetId<AnyTable>?, Queryable?]),
     );
   }
 
   /** A connection-bound RELATE — `await db.relate(alice, Likes, post).set({ rating: 5 })` links the
-   *  endpoints with an edge record (endpoints type-checked against the edge's `.from()`/`.to()`). */
+   *  endpoints with an edge record (endpoints type-checked against the edge's `.from()`/`.to()`). An
+   *  untyped edge (plain name / SDK `Table`) takes any records as endpoints. */
+  relate(
+    from: RecordId | readonly RecordId[] | BoundQuery,
+    edge: UntypedTable,
+    to: RecordId | readonly RecordId[] | BoundQuery,
+  ): RelateQuery<SchemalessRelation, Record<string, unknown>>;
   relate<E extends AnyRelation>(
     from: Endpoint<E, "from">,
     edge: E,
     to: Endpoint<E, "to">,
-  ): RelateQuery<E, App<E>> {
-    return relate(from, edge, to, this.conn);
+  ): RelateQuery<E, App<E>>;
+  relate(
+    from: RecordId | readonly RecordId[] | BoundQuery,
+    edge: AnyRelation | UntypedTable,
+    to: RecordId | readonly RecordId[] | BoundQuery,
+    // biome-ignore lint/suspicious/noExplicitAny: impl; callers see the typed overloads.
+  ): RelateQuery<any, any> {
+    return relate(from, edge as AnyRelation, to, this.conn);
   }
 
   /** A connection-bound function CALL — `await db.call(SendMail, { email, code })` runs
@@ -286,83 +362,147 @@ export class Session implements OrmClientBase {
     readonly session: SurrealSession,
   ) {}
 
-  /** A session-bound SELECT (awaitable); pass an id to target one record. */
+  /** A session-bound SELECT (awaitable); pass an id to target one record. Untyped for a plain name. */
+  select(
+    table: UntypedTable,
+    id?: RecordId | string,
+  ): Select<SchemalessTable, Record<string, unknown>>;
   select<TD extends AnyTable>(table: TD): Select<TD, App<TD>>;
   select<TD extends AnyTable>(table: TD, id: TargetId<TD>): Select<TD, App<TD>>;
-  select<TD extends AnyTable>(
-    table: TD,
-    id?: TargetId<TD>,
-  ): Select<TD, App<TD>> {
+  select(
+    table: AnyTable | UntypedTable,
+    id?: RecordId | string,
+    // biome-ignore lint/suspicious/noExplicitAny: impl; callers see the typed overloads.
+  ): Select<any, any> {
     return id === undefined
-      ? select(table, this.session)
-      : select(table, id, this.session);
+      ? select(table as AnyTable, this.session)
+      : select(table as AnyTable, id, this.session);
   }
 
   /** Fetch ONE record by id, scoped to this session — sugar for `.select(User, id).one()`. */
+  get(
+    table: UntypedTable,
+    id: RecordId | string,
+  ): Select<SchemalessTable, Record<string, unknown>, true>;
   get<TD extends AnyTable>(
     table: TD,
     ...rest: IdArgs<TD, []>
-  ): Select<TD, App<TD>, true> {
+  ): Select<TD, App<TD>, true>;
+  get(
+    table: AnyTable | UntypedTable,
+    ...rest: [id?: RecordId | string]
+    // biome-ignore lint/suspicious/noExplicitAny: impl; callers see the typed overloads.
+  ): Select<any, any, true> {
+    if (typeof table === "string" || table instanceof Table)
+      return select(table, rest[0], this.session).one();
     return select(
       table,
-      thingOf(table, rest[0]) as TargetId<TD>,
+      thingOf(table, rest[0]) as TargetId<AnyTable>,
       this.session,
     ).one();
   }
 
   /** A session-bound CREATE — `create(User)` mints a fresh id, or `create(User, id)` a specific one. */
+  create(
+    table: UntypedTable,
+    ...rest: [id?: RecordId | string]
+  ): CreateQuery<SchemalessTable, Record<string, unknown>>;
   create<TD extends AnyTable>(
     table: TD,
     ...rest: [id?: TargetId<TD>]
-  ): CreateStart<TD> {
+  ): CreateStart<TD>;
+  create(
+    table: AnyTable | UntypedTable,
+    ...rest: [id?: RecordId | string]
+    // biome-ignore lint/suspicious/noExplicitAny: impl; callers see the typed overloads.
+  ): any {
     return create(
-      table,
-      ...([rest[0], this.session] as [TargetId<TD>?, Queryable?]),
+      table as AnyTable,
+      ...([rest[0], this.session] as [TargetId<AnyTable>?, Queryable?]),
     );
   }
 
   /** A session-bound UPDATE — one record (`update(User, id)`) or BULK (`update(User).set(…)
-   *  [.where(…)]`). */
+   *  [.where(…)]`). Untyped for a plain name / SDK `Table`. */
+  update(
+    table: UntypedTable,
+    ...rest: [id?: RecordId | string]
+  ): UpdateQuery<SchemalessTable, Record<string, unknown>>;
   update<TD extends AnyTable>(
     table: TD,
     ...rest: [id?: TargetId<TD>]
-  ): UpdateQuery<TD, App<TD>> {
+  ): UpdateQuery<TD, App<TD>>;
+  update(
+    table: AnyTable | UntypedTable,
+    ...rest: [id?: RecordId | string]
+    // biome-ignore lint/suspicious/noExplicitAny: impl; callers see the typed overloads.
+  ): UpdateQuery<any, any> {
     return update(
-      table,
-      ...([rest[0], this.session] as [TargetId<TD>?, Queryable?]),
+      table as AnyTable,
+      ...([rest[0], this.session] as [TargetId<AnyTable>?, Queryable?]),
     );
   }
 
   /** A session-bound UPSERT — one record (`upsert(User, id)`), a new row (`upsert(User)`), or a
-   *  filtered bulk upsert (`upsert(User).set(…).where(…)`). */
+   *  filtered bulk upsert (`upsert(User).set(…).where(…)`). Untyped for a plain name / SDK `Table`. */
+  upsert(
+    table: UntypedTable,
+    ...rest: [id?: RecordId | string]
+  ): UpdateQuery<SchemalessTable, Record<string, unknown>>;
   upsert<TD extends AnyTable>(
     table: TD,
     ...rest: [id?: TargetId<TD>]
-  ): UpdateQuery<TD, App<TD>> {
+  ): UpdateQuery<TD, App<TD>>;
+  upsert(
+    table: AnyTable | UntypedTable,
+    ...rest: [id?: RecordId | string]
+    // biome-ignore lint/suspicious/noExplicitAny: impl; callers see the typed overloads.
+  ): UpdateQuery<any, any> {
     return upsert(
-      table,
-      ...([rest[0], this.session] as [TargetId<TD>?, Queryable?]),
+      table as AnyTable,
+      ...([rest[0], this.session] as [TargetId<AnyTable>?, Queryable?]),
     );
   }
 
-  /** A session-bound DELETE — one record (`delete(User, id)`) or BULK (`delete(User) [.where(…)]`). */
+  /** A session-bound DELETE — one record (`delete(User, id)`) or BULK (`delete(User) [.where(…)]`).
+   *  Untyped for a plain name / SDK `Table`. */
+  delete(
+    table: UntypedTable,
+    ...rest: [id?: RecordId | string]
+  ): DeleteQuery<SchemalessTable, undefined>;
   delete<TD extends AnyTable>(
     table: TD,
     ...rest: [id?: TargetId<TD>]
-  ): DeleteQuery<TD, undefined> {
+  ): DeleteQuery<TD, undefined>;
+  delete(
+    table: AnyTable | UntypedTable,
+    ...rest: [id?: RecordId | string]
+    // biome-ignore lint/suspicious/noExplicitAny: impl; callers see the typed overloads.
+  ): DeleteQuery<any, undefined> {
     return remove(
-      table,
-      ...([rest[0], this.session] as [TargetId<TD>?, Queryable?]),
+      table as AnyTable,
+      ...([rest[0], this.session] as [TargetId<AnyTable>?, Queryable?]),
     );
   }
 
-  /** A session-bound RELATE (runs under this session's auth context). */
+  /** A session-bound RELATE (runs under this session's auth context). Untyped for a plain-name edge. */
+  relate(
+    from: RecordId | readonly RecordId[] | BoundQuery,
+    edge: UntypedTable,
+    to: RecordId | readonly RecordId[] | BoundQuery,
+  ): RelateQuery<SchemalessRelation, Record<string, unknown>>;
   relate<E extends AnyRelation>(
     from: Endpoint<E, "from">,
     edge: E,
     to: Endpoint<E, "to">,
-  ): RelateQuery<E, App<E>> {
-    return relate(from, edge, to, this.session);
+  ): RelateQuery<E, App<E>>;
+  relate(
+    from: RecordId | readonly RecordId[] | BoundQuery,
+    edge: AnyRelation | UntypedTable,
+    to: RecordId | readonly RecordId[] | BoundQuery,
+    // biome-ignore lint/suspicious/noExplicitAny: impl; callers see the typed overloads.
+  ): RelateQuery<any, any> {
+    return relate(from, edge as AnyRelation, to, this.session);
   }
 
   /** A session-bound function CALL (runs under this session's auth context). */

@@ -19,7 +19,7 @@ import {
   type Project,
   type ProjectionField,
 } from "@schemic/core/query";
-import { BoundQuery, escapeIdent, RecordId } from "surrealdb";
+import { BoundQuery, escapeIdent, RecordId, Table } from "surrealdb";
 import type { App, Create, RelationDef, TableDef, Update, Wire } from "../pure";
 import { isParamRef } from "../pure";
 import { type Expr, lowerExpr, type Predicate, toExpr } from "./expr";
@@ -46,6 +46,12 @@ import {
   refState,
   stripOuterParens,
 } from "./render";
+import {
+  type SchemalessRelation,
+  type SchemalessTable,
+  schemaless,
+  type UntypedTable,
+} from "./schemaless";
 
 export type { TargetId } from "./index";
 
@@ -931,23 +937,33 @@ export class RelateQuery<
  *  creates THAT record (`CREATE user:id …`, which errors if it already exists — unlike `upsert`).
  *  `id` is the app-typed `RecordId` or its plain string id part. Returns the created row (decoded
  *  `App<TD>`). Pass a `conn` to pre-bind (the ORM client does); omit it for `.run(conn)`. */
+export function create(
+  table: UntypedTable,
+  ...rest: [id?: RecordId | string, conn?: Queryable]
+): CreateQuery<SchemalessTable, Record<string, unknown>>;
 export function create<TD extends AnyTableDef>(
   table: TD,
   ...rest: [id?: TargetId<TD>, conn?: Queryable]
-): CreateStart<TD> {
+): CreateStart<TD>;
+export function create(
+  table: AnyTableDef | UntypedTable,
+  ...rest: [id?: RecordId | string, conn?: Queryable]
+  // biome-ignore lint/suspicious/noExplicitAny: impl signature; callers see the typed overloads.
+): any {
   // A given id creates THAT record; omitted, a SINGLETON creates its fixed record (`CREATE
-  // config:default`) and a normal table mints a random id (`target` stays undefined).
-  const [target, conn] = writeTarget(table, rest);
-  // Runtime is always a CreateQuery; the return TYPE narrows to PendingCreate when the table has a
-  // required field (so a contentless create won't type-check until `.content()` is supplied).
-  return new CreateQuery<TD, App<TD>>(
-    table,
-    undefined,
-    "after",
-    true,
-    conn,
-    target,
-  ) as CreateStart<TD>;
+  // config:default`) and a normal table mints a random id (`target` stays undefined). Runtime is
+  // always a CreateQuery; the typed overload narrows to PendingCreate / a schemaless CreateQuery.
+  const src = asTable(table);
+  const [target, conn] = writeTarget(src, rest);
+  return new CreateQuery(src, undefined, "after", true, conn, target);
+}
+
+/** Coerce a factory's table arg: a plain name / SDK `Table` becomes the untyped adapter; a
+ *  `TableDef` passes through. Lets every write factory accept `string | Table` (untyped). */
+function asTable(table: AnyTableDef | UntypedTable): AnyTableDef {
+  return typeof table === "string" || table instanceof Table
+    ? (schemaless(table) as unknown as AnyTableDef)
+    : table;
 }
 
 /** Resolve a write factory's `[id?, conn?]` args to a target + connection. An omitted id means the
@@ -967,13 +983,23 @@ function writeTarget(
 /** Start an `UPDATE` — `update(User, id).merge({ … })` for one record, or `update(User).set(…)
  *  [.where(…)]` for a BULK whole-table / filtered update (SurrealDB-faithful). `id` is the app-typed
  *  `RecordId` or its plain string id part. Returns the updated rows (array; `.only()` for single). */
+export function update(
+  table: UntypedTable,
+  ...rest: [id?: RecordId | string, conn?: Queryable]
+): UpdateQuery<SchemalessTable, Record<string, unknown>>;
 export function update<TD extends AnyTableDef>(
   table: TD,
   ...rest: [id?: TargetId<TD>, conn?: Queryable]
-): UpdateQuery<TD, App<TD>> {
-  const [target, conn] = writeTarget(table, rest);
-  return new UpdateQuery<TD, App<TD>>(
-    table,
+): UpdateQuery<TD, App<TD>>;
+export function update(
+  table: AnyTableDef | UntypedTable,
+  ...rest: [id?: RecordId | string, conn?: Queryable]
+  // biome-ignore lint/suspicious/noExplicitAny: impl signature; callers see the typed overloads.
+): UpdateQuery<any, any> {
+  const src = asTable(table);
+  const [target, conn] = writeTarget(src, rest);
+  return new UpdateQuery(
+    src,
     target,
     undefined,
     undefined,
@@ -987,13 +1013,23 @@ export function update<TD extends AnyTableDef>(
  *  `.set(patch)` upserts THAT record; `upsert(User)` (no id) mints a new row like `create`; a
  *  bulk `upsert(User).set(…).where(…)` upserts the matching rows. Same builder shape as `update`.
  *  Returns the upserted rows (array; `.only()` for single). */
+export function upsert(
+  table: UntypedTable,
+  ...rest: [id?: RecordId | string, conn?: Queryable]
+): UpdateQuery<SchemalessTable, Record<string, unknown>>;
 export function upsert<TD extends AnyTableDef>(
   table: TD,
   ...rest: [id?: TargetId<TD>, conn?: Queryable]
-): UpdateQuery<TD, App<TD>> {
-  const [target, conn] = writeTarget(table, rest);
-  return new UpdateQuery<TD, App<TD>>(
-    table,
+): UpdateQuery<TD, App<TD>>;
+export function upsert(
+  table: AnyTableDef | UntypedTable,
+  ...rest: [id?: RecordId | string, conn?: Queryable]
+  // biome-ignore lint/suspicious/noExplicitAny: impl signature; callers see the typed overloads.
+): UpdateQuery<any, any> {
+  const src = asTable(table);
+  const [target, conn] = writeTarget(src, rest);
+  return new UpdateQuery(
+    src,
     target,
     undefined,
     undefined,
@@ -1011,25 +1047,51 @@ export function upsert<TD extends AnyTableDef>(
  *  whole-table / filtered delete (named `remove` because `delete` is a reserved word; the bound
  *  client exposes it as `db.delete(…)`). Returns nothing by default; `.return("before")` hands back
  *  the deleted rows. */
+export function remove(
+  table: UntypedTable,
+  ...rest: [id?: RecordId | string, conn?: Queryable]
+): DeleteQuery<SchemalessTable, undefined>;
 export function remove<TD extends AnyTableDef>(
   table: TD,
   ...rest: [id?: TargetId<TD>, conn?: Queryable]
-): DeleteQuery<TD, undefined> {
-  const [target, conn] = writeTarget(table, rest);
-  return new DeleteQuery<TD, undefined>(table, target, "none", true, conn);
+): DeleteQuery<TD, undefined>;
+export function remove(
+  table: AnyTableDef | UntypedTable,
+  ...rest: [id?: RecordId | string, conn?: Queryable]
+  // biome-ignore lint/suspicious/noExplicitAny: impl signature; callers see the typed overloads.
+): DeleteQuery<any, undefined> {
+  const src = asTable(table);
+  const [target, conn] = writeTarget(src, rest);
+  return new DeleteQuery(src, target, "none", true, conn);
 }
 
 /** Start a `RELATE` — `relate(alice, Likes, post).set({ rating: 5 })` links the endpoints with an
  *  edge record. `from`/`to` are the app-typed records (or an array to fan out one edge each, or a
  *  `surql` subquery) — type-checked against the edge's `.from()`/`.to()`. Returns the edge rows
  *  (array; `.only()` for single). Pass a `conn` to pre-bind (the ORM client does). */
+export function relate(
+  from: RecordId | readonly RecordId[] | BoundQuery,
+  edge: UntypedTable,
+  to: RecordId | readonly RecordId[] | BoundQuery,
+  conn?: Queryable,
+): RelateQuery<SchemalessRelation, Record<string, unknown>>;
 export function relate<E extends AnyRelation>(
   from: Endpoint<E, "from">,
   edge: E,
   to: Endpoint<E, "to">,
   conn?: Queryable,
-): RelateQuery<E, App<E>> {
-  return new RelateQuery<E, App<E>>(edge, from, to, "after", true, conn);
+): RelateQuery<E, App<E>>;
+export function relate(
+  from: RecordId | readonly RecordId[] | BoundQuery,
+  edge: AnyRelation | UntypedTable,
+  to: RecordId | readonly RecordId[] | BoundQuery,
+  conn?: Queryable,
+  // biome-ignore lint/suspicious/noExplicitAny: impl signature; callers see the typed overloads.
+): RelateQuery<any, any> {
+  // A plain name / SDK `Table` edge becomes the untyped adapter; RelateQuery only reads TableDef
+  // members off the edge (name + codec), so the schemaless adapter works as the edge.
+  const e = asTable(edge) as unknown as AnyRelation;
+  return new RelateQuery(e, from, to, "after", true, conn);
 }
 
 // --- widened write aliases + the statement union --------------------------------------------------
