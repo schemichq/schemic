@@ -67,7 +67,9 @@ type ExprNode =
     }
   | { readonly kind: "and" | "or"; readonly parts: readonly Expr[] }
   | { readonly kind: "not"; readonly part: Expr }
-  | { readonly kind: "raw"; readonly q: BoundQuery };
+  | { readonly kind: "raw"; readonly q: BoundQuery }
+  // A BOOLEAN-valued ref used as a predicate leaf — `array::any(tags, |$v| $v = "x")`.
+  | { readonly kind: "refexpr"; readonly ref: RefState };
 
 /** Chainable boolean combinators — every predicate carries them, so `u.age.gte(18).and(...)`
  *  needs no standalone import. A raw `surql` fragment (`Frag<boolean>`) is accepted anywhere an
@@ -224,6 +226,27 @@ export interface ArrayRefOps<E> {
   reverse(): FieldRef<E[]>;
   slice(start: Operand<number>, len?: Operand<number>): FieldRef<E[]>;
   flatten(): FieldRef<unknown[]>;
+
+  // --- closures (`array::filter(tags, |$v| $v > 2)`) — the callback names the closure's `$param`
+  // and receives it as a typed ref of the ELEMENT type; nested closures get `$v2`, `$v3`, ….
+  /** `array::filter(col, |$v| <pred>)` — the elements matching the predicate. */
+  filter(fn: (v: FieldRef<E>) => Predicate): FieldRef<E[]>;
+  /** `array::map(col, |$v| <expr>)` — each element through the expression. */
+  map<R>(fn: (v: FieldRef<E>) => FieldRef<R>): FieldRef<R[]>;
+  /** `array::find(col, |$v| <pred>)` — the FIRST matching element. */
+  find(fn: (v: FieldRef<E>) => Predicate): FieldRef<E>;
+  /** `array::all(col, |$v| <pred>)` — do ALL elements match? A boolean, so it lands in `.where(…)`
+   *  directly; for a projectable value use `.filter(…).length()`. */
+  all(fn: (v: FieldRef<E>) => Predicate): Expr;
+  /** `array::any(col, |$v| <pred>)` — does ANY element match? See {@link ArrayRefOps.all}. */
+  any(fn: (v: FieldRef<E>) => Predicate): Expr;
+  /** `array::fold(col, <init>, |$acc, $v| <expr>)` — reduce from a seed. */
+  fold<A>(
+    init: Operand<A>,
+    fn: (acc: FieldRef<A>, v: FieldRef<E>) => FieldRef<A>,
+  ): FieldRef<A>;
+  /** `array::reduce(col, |$acc, $v| <expr>)` — reduce with the first element as the seed. */
+  reduce(fn: (acc: FieldRef<E>, v: FieldRef<E>) => FieldRef<E>): FieldRef<E>;
   /** `array::join(col, separator)`. */
   join(separator: Operand<string>): FieldRef<string>;
 }
@@ -333,6 +356,133 @@ function derivedMethod(state: RefState, spec: RefMethodSpec) {
 
 /** Build the runtime ref for a {@link RefState}: comparison ops + the stdlib family for its kind.
  *  Kind `other` gets guidance throwers on the stdlib names (see {@link allMethodNames}). */
+// --- array closures (`array::filter(tags, |$v| $v > 2)`) -------------------------------------------
+
+/**
+ * BUILD-TIME nesting depth of array closures. The closure's parameter name is baked into the refs
+ * handed to the callback, so it must be decided when the callback RUNS — here — not at render time.
+ * Naming by depth (`$v`, then `$v2` inside it) means a nested closure never shadows the outer one,
+ * and the emitted SQL doesn't depend on how many closures were built earlier in the process (a
+ * global counter would make identical queries lower to different text).
+ */
+let closureDepth = 0;
+
+/** The stdlib family a `fold` SEED carries, so `$acc` gets `.plus()` rather than the unknown-kind
+ *  stub. A ref/`$param` seed reports its own kind; a bare literal reports its JS type's. */
+function seedKind(init: unknown): RefKind {
+  const rs = refState(init);
+  if (rs) return rs.kind;
+  if (typeof init === "number") return "number";
+  if (typeof init === "string") return "string";
+  if (init instanceof Date) return "date";
+  if (Array.isArray(init)) return "array";
+  return "other";
+}
+
+/** Lower a closure BODY: a predicate lowers as a boolean expression, a ref renders, anything else
+ *  lowers as an operand (so a literal binds). */
+function closureBody(body: unknown, ctx: Ctx): string {
+  if (isExpr(body)) return lowerExpr(body, ctx);
+  const rs = refState(body);
+  return rs ? renderRef(rs, ctx) : operandText(body, ctx);
+}
+
+/** One `array::<fn>(<self>[, <init>], |$params| <body>)` closure method. `init` (fold's seed) is the
+ *  only value SurrealQL puts BETWEEN the array and the closure. */
+function closureCall(
+  state: RefState,
+  fn: string,
+  params: readonly string[],
+  paramKinds: readonly RefKind[],
+  cb: (...refs: FieldRef<unknown>[]) => unknown,
+  init: { readonly value: unknown } | undefined,
+): RefState {
+  const suffix = closureDepth === 0 ? "" : String(closureDepth + 1);
+  const names = params.map((p) => `${p}${suffix}`);
+  closureDepth++;
+  let body: unknown;
+  try {
+    body = cb(
+      ...names.map((n, i) =>
+        mkRef({ root: { text: `$${n}` }, kind: paramKinds[i] ?? "other" }),
+      ),
+    );
+  } finally {
+    closureDepth--;
+  }
+  const prev = state.wrap;
+  const base = (inner: string, ctx: Ctx) => (prev ? prev(inner, ctx) : inner);
+  return {
+    root: state.root,
+    kind: "other",
+    wrap: (inner, ctx) => {
+      const seed = init ? `, ${operandText(init.value, ctx)}` : "";
+      const ps = names.map((n) => `$${n}`).join(", ");
+      return `${fn}(${base(inner, ctx)}${seed}, |${ps}| ${closureBody(body, ctx)})`;
+    },
+  };
+}
+
+/** The closure-taking `array::*` builtins. They can't ride {@link RefMethodSpec} (which renders
+ *  `fn(self, ...operands)`): a closure argument needs its own `$param` ref scope, minted here and
+ *  handed to the callback. Verified on 3.1.4: `filter`/`map`/`all`/`any`/`find` take `|$v|`,
+ *  `fold` takes `(arr, init, |$acc, $v|)` and `reduce` `(arr, |$acc, $v|)`. */
+function attachClosureMethods(
+  impl: Record<string | symbol, unknown>,
+  state: RefState,
+): void {
+  const elem: RefKind = state.elem ?? "other";
+  /** `all`/`any` yield a BOOLEAN, so they surface as a predicate `Expr` (usable in `.where`), not
+   *  a ref. For the value side, reach for `.filter(…).length()`. */
+  const pred = (fn: string) => (cb: (v: FieldRef<unknown>) => unknown) =>
+    mkExpr({
+      kind: "refexpr",
+      ref: closureCall(state, fn, ["v"], [elem], cb, undefined),
+    });
+  const ref =
+    (fn: string, kind: RefKind, elemOut?: RefKind) =>
+    (cb: (v: FieldRef<unknown>) => unknown) =>
+      mkRef({
+        ...closureCall(state, fn, ["v"], [elem], cb, undefined),
+        kind,
+        elem: elemOut,
+      });
+
+  // filter keeps the element type; map's element type is whatever the body produced (unknown here).
+  impl.filter = ref("array::filter", "array", elem);
+  impl.map = ref("array::map", "array", undefined);
+  impl.find = ref("array::find", elem);
+  impl.all = pred("array::all");
+  impl.any = pred("array::any");
+  impl.fold = (
+    init: unknown,
+    cb: (acc: FieldRef<unknown>, v: FieldRef<unknown>) => unknown,
+  ): FieldRef<unknown> => {
+    // `$acc` carries the SEED's kind (a `0` seed makes `.plus()` reachable), not the element's.
+    const acc = seedKind(init);
+    return mkRef({
+      ...closureCall(state, "array::fold", ["acc", "v"], [acc, elem], cb, {
+        value: init,
+      }),
+      kind: acc,
+    });
+  };
+  impl.reduce = (
+    cb: (acc: FieldRef<unknown>, v: FieldRef<unknown>) => unknown,
+  ): FieldRef<unknown> =>
+    mkRef({
+      ...closureCall(
+        state,
+        "array::reduce",
+        ["acc", "v"],
+        [elem, elem],
+        cb,
+        undefined,
+      ),
+      kind: elem,
+    });
+}
+
 export function mkRef(state: RefState): FieldRef<unknown> {
   const cmp =
     (op: BinOp) =>
@@ -377,7 +527,9 @@ export function mkRef(state: RefState): FieldRef<unknown> {
   if (state.kind !== "other") {
     for (const [name, spec] of Object.entries(refMethods[state.kind]))
       impl[name] = derivedMethod(state, spec);
-  } else {
+  }
+  if (state.kind === "array") attachClosureMethods(impl, state);
+  if (state.kind === "other") {
     for (const name of allMethodNames) {
       if (name in impl) continue;
       impl[name] = () => {
@@ -513,6 +665,7 @@ export function lowerExpr(e: Expr, ctx: Ctx): string {
     return `(${lhs}) ${e.op} ${operandText(e.value, ctx)}`;
   }
   if (e.kind === "raw") return `(${mergeRaw(e.q, ctx.vars)})`;
+  if (e.kind === "refexpr") return renderRef(e.ref, ctx);
   if (e.kind === "not") return `!(${lowerExpr(e.part, ctx)})`;
   const joined = e.parts
     .map((p) => lowerExpr(p, ctx))
