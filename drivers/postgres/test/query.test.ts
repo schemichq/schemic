@@ -5,7 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import { defineTable, pgSql, s } from "../src";
 import type { App } from "../src/authoring";
-import { and, or, type SelectQuery, select } from "../src/query";
+import { and, not, or, type SelectQuery, select } from "../src/query";
 
 // A table with a numeric field (for comparisons), a Date field (timestamptz), and a TRANSFORMING codec
 // field via `$postgres` (wire text stored lowercase, app string read uppercase) — to prove decode runs.
@@ -74,6 +74,46 @@ describe("postgres/query — SQL lowering", () => {
         .where((r) => r.age.in([pgSql`24`, 30]))
         .toSQL().sql,
     ).toContain('"age" IN ((24), $1)');
+  });
+
+  test("a raw pgSql PREDICATE in where — column refs splice as identifiers", () => {
+    // `where(u => pgSql`${u.age} > 24`)` — the ref splices as "age", the literal is inline
+    expect(
+      select(user)
+        .where((r) => pgSql`${r.age} > 24`)
+        .toSQL(),
+    ).toEqual({
+      sql: 'SELECT "id", "name", "age", "createdAt", "slug" FROM "user" WHERE ("age" > 24);',
+      params: [],
+    });
+    // a ref splices while an interpolated VALUE still binds
+    expect(
+      select(user)
+        .where((r) => pgSql`${r.age} > ${24}`)
+        .toSQL(),
+    ).toEqual({
+      sql: 'SELECT "id", "name", "age", "createdAt", "slug" FROM "user" WHERE ("age" > $1);',
+      params: [24],
+    });
+  });
+
+  test("Expr.and/.or/.not chain, and raw predicates mix into them", () => {
+    const { sql, params } = select(user)
+      .where((r) => r.age.gte(18).and(pgSql`${r.name} <> 'x'`).not())
+      .toSQL();
+    expect(sql).toContain(`WHERE NOT (("age" >= $1 AND ("name" <> 'x')))`);
+    expect(params).toEqual([18]);
+    // free-function not(), and .or() taking a raw fragment
+    expect(
+      select(user)
+        .where((r) => not(r.age.gte(25)))
+        .toSQL().sql,
+    ).toContain('WHERE NOT ("age" >= $1)');
+    expect(
+      select(user)
+        .where((r) => r.age.lt(20).or(pgSql`${r.name} = 'x'`))
+        .toSQL().sql,
+    ).toContain(`WHERE ("age" < $1 OR ("name" = 'x'))`);
   });
 
   test("and/or compose", () => {

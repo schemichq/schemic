@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { emitKinds } from "@schemic/core";
-import { defineTable, s } from "../src";
+import { defineTable, pgSql, s } from "../src";
 import { connect, PgClient } from "../src/client";
 import type { PgConn } from "../src/connection";
 import { postgresDriver } from "../src/driver";
@@ -364,6 +364,20 @@ describe("postgres ORM client — query Phase 1 (live)", () => {
         ids(await db.select(post).where((r) => r.note.includes("o"))),
       ).toEqual(["p3"]); // p2 NULL excluded, p1 'hi' no 'o'
       expect(await db.select(post).where((r) => r.id.in([]))).toEqual([]); // empty IN -> no rows
+      // raw pgSql PREDICATE in where (column ref splices as an identifier), and Expr .and/.or/.not
+      expect(
+        ids(await db.select(post).where((r) => pgSql`${r.views} > 15`)),
+      ).toEqual(["p2", "p3"]); // prettier-ignore
+      expect(
+        ids(
+          await db
+            .select(post)
+            .where((r) => r.views.lt(30).and(pgSql`${r.title} <> 'alpha'`)),
+        ),
+      ).toEqual(["p2"]); // prettier-ignore
+      expect(
+        ids(await db.select(post).where((r) => r.views.gte(20).not())),
+      ).toEqual(["p1"]); // prettier-ignore
     } finally {
       await conn.close();
     }

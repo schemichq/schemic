@@ -41,18 +41,53 @@ type PredNode =
       op: "contains" | "any" | "all";
       value: unknown;
     }
-  | { kind: "and" | "or"; parts: PredNode[] };
+  | { kind: "and" | "or"; parts: PredNode[] }
+  | { kind: "not"; part: PredNode }
+  /** A whole raw `pgSql` predicate — `where(u => pgSql\`${u.age} > 24\`)`. Splices (parenthesized). */
+  | { kind: "raw"; frag: BoundPgQuery };
 
-/** An opaque boolean expression produced by field operators / `and`/`or` — rendered in `WHERE`. */
+/** An opaque boolean expression produced by field operators, `and`/`or`, or a raw `pgSql` predicate.
+ *  Chainable: `u.age.gte(18).and(u.name.eq("a")).not()`. */
 export class Expr {
   constructor(readonly node: PredNode) {}
+
+  /** `this AND …others` — each a typed `Expr` or a raw `pgSql` predicate. */
+  and(...others: Predicate[]): Expr {
+    return new Expr({
+      kind: "and",
+      parts: [this.node, ...others.map((o) => toExpr(o).node)],
+    });
+  }
+  /** `this OR …others` — each a typed `Expr` or a raw `pgSql` predicate. */
+  or(...others: Predicate[]): Expr {
+    return new Expr({
+      kind: "or",
+      parts: [this.node, ...others.map((o) => toExpr(o).node)],
+    });
+  }
+  /** `NOT (this)`. */
+  not(): Expr {
+    return new Expr({ kind: "not", part: this.node });
+  }
 }
 
-export function and(...parts: Expr[]): Expr {
-  return new Expr({ kind: "and", parts: parts.map((p) => p.node) });
+/** Anything usable as a boolean predicate: a typed {@link Expr} or a raw `pgSql` fragment. */
+export type Predicate = Expr | BoundPgQuery;
+
+/** Coerce a {@link Predicate} into an {@link Expr}: a raw `pgSql` fragment becomes a raw predicate
+ *  leaf; an `Expr` passes through. */
+const toExpr = (v: Predicate): Expr =>
+  v instanceof Expr ? v : new Expr({ kind: "raw", frag: v });
+
+export function and(...parts: Predicate[]): Expr {
+  return new Expr({ kind: "and", parts: parts.map((p) => toExpr(p).node) });
 }
-export function or(...parts: Expr[]): Expr {
-  return new Expr({ kind: "or", parts: parts.map((p) => p.node) });
+export function or(...parts: Predicate[]): Expr {
+  return new Expr({ kind: "or", parts: parts.map((p) => toExpr(p).node) });
+}
+/** `NOT (predicate)` — the free-function form of {@link Expr.not}. */
+export function not(p: Predicate): Expr {
+  return new Expr({ kind: "not", part: toExpr(p).node });
 }
 
 // --- field refs ----------------------------------------------------------------------------------
@@ -135,6 +170,10 @@ function makeRef(path: string, schema: z.ZodType): FieldRef<unknown> & RefImpl {
   return brandRef({
     __path: path,
     __schema: schema,
+    // `__pgRaw` is the `pgSql` splice protocol (same one `identifier()`/`raw()` use): interpolating a
+    // column ref into a template emits its quoted identifier instead of binding it as a param — so
+    // `pgSql`${u.age} > 24`` renders `"age" > 24`. Type-only refs never leak into a bind position.
+    __pgRaw: escId(path),
     eq: cmp("="),
     neq: cmp("<>"),
     lt: cmp("<"),
@@ -219,6 +258,11 @@ function renderPred(node: PredNode, b: Binder): string {
       return node.op === "contains"
         ? `${b.bind(node.value)} = ANY(${escId(node.path)})`
         : `${escId(node.path)} ${node.op === "any" ? "&&" : "@>"} ${b.bind(node.value)}`;
+    // a whole raw predicate — splice it (parenthesized) so it composes under AND/OR/NOT
+    case "raw":
+      return `(${b.splice(node.frag)})`;
+    case "not":
+      return `NOT (${renderPred(node.part, b)})`;
   }
   const joiner = node.kind === "and" ? " AND " : " OR ";
   return `(${node.parts.map((p) => renderPred(p, b)).join(joiner)})`;
@@ -300,8 +344,12 @@ export class SelectQuery<TD extends PgTableDef, Res>
     );
   }
 
-  where(cb: (row: Row<TD>) => Expr): SelectQuery<TD, Res> {
-    return this.with({ where: cb(rowOf(this.table) as unknown as Row<TD>) });
+  /** Filter rows. The callback returns an {@link Expr} (field ops / `and`/`or`/`not`) OR a whole raw
+   *  `pgSql` predicate — `where(u => pgSql\`${u.age} > 24\`)` (column refs splice as identifiers). */
+  where(cb: (row: Row<TD>) => Predicate): SelectQuery<TD, Res> {
+    return this.with({
+      where: toExpr(cb(rowOf(this.table) as unknown as Row<TD>)),
+    });
   }
 
   orderBy(
