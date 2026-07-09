@@ -46,9 +46,24 @@ describe("surql tag — eager marker resolution", () => {
     const inner = surql`age >= ${18}`;
     const q = surql`SELECT * FROM ${User} WHERE ${inner} AND name = ${"ada"}`;
     expect(q.query).toContain("FROM frag_user");
-    expect(q.query).not.toContain("18"); // bound, not inlined
+    // BOUND, not inlined. Assert on a TOKEN boundary, not a substring: the SDK names its params
+    // `bind__<n>` off a module-global counter (`getIncrementalID` — private to `surrealdb`, so it
+    // can neither be reset nor made per-query from here). Once it passes 180 the query reads
+    // `age >= $bind__181`, in which a plain `toContain("18")` finds the counter's digits and the
+    // test fails depending on WHICH FILES RAN BEFORE IT.
+    expect(q.query).not.toMatch(/(?<!\w)18(?!\w)/);
     expect(Object.values(q.bindings ?? {})).toContain(18);
     expect(Object.values(q.bindings ?? {})).toContain("ada");
+  });
+
+  test("the bind assertion holds however far the SDK's global counter has advanced", () => {
+    // Reproduces the order-dependence directly: burn enough ids that the next `bind__` name
+    // contains "18", then re-assert. Guards the fix above against a regression to `toContain`.
+    for (let i = 0; i < 200; i++) void surql`x = ${i}`;
+    const q = surql`SELECT * WHERE age >= ${18}`;
+    expect(q.query).toMatch(/\$bind__\d+/);
+    expect(q.query).not.toMatch(/(?<!\w)18(?!\w)/);
+    expect(Object.values(q.bindings ?? {})).toContain(18);
   });
 
   test("surql.record builds type::record with the typed table ref", () => {
