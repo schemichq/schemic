@@ -1,11 +1,7 @@
-import { describe, expect, setDefaultTimeout, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { pgCommands } from "../src/commands";
 import type { PgConn } from "../src/connection";
 import { postgresDriver } from "../src/driver";
-
-// PGlite (WASM Postgres) cold-start + heavy round-trips exceed the DEFAULT 5s per-test timeout.
-// Set PER FILE: from a shared imported module setDefaultTimeout only reaches the first test file.
-setDefaultTimeout(30_000);
 
 // The driver-contributed CLI commands (sc <kind> <verb>). Core parses argv into ParsedCommandArgs and
 // hands run() a CommandContext; here we drive run() directly with a capturing `io` + a real PGlite conn,

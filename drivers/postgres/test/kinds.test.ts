@@ -1,4 +1,4 @@
-import { describe, expect, setDefaultTimeout, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { buildKindDiff, emitKinds } from "@schemic/core";
 import {
   option,
@@ -23,10 +23,6 @@ import {
   triggerPortable,
   viewPortable,
 } from "../src/kinds";
-
-// PGlite (WASM Postgres) cold-start + heavy round-trips exceed the DEFAULT 5s per-test timeout.
-// Set PER FILE: from a shared imported module setDefaultTimeout only reaches the first test file.
-setDefaultTimeout(30_000);
 
 // The postgres kind registry, post Option-A flip. The driver speaks kinds: explode(authoring) +
 // introspectAll feed the generic spine (emitKinds/buildKindDiff). These tests drive that spine

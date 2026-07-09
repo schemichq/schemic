@@ -1,4 +1,4 @@
-import { describe, expect, setDefaultTimeout, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { buildKindDiff, emitKinds } from "@schemic/core";
 import * as z from "zod";
 import { postgresDriver } from "../src/driver";
@@ -24,10 +24,6 @@ import {
 } from "../src/index";
 import { registry, splitTables } from "../src/kinds";
 import { lowerTable, pgLower } from "../src/lower";
-
-// PGlite (WASM Postgres) cold-start + heavy round-trips exceed the DEFAULT 5s per-test timeout.
-// Set PER FILE: from a shared imported module setDefaultTimeout only reaches the first test file.
-setDefaultTimeout(30_000);
 
 // The pg-native s.* authoring surface, post-flip: author with pg vocabulary -> lower to the driver's
 // table IR (lowerTable) -> split into kind objects -> emit pg DDL -> apply to a real PGlite ->

@@ -1,4 +1,4 @@
-import { describe, expect, setDefaultTimeout, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import type { ChainableDriverFactory } from "@schemic/core";
 import { defineConfig } from "@schemic/core/config";
 import type { ConnectionConfigBase } from "@schemic/core/driver";
@@ -13,10 +13,6 @@ import {
   postgresConnection,
   raw,
 } from "../src/index";
-
-// PGlite (WASM Postgres) cold-start + heavy round-trips exceed the DEFAULT 5s per-test timeout.
-// Set PER FILE: from a shared imported module setDefaultTimeout only reaches the first test file.
-setDefaultTimeout(30_000);
 
 // Additive multi-connection surface (built off feat/multi-connection): the `postgresConnection`
 // factory, the `pgSql` safe tagged-template builder, and `Driver.query`. No `connect`/config
