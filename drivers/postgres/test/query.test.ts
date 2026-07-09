@@ -3,7 +3,7 @@
 // transforming codec field), (c) .return(...) re-types to the projected decoded shape (type-level).
 
 import { describe, expect, test } from "bun:test";
-import { defineTable, s } from "../src";
+import { defineTable, pgSql, s } from "../src";
 import type { App } from "../src/authoring";
 import { and, or, type SelectQuery, select } from "../src/query";
 
@@ -48,6 +48,32 @@ describe("postgres/query — SQL lowering", () => {
       'SELECT "id", "name", "age", "createdAt", "slug" FROM "user" WHERE "age" >= $1 ORDER BY "name" DESC LIMIT $2;',
     );
     expect(params).toEqual([18, 5]);
+  });
+
+  test("a pgSql fragment is a typed OPERAND — spliced (parens), not bound", () => {
+    // the headline: `u.age.gte(pgSql`24`)` — raw SQL as a comparison operand
+    expect(
+      select(user)
+        .where((r) => r.age.gte(pgSql`24`))
+        .toSQL(),
+    ).toEqual({
+      sql: 'SELECT "id", "name", "age", "createdAt", "slug" FROM "user" WHERE "age" >= (24);',
+      params: [],
+    });
+    // a fragment carrying its OWN bind renumbers + merges alongside other params
+    const { sql, params } = select(user)
+      .where((r) => and(r.name.eq("x"), r.age.gt(pgSql`${20} + 4`)))
+      .toSQL();
+    expect(sql).toBe(
+      'SELECT "id", "name", "age", "createdAt", "slug" FROM "user" WHERE ("name" = $1 AND "age" > ($2 + 4));',
+    );
+    expect(params).toEqual(["x", 20]);
+    // works inside IN too
+    expect(
+      select(user)
+        .where((r) => r.age.in([pgSql`24`, 30]))
+        .toSQL().sql,
+    ).toContain('"age" IN ((24), $1)');
   });
 
   test("and/or compose", () => {

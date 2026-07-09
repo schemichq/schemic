@@ -19,7 +19,7 @@ import {
 } from "@schemic/core/query";
 import { z } from "zod";
 import type { App, CreateInput, PgTableDef, UpdateInput } from "../authoring";
-import type { PgConn } from "../connection";
+import { type BoundPgQuery, isBoundPgQuery, type PgConn } from "../connection";
 import { escId } from "../emit";
 
 // --- expressions ---------------------------------------------------------------------------------
@@ -57,20 +57,26 @@ export function or(...parts: Expr[]): Expr {
 
 // --- field refs ----------------------------------------------------------------------------------
 
+/** A comparison operand: a plain VALUE (bound as a param) OR a raw `pgSql` fragment (spliced as SQL,
+ *  its binds merged) — so `u.age.gte(pgSql\`24\`)` / `u.at.lt(pgSql\`now() - interval '1 day'\`)` compose
+ *  raw SQL into the typed builder. The fragment escape hatch is untyped by nature (any `BoundPgQuery`). */
+export type Operand<T> = T | BoundPgQuery;
+
 /** The operators EVERY column carries: comparisons, set membership (`in`/`notIn`), and NULL checks
- *  (`isNone`/`isNotNone`, cross-driver names for `IS [NOT] NULL`). The neutral `FieldRefBase` carrier
- *  lets core's `Project` read the app type back. */
+ *  (`isNone`/`isNotNone`, cross-driver names for `IS [NOT] NULL`). Each comparison takes an
+ *  {@link Operand} — a value or a raw `pgSql` fragment. The neutral `FieldRefBase` carrier lets core's
+ *  `Project` read the app type back. */
 export interface FieldRefOps<T> extends FieldRefBase<T> {
-  eq(v: T): Expr;
-  neq(v: T): Expr;
-  lt(v: T): Expr;
-  lte(v: T): Expr;
-  gt(v: T): Expr;
-  gte(v: T): Expr;
-  /** `col IN (…)` — the value is one of. */
-  in(values: readonly T[]): Expr;
+  eq(v: Operand<T>): Expr;
+  neq(v: Operand<T>): Expr;
+  lt(v: Operand<T>): Expr;
+  lte(v: Operand<T>): Expr;
+  gt(v: Operand<T>): Expr;
+  gte(v: Operand<T>): Expr;
+  /** `col IN (…)` — the value is one of (each item a value or a raw `pgSql` fragment). */
+  in(values: readonly Operand<T>[]): Expr;
   /** `col NOT IN (…)`. */
-  notIn(values: readonly T[]): Expr;
+  notIn(values: readonly Operand<T>[]): Expr;
   /** `col IS NULL` — the (nullable) column is absent. */
   isNone(): Expr;
   /** `col IS NOT NULL`. */
@@ -170,16 +176,32 @@ class Binder {
     this.params.push(v);
     return `$${this.params.length}`;
   }
+  /** Splice a raw `pgSql` fragment: renumber its `$n` by the params already collected, merge its params,
+   *  and return the renumbered SQL. */
+  splice(frag: BoundPgQuery): string {
+    const sql = frag.query.replace(
+      /\$(\d+)/g,
+      (_m, n) => `$${this.params.length + Number(n)}`,
+    );
+    this.params.push(...frag.params);
+    return sql;
+  }
+}
+
+/** Render a comparison operand: a raw `pgSql` fragment splices (parenthesized, binds merged) as SQL; a
+ *  plain value binds as a positional param. */
+function renderOperand(v: unknown, b: Binder): string {
+  return isBoundPgQuery(v) ? `(${b.splice(v)})` : b.bind(v);
 }
 
 function renderPred(node: PredNode, b: Binder): string {
   switch (node.kind) {
     case "cmp":
-      return `${escId(node.path)} ${node.op} ${b.bind(node.value)}`;
+      return `${escId(node.path)} ${node.op} ${renderOperand(node.value, b)}`;
     case "in": {
       // an empty set: `IN ()` is invalid — `in [] ` is always false, `notIn []` always true.
       if (!node.values.length) return node.not ? "TRUE" : "FALSE";
-      const list = node.values.map((v) => b.bind(v)).join(", ");
+      const list = node.values.map((v) => renderOperand(v, b)).join(", ");
       return `${escId(node.path)} ${node.not ? "NOT IN" : "IN"} (${list})`;
     }
     case "null":

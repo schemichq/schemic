@@ -41,7 +41,9 @@ interface PgFragment {
 }
 const isFragment = (v: unknown): v is PgFragment =>
   typeof v === "object" && v !== null && "__pgRaw" in v;
-const isBound = (v: unknown): v is BoundPgQuery =>
+/** Is `v` a bound `pgSql` fragment (`{ query, params }`)? Exported so the query builder can accept a
+ *  raw fragment as a typed OPERAND (`u.age.gte(pgSql\`24\`)`) and splice it instead of binding. */
+export const isBoundPgQuery = (v: unknown): v is BoundPgQuery =>
   typeof v === "object" &&
   v !== null &&
   typeof (v as BoundPgQuery).query === "string" &&
@@ -79,7 +81,7 @@ export function pgSql(
     const v = values[i];
     if (isFragment(v)) {
       query += v.__pgRaw;
-    } else if (isBound(v)) {
+    } else if (isBoundPgQuery(v)) {
       // Compose: renumber the nested query's $n by the params already collected, then merge.
       query += v.query.replace(
         /\$(\d+)/g,
