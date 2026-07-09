@@ -1116,3 +1116,35 @@ describe("index kind — method + partial", () => {
     }
   });
 });
+
+describe("KindEngine.parent — dotted CLI addressing (index/constraint -> table)", () => {
+  test("index.parent() and constraint.parent() point at the owning table; owner stays declined", () => {
+    const idx = registry.engine("index");
+    const con = registry.engine("constraint");
+    // index: parent is the table it's ON -> dotted `sc index info user.user_email_idx`
+    expect(
+      idx?.parent?.({
+        kind: "index",
+        name: "user_email_idx",
+        table: "user",
+        cols: ["email"],
+        unique: true,
+      }),
+    ).toEqual({ kind: "table", name: "user" });
+    // constraint: parent is the table the FK is declared ON (not the referenced table)
+    expect(
+      con?.parent?.({
+        kind: "constraint",
+        name: "post_author_fkey",
+        table: "post",
+        ctype: "fk",
+        columns: ["author"],
+        refTable: "user",
+        refColumns: ["id"],
+      }),
+    ).toEqual({ kind: "table", name: "post" });
+    // owner stays declined: parent is the ADDRESSING hook; pg keeps its rank-group diff clustering
+    expect(idx?.owner).toBeUndefined();
+    expect(con?.owner).toBeUndefined();
+  });
+});

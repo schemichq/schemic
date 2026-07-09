@@ -340,6 +340,10 @@ const indexEngine: KindEngine<PgIndexPortable, PgIndexPortable> = {
   // to ordinal+name, so all indexes emit as a rank group after all tables (pg's emit convention),
   // rather than clustered next to each table. owner is opt-in readability we deliberately decline.
   deps: (i) => [tableRef(i.table)],
+  // `parent`: the STRUCTURAL container for CLI dotted addressing (`sc index info <table>.<name>`) +
+  // grouping — DISTINCT from `owner` (diff-clustering, declined above). So pg gets the dotted sugar while
+  // keeping the rank-group emit clustering; the CLI resolves parent ?? owner ?? flat.
+  parent: (i) => tableRef(i.table),
   // no overwrite: an index change is a drop+recreate (the spine's default).
 };
 
@@ -366,6 +370,9 @@ const constraintEngine: KindEngine<PgConstraintPortable, PgConstraintPortable> =
       c.refTable === c.table
         ? [tableRef(c.table)]
         : [tableRef(c.table), tableRef(c.refTable)],
+    // `parent`: the OWNING table (the one the FK is declared ON, not the referenced one) — dotted CLI
+    // addressing (`sc constraint info <table>.<fk>`) without adopting `owner` clustering. See index kind.
+    parent: (c) => tableRef(c.table),
     // no overwrite: a FK change is drop+recreate (the spine's default).
   };
 
