@@ -2,7 +2,7 @@
 // managed-vs-BYO dispose rule (managed closes, BYO is a no-op); AsyncDisposable; and that the classic
 // standalone `select(t).run(conn)` still works (the binding is additive).
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { emitKinds } from "@schemic/core";
 import { defineTable, s } from "../src";
 import { connect, PgClient } from "../src/client";
@@ -10,6 +10,10 @@ import type { PgConn } from "../src/connection";
 import { postgresDriver } from "../src/driver";
 import { registry } from "../src/kinds";
 import { select } from "../src/query";
+
+// PGlite (WASM Postgres) cold-start + heavy round-trips exceed the DEFAULT 5s per-test timeout.
+// Set PER FILE: from a shared imported module setDefaultTimeout only reaches the first test file.
+setDefaultTimeout(30_000);
 
 const user = defineTable("app_user", {
   id: s.text().$primaryKey(),
