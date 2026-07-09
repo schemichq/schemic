@@ -21,6 +21,11 @@ import {
   inlineAnalyzerFunctions,
   upperFilterClause,
 } from "../ddl";
+import {
+  assertCompleteDef,
+  requireFunctionBody,
+  unknownDefKind,
+} from "../pure";
 import type {
   AccessDef,
   AnalyzerDef,
@@ -303,10 +308,12 @@ function lowerFunction(fn: FunctionDef): StructFunction {
     n,
     fieldType(f),
   ]);
+  // A bodyless function is an ERROR, not an empty `{}` block — silently lowering it would land an
+  // empty function in the snapshot while `emit` throws on the very same def.
   const out: StructFunction = {
     name: fn.name,
     args,
-    block: fn.config.body !== undefined ? braceBody(fn.config.body) : "{}",
+    block: braceBody(requireFunctionBody(fn)),
   };
   if (fn.config.returns) out.returns = fieldType(fn.config.returns);
   const p = fn.config.permissions;
@@ -389,12 +396,18 @@ export function lowerParam(p: ParamDef): StructParam {
 export function fromStandalone(
   def: StandaloneDef,
 ): StructFunction | StructAccess | StructEvent | StructAnalyzer | StructParam {
+  // An unfinished builder chain (`defineAccess("x")` with no scope/TYPE) throws its teaching error
+  // here rather than mis-dispatching below.
+  assertCompleteDef(def);
   // An `EventDef` already carries `name`/`when`/`then` — the `TableEvent` shape `lowerEvent` reads.
   if (def.kind === "event") return lowerEvent(def.table, def);
   if (def.kind === "function") return lowerFunction(def);
   if (def.kind === "analyzer") return lowerAnalyzer(def);
   if (def.kind === "param") return lowerParam(def);
-  return lowerAccess(def);
+  // EXHAUSTIVE: never fall through to a sibling's lowerer (an unknown kind used to land in
+  // `lowerAccess` and die on `cfg.kind`).
+  if (def.kind === "access") return lowerAccess(def);
+  throw unknownDefKind(def);
 }
 
 /**

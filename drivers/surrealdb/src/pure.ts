@@ -4194,6 +4194,25 @@ interface AccessConfig {
 }
 
 /**
+ * Marks a NON-TERMINAL builder stage — a def whose chain was never finished (`defineAccess("x")` with
+ * no scope/TYPE). Such a stage deliberately ALSO carries `kind`/`name`, so the CLI's duck-typed
+ * collector picks it up: an unfinished def must fail LOUDLY with a teaching error at lower/emit rather
+ * than be silently dropped from the schema (which would make `ls`/`diff`/`pull` quietly ignore it).
+ * The stage is still absent from {@link StandaloneDef}, so finishing the chain stays a COMPILE-time
+ * requirement — this beacon only catches the untyped paths (a JS schema module, a bad cast).
+ *
+ * Registered via `Symbol.for` so it survives duplicate module instances (subpath splits).
+ */
+export const INCOMPLETE_DEF: unique symbol = Symbol.for(
+  "schemic.surrealdb.incompleteDef",
+);
+
+/** A non-terminal builder stage: carries the teaching message to throw. See {@link INCOMPLETE_DEF}. */
+export interface IncompleteDef {
+  readonly [INCOMPLETE_DEF]: string;
+}
+
+/**
  * An access definition — `DEFINE ACCESS <name> ON DATABASE TYPE …`. This is the shared **base** of the
  * staged builders: `defineAccess(name)` → {@link UnscopedAccessDef} (pick a scope) →
  * {@link DatabaseAccessDef}/{@link NamespaceAccessDef} (pick a type) → the type's own builder
@@ -4290,8 +4309,14 @@ export class BearerAccessDef extends AccessDef {
  * builder, so the choice is exclusive and only that type's clauses are reachable afterward. A bare
  * `.onDatabase()` is a non-terminal (like a bare `defineAccess("x")`) — you must pick a type.
  */
-export class DatabaseAccessDef {
+export class DatabaseAccessDef implements IncompleteDef {
+  /** Beacon only — see {@link INCOMPLETE_DEF}: makes the collector SEE this unfinished def so it
+   *  throws below instead of vanishing from the schema. Not a usable `AccessDef`. */
+  readonly kind = "access" as const;
   constructor(readonly name: string) {}
+  get [INCOMPLETE_DEF](): string {
+    return `access "${this.name}" has no TYPE — call .record(), .jwt({ … }) or .bearer({ for: "record" | "user" }) after .onDatabase().`;
+  }
   /** `TYPE RECORD` — end users sign up / sign in directly (database-only). */
   record(): RecordAccessDef {
     return new RecordAccessDef(this.name, {
@@ -4321,8 +4346,13 @@ export class DatabaseAccessDef {
  * or BEARER; those are the only choices here, which turns "record on namespace" from a runtime throw
  * into a compile error. A bare `.onNamespace()` is a non-terminal — you must pick `.jwt()` / `.bearer()`.
  */
-export class NamespaceAccessDef {
+export class NamespaceAccessDef implements IncompleteDef {
+  /** Beacon only — see {@link INCOMPLETE_DEF}. */
+  readonly kind = "access" as const;
   constructor(readonly name: string) {}
+  get [INCOMPLETE_DEF](): string {
+    return `access "${this.name}" has no TYPE — call .jwt({ … }) or .bearer({ for: "record" | "user" }) after .onNamespace() (TYPE RECORD is database-only).`;
+  }
   /** `TYPE JWT` — validate external tokens ({@link JwtConfig}): `{ url }` (JWKS) XOR `{ key, alg? }`
    *  (symmetric) XOR `{ key, alg, issuer? }` (asymmetric — public verify + optional private issuer). */
   jwt(opts: JwtConfig): JwtAccessDef {
@@ -4346,8 +4376,13 @@ export class NamespaceAccessDef {
  * type-enforced first step — `defineAccess("x").record()` is a compile error; `defineAccess("x")
  * .onDatabase().record()` is the way. (`TYPE RECORD` is database-only, so namespace access is JWT/BEARER.)
  */
-export class UnscopedAccessDef {
+export class UnscopedAccessDef implements IncompleteDef {
+  /** Beacon only — see {@link INCOMPLETE_DEF}. */
+  readonly kind = "access" as const;
   constructor(readonly name: string) {}
+  get [INCOMPLETE_DEF](): string {
+    return `access "${this.name}" is incomplete — it has no scope and no TYPE. Call .onDatabase() or .onNamespace(), then a TYPE: .record() / .jwt({ … }) / .bearer({ for: "record" | "user" }).`;
+  }
   /** `ON DATABASE` — database-scoped access (the only scope that supports `TYPE RECORD`). */
   onDatabase(): DatabaseAccessDef {
     return new DatabaseAccessDef(this.name);
@@ -4598,6 +4633,41 @@ export type StandaloneDef =
   | AccessDef
   | AnalyzerDef
   | ParamDef;
+
+/** The teaching message if `v` is an unfinished builder stage, else `undefined`. */
+export function incompleteDefMessage(v: unknown): string | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const msg = (v as Record<symbol, unknown>)[INCOMPLETE_DEF];
+  return typeof msg === "string" ? msg : undefined;
+}
+
+/** Throw the teaching error if `def` is an unfinished builder stage. Called by BOTH the lower and the
+ *  emit entry points, so every pipeline (`ls`/`diff`/`pull`/`migrate`) reports it the same way. */
+export function assertCompleteDef(def: unknown): void {
+  const msg = incompleteDefMessage(def);
+  if (msg !== undefined) throw new Error(msg);
+}
+
+/** An unrecognized `kind` on a collected def. The `never` parameter makes the dispatch sites
+ *  EXHAUSTIVE at compile time; at runtime it names the def, so an untyped schema module reads a schema
+ *  error rather than an internal crash inside whichever sibling emitter it fell through to. */
+export function unknownDefKind(def: never): Error {
+  const d = def as { kind?: unknown; name?: unknown };
+  return new Error(
+    `definition "${String(d.name)}" has an unknown kind "${String(d.kind)}" — expected one of: event, access, analyzer, param, function.`,
+  );
+}
+
+/** The `defineFunction` body, or the teaching error. Shared by lower + emit so a bodyless function can
+ *  never lower to an empty `{}` block (silently landing an empty function in the snapshot) while emit
+ *  throws — both paths must reject it identically. */
+export function requireFunctionBody(fn: FunctionDef): Expr {
+  if (fn.config.body === undefined)
+    throw new Error(
+      `function fn::${fn.name} has no body — call .body(surql\`…\`)`,
+    );
+  return fn.config.body;
+}
 
 /**
  * The underlying Zod schema of any s value: a field (`SField`), a table/relation def

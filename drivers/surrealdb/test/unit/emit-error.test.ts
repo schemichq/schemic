@@ -1,8 +1,17 @@
 import { describe, expect, test } from "bun:test";
+import { fromStandalone } from "../../src/cli/lower";
 import { buildSnapshot } from "../../src/cli/surreal-diff";
 import { emitDefStatement, emitTable } from "../../src/driver";
 import { surql } from "../../src/index";
-import { defineAccess, defineTable, RecordAccessDef, s } from "../../src/pure";
+import {
+  defineAccess,
+  defineAnalyzer,
+  defineFunction,
+  defineTable,
+  RecordAccessDef,
+  type StandaloneDef,
+  s,
+} from "../../src/pure";
 
 test("DEFINE ACCESS scope is a type-enforced first step (.onDatabase()/.onNamespace())", () => {
   // The type/clause methods don't exist until a scope is picked — a COMPILE error, which is the whole
@@ -41,6 +50,83 @@ test("emit defensively throws if an access somehow has no scope", () => {
   expect(() =>
     emitDefStatement(new RecordAccessDef("a", { kind: { type: "record" } })),
   ).toThrow(/no scope set — call \.onDatabase\(\) or \.onNamespace\(\)/);
+});
+
+// --- incomplete defs teach, never crash (and are never silently dropped) -------------------------
+describe("incomplete definitions", () => {
+  // The public API type-gates these (see the `_typeGate` above), so a JS schema module or a bad cast
+  // is how they reach the pipeline. They used to MIS-DISPATCH: a def with no `kind` fell through
+  // `emitDefStatement` into `emitFunction` and died on `undefined is not an object (fn.config.body)`.
+  const unscoped = () => defineAccess("account") as unknown as StandaloneDef;
+  const noType = () =>
+    defineAccess("account").onDatabase() as unknown as StandaloneDef;
+  const noTypeNs = () =>
+    defineAccess("account").onNamespace() as unknown as StandaloneDef;
+
+  test("an access with no scope + no TYPE names the next call to make", () => {
+    for (const go of [
+      () => emitDefStatement(unscoped()),
+      () => fromStandalone(unscoped()),
+    ]) {
+      expect(go).toThrow(/access "account" is incomplete/);
+      expect(go).toThrow(/\.onDatabase\(\) or \.onNamespace\(\)/);
+    }
+  });
+
+  test("a scoped access with no TYPE names only that scope's types", () => {
+    expect(() => emitDefStatement(noType())).toThrow(
+      /access "account" has no TYPE — call \.record\(\), \.jwt\(.+\) or \.bearer\(/,
+    );
+    expect(() => fromStandalone(noType())).toThrow(/has no TYPE/);
+    // RECORD is database-only, so the namespace stage must not suggest it.
+    expect(() => emitDefStatement(noTypeNs())).toThrow(
+      /TYPE RECORD is database-only/,
+    );
+    expect(() => emitDefStatement(noTypeNs())).not.toThrow(/\.record\(\)/);
+  });
+
+  test("an incomplete access is COLLECTED, not silently dropped", () => {
+    // core's loader duck-types `{ kind: string, name: string }`. Without a `kind` the unfinished
+    // stage vanished from the schema and `ls`/`diff`/`pull` quietly ignored it — worse than a crash.
+    const collected = (v: unknown) =>
+      !!v &&
+      typeof v === "object" &&
+      typeof (v as { kind?: unknown }).kind === "string" &&
+      typeof (v as { name?: unknown }).name === "string";
+    expect(collected(defineAccess("account"))).toBe(true);
+    expect(collected(defineAccess("account").onDatabase())).toBe(true);
+    expect(collected(defineAccess("account").onNamespace())).toBe(true);
+  });
+
+  test("a bodyless function throws on BOTH lower and emit (never an empty block)", () => {
+    // `lowerFunction` used to emit `block: "{}"`, landing an empty function in the snapshot while
+    // `emitFunction` threw on the very same def.
+    const bodyless = () => defineFunction("greet") as unknown as StandaloneDef;
+    expect(() => emitDefStatement(bodyless())).toThrow(
+      /function fn::greet has no body — call \.body\(/,
+    );
+    expect(() => fromStandalone(bodyless())).toThrow(
+      /function fn::greet has no body — call \.body\(/,
+    );
+  });
+
+  test("an unknown def kind is named, not mis-dispatched into a sibling emitter", () => {
+    const bogus = { kind: "widget", name: "w" } as unknown as StandaloneDef;
+    for (const go of [
+      () => emitDefStatement(bogus),
+      () => fromStandalone(bogus),
+    ]) {
+      expect(go).toThrow(/definition "w" has an unknown kind "widget"/);
+      expect(go).toThrow(/event, access, analyzer, param, function/);
+    }
+  });
+
+  test("defs that are legitimately clause-free still emit", () => {
+    // Guard the guards: a bare analyzer is VALID SurrealQL (verified on 3.1.4), so it must not throw.
+    expect(emitDefStatement(defineAnalyzer("english")).ddl).toBe(
+      "DEFINE ANALYZER english;",
+    );
+  });
 });
 
 test("a non-Surreal field type error names the field + table", () => {

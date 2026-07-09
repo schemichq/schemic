@@ -4,11 +4,13 @@ import type { z } from "zod";
 import {
   type AccessDef,
   type AnalyzerDef,
+  assertCompleteDef,
   type Expr,
   type FieldPermissions,
   type FunctionDef,
   objectFieldsRegistry,
   type PermOp,
+  requireFunctionBody,
   type SField,
   type Shape,
   type StandaloneDef,
@@ -17,6 +19,7 @@ import {
   type TableDef,
   type TableEvent,
   type TablePermissions,
+  unknownDefKind,
 } from "./pure";
 
 /** Inline a BoundQuery's bindings into a literal SurrealQL string for DDL use. Exported so the
@@ -532,11 +535,7 @@ function emitEvent(
 
 /** `DEFINE FUNCTION fn::<name>(<args>) [-> <returns>] { <body> } [PERMISSIONS …] [COMMENT …]`. */
 function emitFunction(fn: FunctionDef, opts?: DefineOptions): string {
-  if (fn.config.body === undefined) {
-    throw new Error(
-      `function fn::${fn.name} has no body — call .body(surql\`…\`)`,
-    );
-  }
+  const body = requireFunctionBody(fn);
   const args = Object.entries(fn.args)
     .map(([n, f]) => `$${n}: ${fieldType(f)}`)
     .join(", ");
@@ -544,7 +543,7 @@ function emitFunction(fn: FunctionDef, opts?: DefineOptions): string {
     `DEFINE FUNCTION ${existsPrefix(opts)}fn::${escapeIdent(fn.name)}(${args})`,
   ];
   if (fn.config.returns) parts.push(`-> ${fieldType(fn.config.returns)}`);
-  parts.push(braceBody(fn.config.body));
+  parts.push(braceBody(body));
   const p = fn.config.permissions;
   if (p !== undefined) {
     parts.push(
@@ -718,6 +717,9 @@ export function emitDefStatement(
   def: StandaloneDef,
   opts?: DefineOptions,
 ): DefineStatement {
+  // An unfinished builder chain (`defineAccess("x")` with no scope/TYPE) throws its teaching error
+  // here rather than mis-dispatching below.
+  assertCompleteDef(def);
   if (def.kind === "event") {
     return {
       kind: "event",
@@ -755,7 +757,12 @@ export function emitDefStatement(
         : {}),
     };
   }
-  return { kind: "function", name: def.name, ddl: emitFunction(def, opts) };
+  if (def.kind === "function") {
+    return { kind: "function", name: def.name, ddl: emitFunction(def, opts) };
+  }
+  // EXHAUSTIVE: never fall through to a sibling's emitter — a def of an unknown kind used to land in
+  // `emitFunction` and die on `fn.config.body`.
+  throw unknownDefKind(def);
 }
 
 /**
