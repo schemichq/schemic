@@ -12,14 +12,19 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 ## [Unreleased]
 
 ### Added
+- **core:** `KindEngine.parent?(portable)` — the STRUCTURAL container a nested kind is addressed/grouped
+  under (an index's/field's table), for the CLI's dotted `parent.child` addressing. DECOUPLED from
+  `owner` (which is a display-only diff-clustering choice): a kind can be addressable-as-nested
+  (`parent`) while declining per-parent diff clustering (`owner`), or vice versa. Addressing resolves
+  `parent ?? owner` (so a kind that only sets `owner` still addresses dotted, unchanged).
 - **cli:** READ-ONLY inspection commands — `sc <kind> ls` lists a kind's entities, `sc <kind> info
   <name>` dumps one entity's resolved DDL, and `sc ls` is a cross-kind overview (kinds + counts).
   Noun-first `sc <kind> <verb>` (so `access` is no longer special — it just also carries
   `rotate`/etc.), AUTO-GENERATED from the neutral kind registry so every driver gets them free.
   `--from snapshot` (DEFAULT — offline/fast) | `db` (live introspect) | `both` (snapshot vs DB with
   drift markers `= ~ + -`, degrading to snapshot-only when no DB is reachable). Table-scoped kinds
-  address dotted (`sc index info user.email_idx`, via the neutral `owner` hook). `--json` on all.
-  Driver + inspect `sc <kind> <verb>` actions now share one error formatter (clean `✗ <message>` +
+  address dotted (`sc index info user.email_idx`, via the neutral `parent`/`owner` hook). `--json` on
+  all. Driver + inspect `sc <kind> <verb>` actions now share one error formatter (clean `✗ <message>` +
   SCHEMIC_DEBUG stacks).
 - **core / repo:** TYPE-PERF testing standard (`@ark/attest`) — shared type-level test suites across
   the workspace: type-completeness assertions (`attest<Expected, Actual>()`) and per-expression

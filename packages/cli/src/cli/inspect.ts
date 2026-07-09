@@ -46,21 +46,26 @@ function engineMap(registry: KindRegistry): Map<string, AnyEngine> {
   return new Map(registry.entries());
 }
 
-/** The owning object's NAME for a table-scoped kind (index/event/…), via the neutral `owner` hook. */
-function ownerName(
+/**
+ * The NAME of the structural container a nested kind is addressed under. Prefers the dedicated
+ * `parent` hook (addressing) and falls back to `owner` (diff clustering) — a kind that only declares
+ * `owner` still addresses dotted, while a kind that declines `owner` (e.g. to keep its own diff
+ * clustering) can still opt into dotted addressing by declaring `parent`.
+ */
+function parentName(
   engine: AnyEngine | undefined,
   obj: PortableObject,
 ): string | undefined {
-  return engine?.owner?.(obj)?.name;
+  return (engine?.parent?.(obj) ?? engine?.owner?.(obj))?.name;
 }
 
-/** The addressable key: `table.name` for an owned kind, else the bare `name`. */
+/** The addressable key: `parent.name` for a nested kind, else the bare `name`. */
 export function addressOf(
   engine: AnyEngine | undefined,
   obj: PortableObject,
 ): string {
-  const owner = ownerName(engine, obj);
-  return owner ? `${owner}.${obj.name}` : obj.name;
+  const parent = parentName(engine, obj);
+  return parent ? `${parent}.${obj.name}` : obj.name;
 }
 
 /** Change-detection form: the kind's `canonical` if any, else its emitted DDL (the documented default). */

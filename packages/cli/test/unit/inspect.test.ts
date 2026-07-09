@@ -4,21 +4,29 @@ import { describe, expect, test } from "bun:test";
 import type { KindEngine, PortableObject } from "@schemic/core";
 import { addressOf, mergeKind, parseSource } from "../../src/cli/inspect";
 
-// A minimal fake engine: emit joins a `ddl` field; owner reads a `table` field; canonical = emit.
-// biome-ignore lint/suspicious/noExplicitAny: test doubles for the erased-at-seam engine.
-function fakeEngine(owned: boolean): KindEngine<any, any> {
+// biome-ignore lint/suspicious/noExplicitAny: the registry erases each engine's A/P at this seam.
+type FakeEngine = KindEngine<any, any>;
+
+// A minimal fake engine: emit joins a `ddl` field; owner/parent read `table`/`parent` fields off the
+// object; canonical = emit. `owner` = diff clustering, `parent` = addressing (the CLI prefers parent).
+function fakeEngine(opts: { owner?: boolean; parent?: boolean } = {}): FakeEngine {
   return {
     lower: (a: PortableObject) => a,
     emit: (o: PortableObject & { ddl?: string }) => [o.ddl ?? o.name],
     remove: () => [],
-    owner: owned
+    owner: opts.owner
       ? (o: PortableObject & { table?: string }) => ({
           kind: "table",
           name: o.table ?? "",
         })
       : undefined,
-    // biome-ignore lint/suspicious/noExplicitAny: partial engine is enough for these units.
-  } as any;
+    parent: opts.parent
+      ? (o: PortableObject & { parent?: string }) => ({
+          kind: "table",
+          name: o.parent ?? "",
+        })
+      : undefined,
+  } as unknown as FakeEngine;
 }
 
 const obj = (
@@ -41,18 +49,37 @@ describe("parseSource", () => {
 });
 
 describe("addressOf", () => {
-  test("top-level kind → bare name", () => {
-    expect(addressOf(fakeEngine(false), obj("table", "user"))).toBe("user");
+  test("top-level kind (no parent/owner) → bare name", () => {
+    expect(addressOf(fakeEngine(), obj("table", "user"))).toBe("user");
   });
-  test("table-scoped kind → table.name via the owner hook", () => {
+  test("owner-only kind → parent.name via the owner fallback", () => {
     expect(
-      addressOf(fakeEngine(true), obj("index", "email", { table: "user" })),
+      addressOf(
+        fakeEngine({ owner: true }),
+        obj("index", "email", { table: "user" }),
+      ),
     ).toBe("user.email");
+  });
+  test("parent-only kind (owner declined) → parent.name via the parent hook", () => {
+    expect(
+      addressOf(
+        fakeEngine({ parent: true }),
+        obj("index", "email", { parent: "user" }),
+      ),
+    ).toBe("user.email");
+  });
+  test("parent WINS over owner when both are set", () => {
+    expect(
+      addressOf(
+        fakeEngine({ owner: true, parent: true }),
+        obj("index", "email", { table: "clusterTbl", parent: "addrTbl" }),
+      ),
+    ).toBe("addrTbl.email");
   });
 });
 
 describe("mergeKind drift (--from both)", () => {
-  const eng = fakeEngine(false);
+  const eng = fakeEngine();
   test("no drift markers when only one side is loaded (snapshot-only)", () => {
     const rows = mergeKind(
       eng,
@@ -89,7 +116,7 @@ describe("mergeKind drift (--from both)", () => {
       obj("table", "user"),
       obj("index", "email", { table: "user" }),
     ];
-    const rows = mergeKind(fakeEngine(false), "table", snap, undefined);
+    const rows = mergeKind(fakeEngine(), "table", snap, undefined);
     expect(rows.map((r) => r.address)).toEqual(["user"]);
   });
 });

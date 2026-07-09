@@ -103,6 +103,15 @@ export interface KindEngine<
    */
   owner?(portable: P): Ref | undefined;
   /**
+   * The STRUCTURAL container this object is nested within (an index's/field's table) — used for
+   * ADDRESSING and grouping (the CLI's dotted `parent.child`, e.g. `sc index info user.email_idx`) and
+   * distinct from {@link owner}, which is a DISPLAY choice (diff clustering). A kind may declare `parent`
+   * (it IS nested) while declining `owner` (it doesn't want per-parent diff clustering), or vice versa.
+   * The CLI resolves a nesting address as `parent ?? owner` (so a kind that only sets `owner` still
+   * addresses dotted). Omitted (and no `owner`) = a top-level object, addressed by its bare name.
+   */
+  parent?(portable: P): Ref | undefined;
+  /**
    * Live connection -> all portable objects of THIS kind (the reverse direction). Introspection is
    * often one `INFO`/`pg_catalog` read yielding every kind at once; a driver backs all of its kinds'
    * `introspect` with one shared (memoized) read and slices out this kind's objects. Omitted -> this
