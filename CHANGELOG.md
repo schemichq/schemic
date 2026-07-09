@@ -20,12 +20,12 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
 - **cli:** READ-ONLY inspection commands — `sc <kind> ls` lists a kind's entities, `sc <kind> info
   <name>` dumps one entity's resolved DDL, and `sc ls` is a cross-kind overview (kinds + counts).
   Noun-first `sc <kind> <verb>` (so `access` is no longer special — it just also carries
-  `rotate`/etc.), AUTO-GENERATED from the neutral kind registry so every driver gets them free.
-  `--from snapshot` (DEFAULT — offline/fast) | `db` (live introspect) | `both` (snapshot vs DB with
-  drift markers `= ~ + -`, degrading to snapshot-only when no DB is reachable). Table-scoped kinds
-  address dotted (`sc index info user.email_idx`, via the neutral `parent`/`owner` hook). `--json` on
-  all. Driver + inspect `sc <kind> <verb>` actions now share one error formatter (clean `✗ <message>` +
-  SCHEMIC_DEBUG stacks).
+  `rotate`/etc.), AUTO-GENERATED from the neutral kind registry so every driver gets them free. Source
+  is what you DECLARED by default (the authored `define*` — always available even pre-`gen`, never
+  stale, fully offline); `--snapshot` reads the metaDir baseline, `--live` introspects the DB (matching
+  `diff --live`). Drift stays diff/check's lane. Table-scoped kinds address dotted (`sc index info
+  user.email_idx`, via the neutral `parent`/`owner` hook). `--json` on all. Driver + inspect
+  `sc <kind> <verb>` actions share one error formatter (clean `✗ <message>` + SCHEMIC_DEBUG stacks).
 - **core / repo:** TYPE-PERF testing standard (`@ark/attest`) — shared type-level test suites across
   the workspace: type-completeness assertions (`attest<Expected, Actual>()`) and per-expression
   instantiation BUDGETS (`bench(...).types([N])`) that fail when a hot generic's inference cost

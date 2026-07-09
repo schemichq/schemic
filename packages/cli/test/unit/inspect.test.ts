@@ -1,15 +1,18 @@
-// Pure logic of the `ls`/`info` inspection commands: --from parsing (snapshot default), table-scoped
-// addressing via the neutral owner hook, and the snapshot-vs-db drift merge (=/~/+/-).
+// Pure logic of the `ls`/`info` inspection commands: source-flag resolution (declared default,
+// --snapshot/--live mutually exclusive), table-scoped addressing (parent hook, owner fallback), and
+// per-kind address listing.
 import { describe, expect, test } from "bun:test";
 import type { KindEngine, PortableObject } from "@schemic/core";
-import { addressOf, mergeKind, parseSource } from "../../src/cli/inspect";
+import { addressesOfKind, addressOf, pickSource } from "../../src/cli/inspect";
 
 // biome-ignore lint/suspicious/noExplicitAny: the registry erases each engine's A/P at this seam.
 type FakeEngine = KindEngine<any, any>;
 
 // A minimal fake engine: emit joins a `ddl` field; owner/parent read `table`/`parent` fields off the
-// object; canonical = emit. `owner` = diff clustering, `parent` = addressing (the CLI prefers parent).
-function fakeEngine(opts: { owner?: boolean; parent?: boolean } = {}): FakeEngine {
+// object. `owner` = diff clustering, `parent` = addressing (the CLI prefers parent).
+function fakeEngine(
+  opts: { owner?: boolean; parent?: boolean } = {},
+): FakeEngine {
   return {
     lower: (a: PortableObject) => a,
     emit: (o: PortableObject & { ddl?: string }) => [o.ddl ?? o.name],
@@ -35,16 +38,18 @@ const obj = (
   extra: Record<string, unknown> = {},
 ): PortableObject => ({ kind, name, ...extra }) as PortableObject;
 
-describe("parseSource", () => {
-  test("defaults to snapshot (offline/fast)", () => {
-    expect(parseSource(undefined)).toBe("snapshot");
+describe("pickSource", () => {
+  test("defaults to declared (what you wrote — offline, never stale)", () => {
+    expect(pickSource({})).toBe("declared");
   });
-  test("accepts snapshot|db|both", () => {
-    expect(parseSource("db")).toBe("db");
-    expect(parseSource("both")).toBe("both");
+  test("--snapshot → snapshot, --live → live", () => {
+    expect(pickSource({ snapshot: true })).toBe("snapshot");
+    expect(pickSource({ live: true })).toBe("live");
   });
-  test("rejects anything else", () => {
-    expect(() => parseSource("live")).toThrow(/snapshot\|db\|both/);
+  test("--snapshot + --live is a teaching error", () => {
+    expect(() => pickSource({ snapshot: true, live: true })).toThrow(
+      /mutually exclusive/,
+    );
   });
 });
 
@@ -78,45 +83,22 @@ describe("addressOf", () => {
   });
 });
 
-describe("mergeKind drift (--from both)", () => {
-  const eng = fakeEngine();
-  test("no drift markers when only one side is loaded (snapshot-only)", () => {
-    const rows = mergeKind(
-      eng,
-      "table",
-      [obj("table", "user"), obj("table", "post")],
-      undefined,
-    );
-    expect(rows.map((r) => r.address)).toEqual(["post", "user"]); // sorted
-    expect(rows.every((r) => r.drift === undefined)).toBe(true);
-  });
-
-  test("= in sync, ~ differs, + only in db, - only in snapshot", () => {
-    const snap = [
-      obj("table", "same", { ddl: "DEFINE TABLE same" }),
-      obj("table", "changed", { ddl: "DEFINE TABLE changed A" }),
-      obj("table", "goneFromDb", { ddl: "x" }),
-    ];
-    const db = [
-      obj("table", "same", { ddl: "DEFINE TABLE same" }),
-      obj("table", "changed", { ddl: "DEFINE TABLE changed B" }),
-      obj("table", "newInDb", { ddl: "y" }),
-    ];
-    const byAddr = Object.fromEntries(
-      mergeKind(eng, "table", snap, db).map((r) => [r.address, r.drift]),
-    );
-    expect(byAddr.same).toBe("=");
-    expect(byAddr.changed).toBe("~");
-    expect(byAddr.newInDb).toBe("+");
-    expect(byAddr.goneFromDb).toBe("-");
-  });
-
-  test("filters to the requested kind", () => {
-    const snap = [
+describe("addressesOfKind", () => {
+  test("filters to the kind, addresses dotted, and sorts", () => {
+    const eng = fakeEngine({ parent: true });
+    const objects = [
+      obj("index", "b_idx", { parent: "user" }),
+      obj("index", "a_idx", { parent: "post" }),
       obj("table", "user"),
-      obj("index", "email", { table: "user" }),
     ];
-    const rows = mergeKind(fakeEngine(), "table", snap, undefined);
-    expect(rows.map((r) => r.address)).toEqual(["user"]);
+    expect(addressesOfKind(eng, "index", objects)).toEqual([
+      "post.a_idx",
+      "user.b_idx",
+    ]);
+  });
+  test("empty when the kind has no objects", () => {
+    expect(
+      addressesOfKind(fakeEngine(), "event", [obj("table", "user")]),
+    ).toEqual([]);
   });
 });
