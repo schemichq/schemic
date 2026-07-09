@@ -6,7 +6,13 @@
 import { describe, expect, test } from "bun:test";
 import { DateTime, escapeIdent, RecordId } from "surrealdb";
 import { z } from "zod";
-import { defineRelation, defineTable, s, surql } from "../../src/index";
+import {
+  defineParam,
+  defineRelation,
+  defineTable,
+  s,
+  surql,
+} from "../../src/index";
 import type { App } from "../../src/pure";
 import type {
   AnyCount,
@@ -15,6 +21,7 @@ import type {
   AnyUpdate,
 } from "../../src/query";
 import {
+  block,
   create,
   relate,
   remove,
@@ -427,6 +434,65 @@ describe("relate — RELATE from -> edge -> to", () => {
     const _badTo = () => relate(alice, Likes, alice);
     expect(typeof _badFrom).toBe("function");
     expect(typeof _badTo).toBe("function");
+  });
+
+  // A `$param` / block-var endpoint must SPLICE as its `$name`, never bind — binding it would hand
+  // the DB the literal ref object instead of the record it names.
+  describe("reference endpoints splice as $name (never bind)", () => {
+    test("a bare $param (surql.$) splices, contributing no bindings", () => {
+      const { sql, vars } = relate(surql.$.a, Likes, surql.$.b).toSQL();
+      expect(sql).toBe(`RELATE $a->${escapeIdent("likes")}->$b RETURN AFTER`);
+      expect(Object.keys(vars)).toEqual([]);
+    });
+
+    test("a defineParam def IS its $name reference", () => {
+      const Home = defineParam("home_user");
+      const { sql, vars } = relate(Home, Likes, post).toSQL();
+      expect(sql).toBe(
+        `RELATE $home_user->${escapeIdent("likes")}->$__to RETURN AFTER`,
+      );
+      expect(Object.keys(vars)).toEqual(["__to"]);
+    });
+
+    test("a block FOR loop var relates without dropping to raw surql", () => {
+      // The unlock: `FOR $u IN (SELECT * FROM r_user) { RELATE $u->likes->$__to }`. SurrealDB coerces
+      // the row object at an endpoint back to its id (verified on 3.1.4).
+      const { query } = block()
+        .for({ u: select(RUser) }, (v) => relate(v.u, Likes, post))
+        .toQuery();
+      expect(query).toContain("FOR $u IN (SELECT * FROM r_user)");
+      // `$u` SPLICES; the `post` endpoint still binds (the block renames inner binds, so match the
+      // splice + the bind's `$`-prefix rather than its generated name).
+      expect(query).toMatch(
+        new RegExp(`RELATE \\$u->${escapeIdent("likes")}->\\$\\w+`),
+      );
+    });
+
+    test("a LET block var works at either endpoint", () => {
+      const { query } = block()
+        .let({ target: select(RPost) })
+        .for({ u: select(RUser) }, (v) => relate(v.u, Likes, v.target))
+        .toQuery();
+      expect(query).toContain(`RELATE $u->${escapeIdent("likes")}->$target`);
+    });
+
+    test("a ref of the WRONG table is still a compile error", () => {
+      const _bad = () =>
+        block().for({ p: select(RPost) }, (v) =>
+          // @ts-expect-error — an r_post ref can't be the SOURCE (from must be an r_user)
+          relate(v.p, Likes, post),
+        );
+      expect(typeof _bad).toBe("function");
+    });
+
+    test("plain records still BIND under $__from/$__to (no regression)", () => {
+      const { sql, vars } = relate(alice, Likes, post).toSQL();
+      expect(sql).toBe(
+        `RELATE $__from->${escapeIdent("likes")}->$__to RETURN AFTER`,
+      );
+      expect(String(vars.__from)).toBe("r_user:alice");
+      expect(String(vars.__to)).toBe("r_post:p1");
+    });
   });
 });
 

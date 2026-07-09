@@ -12,7 +12,7 @@ import { bench } from "@ark/attest";
 import { defineRelation, defineTable, s, surql } from "../../src/index";
 import type { App, Create } from "../../src/pure";
 import type { Row } from "../../src/query";
-import { create, select } from "../../src/query";
+import { block, create, relate, select } from "../../src/query";
 
 const User = defineTable("user", {
   name: s.string(),
@@ -74,3 +74,15 @@ bench("graph: recursion p.repeat({min,max}, t => t.out(E))", () =>
     net: p.repeat({ min: 1, max: 3 }, (t) => t.out(PairsWith)),
   })),
 ).types([110416, "instantiations"]);
+
+// --- RELATE endpoints — the `Endpoint` union resolves the edge's .from()/.to() node types, and now
+// also admits `$param`/block-var refs. Guards that the ref branch stays cheap.
+bench("relate(record, Edge, record)", () =>
+  relate(User.record().for("u1"), Owns, Product.record().for("p1")),
+).types([109972, "instantiations"]);
+
+bench("relate(blockVar, Edge, record) — ref endpoint", () =>
+  block().for({ u: select(User) }, (v) =>
+    relate(v.u, Owns, Product.record().for("p1")),
+  ),
+).types([116235, "instantiations"]);

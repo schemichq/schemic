@@ -30,6 +30,7 @@ export {
   hasRefDeep,
   mergeRaw,
   operandText,
+  paramDefName,
   REF_STATE,
   type RefKind,
   type RefState,

@@ -14,13 +14,23 @@
  * are SurrealDB-native extras.
  */
 
+import type { FieldRefBase } from "@schemic/core/query";
 import {
   decodeProjection,
   type Project,
   type ProjectionField,
 } from "@schemic/core/query";
 import { BoundQuery, escapeIdent, RecordId, Table } from "surrealdb";
-import type { App, Create, RelationDef, TableDef, Update, Wire } from "../pure";
+import type {
+  App,
+  Create,
+  ParamDef,
+  ParamRef,
+  RelationDef,
+  TableDef,
+  Update,
+  Wire,
+} from "../pure";
 import { isParamRef } from "../pure";
 import { type Expr, lowerExpr, type Predicate, toExpr } from "./expr";
 import {
@@ -43,6 +53,7 @@ import {
   type Ctx,
   mergeRaw,
   operandText,
+  paramDefName,
   refState,
   stripOuterParens,
 } from "./render";
@@ -745,12 +756,51 @@ type EndpointId<E, Dir extends "from" | "to"> = [
     ? I
     : RecordId;
 
-/** A RELATE endpoint: one record (single edge), an array of records (fan-out — one edge each), or a
- *  `surql` subquery producing records. NOT a bare table (SurrealDB rejects it). */
+/** A record the endpoint may name by REFERENCE: its id, or its whole row — SurrealDB coerces a record
+ *  object back to its id at an endpoint (`RELATE $row->edge->…` stores `in: <row>.id`; verified on
+ *  3.1.4), which is what makes a `FOR $b IN (SELECT * FROM buffalo)` loop var work directly. */
+type EndpointRowOrId<E, Dir extends "from" | "to"> =
+  | EndpointId<E, Dir>
+  | App<EndpointNodes<E, Dir>>;
+
+/** The value an endpoint REF may carry: one record (single edge) or an array of them (fan-out).
+ *  An edge that left this side unrestricted carries `unknown` (any ref is accepted). */
+type EndpointRefValue<E, Dir extends "from" | "to"> = [
+  EndpointNodes<E, Dir>,
+] extends [never]
+  ? unknown
+  : EndpointRowOrId<E, Dir> | readonly EndpointRowOrId<E, Dir>[];
+
+/** An endpoint named by REFERENCE rather than by value — these splice as their `$name` TEXT, and must
+ *  never bind or the DB would see the literal instead of the reference:
+ *   - a typed block-var / field ref (`block().for({ b: select(Buffalo) }, (v) => relate(v.b, …))`),
+ *     checked against the edge's node type — a ref of the wrong table is a compile error;
+ *   - a bare `$param` (`surql.$.x`, or a `defineParam` def), the deliberate ESCAPE HATCH: it names a
+ *     param bound in an outer scope whose type we can't see, so the DB checks it. Same call as
+ *     `CallArgValue`. Type it with `surql.$.x.as<…>()` when you want the compile-time check back. */
+type EndpointRef<E, Dir extends "from" | "to"> =
+  | ParamRef
+  | ParamDef
+  | FieldRefBase<EndpointRefValue<E, Dir>>;
+
+/** A RELATE endpoint: one record (single edge), an array of records (fan-out — one edge each), a
+ *  `surql` subquery producing records, or a `$param`/block-var {@link EndpointRef}. NOT a bare table
+ *  (SurrealDB rejects it). */
 export type Endpoint<E, Dir extends "from" | "to"> =
   | EndpointId<E, Dir>
   | readonly EndpointId<E, Dir>[]
-  | BoundQuery;
+  | BoundQuery
+  | EndpointRef<E, Dir>;
+
+/** A RELATE endpoint on the UNTYPED (schemaless) `relate` — the same forms, but unconstrained: with
+ *  no edge def there are no `.from()`/`.to()` node types to check the record against. */
+export type UntypedEndpoint =
+  | RecordId
+  | readonly RecordId[]
+  | BoundQuery
+  | ParamRef
+  | ParamDef
+  | FieldRefBase<unknown>;
 
 /** The edge body for RELATE `CONTENT` — the edge's create shape minus the `in`/`out` endpoints,
  *  which the RELATE path supplies (so you never pass them in the body). */
@@ -765,13 +815,19 @@ interface RelateExtra {
   readonly timeout?: string;
 }
 
-/** Lower a RELATE endpoint: a `surql` subquery splices as `(…)`; a record / record-array binds. */
+/** Lower a RELATE endpoint: a `surql` subquery splices as `(…)`; a `$param` / block-var / field ref
+ *  splices as its `$name` TEXT (binding it would hand the DB the literal instead of the reference);
+ *  a plain record / record-array binds under the caller's key. */
 function endpointSQL(
   ep: unknown,
   key: string,
   vars: Record<string, unknown>,
 ): string {
   if (ep instanceof BoundQuery) return `(${mergeRaw(ep, vars)})`;
+  // Every reference form the operand vocabulary knows (`$param`, a `defineParam` def, a block-var /
+  // field ref) — `operandText` renders each as text, row-token-aware, merging any bindings.
+  if (isParamRef(ep) || paramDefName(ep) !== undefined || refState(ep))
+    return operandText(ep, { vars });
   vars[key] = ep;
   return `$${key}`;
 }
@@ -1066,13 +1122,14 @@ export function remove(
 }
 
 /** Start a `RELATE` — `relate(alice, Likes, post).set({ rating: 5 })` links the endpoints with an
- *  edge record. `from`/`to` are the app-typed records (or an array to fan out one edge each, or a
- *  `surql` subquery) — type-checked against the edge's `.from()`/`.to()`. Returns the edge rows
- *  (array; `.only()` for single). Pass a `conn` to pre-bind (the ORM client does). */
+ *  edge record. `from`/`to` are the app-typed records (or an array to fan out one edge each, a
+ *  `surql` subquery, or a `$param`/block-var ref — see {@link Endpoint}) — type-checked against the
+ *  edge's `.from()`/`.to()`. Returns the edge rows (array; `.only()` for single). Pass a `conn` to
+ *  pre-bind (the ORM client does). */
 export function relate(
-  from: RecordId | readonly RecordId[] | BoundQuery,
+  from: UntypedEndpoint,
   edge: UntypedTable,
-  to: RecordId | readonly RecordId[] | BoundQuery,
+  to: UntypedEndpoint,
   conn?: Queryable,
 ): RelateQuery<SchemalessRelation, Record<string, unknown>>;
 export function relate<E extends AnyRelation>(
@@ -1082,9 +1139,10 @@ export function relate<E extends AnyRelation>(
   conn?: Queryable,
 ): RelateQuery<E, App<E>>;
 export function relate(
-  from: RecordId | readonly RecordId[] | BoundQuery,
+  // The impl accepts every endpoint form both overloads admit; callers only see the overloads.
+  from: unknown,
   edge: AnyRelation | UntypedTable,
-  to: RecordId | readonly RecordId[] | BoundQuery,
+  to: unknown,
   conn?: Queryable,
   // biome-ignore lint/suspicious/noExplicitAny: impl signature; callers see the typed overloads.
 ): RelateQuery<any, any> {
