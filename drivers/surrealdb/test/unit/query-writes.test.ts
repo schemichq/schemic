@@ -10,6 +10,7 @@ import {
   defineParam,
   defineRelation,
   defineTable,
+  range,
   s,
   surql,
 } from "../../src/index";
@@ -347,6 +348,99 @@ describe("Any* widened aliases — receive a builder regardless of type params",
     // survives output-mode chaining (the discriminant persists through clones)
     expect(select(Post, "p1").only().kind).toBe("select");
     expect(update(Post, "p1").merge({ title: "x" }).only().kind).toBe("update");
+  });
+});
+
+// SurrealDB's `|table:…|` bulk-create target. Grammar + hazards verified on live 3.1.4.
+describe("create().ids() — bulk |table:range| / |table:count|", () => {
+  const Bulk = defineTable("bulk", {
+    tier: s.string().$default(surql`'free'`),
+  });
+
+  test("a range spans literal integer ids; the bound spelling carries through", () => {
+    expect(
+      create(Bulk)
+        .ids(range({ from: 1, to: 50 }))
+        .toSQL().sql,
+    ).toBe("CREATE |bulk:1..=50| RETURN AFTER");
+    expect(
+      create(Bulk)
+        .ids(range({ from: 1, until: 51 }))
+        .toSQL().sql,
+    ).toBe("CREATE |bulk:1..51| RETURN AFTER");
+    expect(
+      create(Bulk)
+        .ids(range({ after: 0, to: 50 }))
+        .toSQL().sql,
+    ).toBe("CREATE |bulk:0>..=50| RETURN AFTER");
+    // negative ids are legal signed integers
+    expect(
+      create(Bulk)
+        .ids(range({ from: -3, to: -1 }))
+        .toSQL().sql,
+    ).toBe("CREATE |bulk:-3..=-1| RETURN AFTER");
+  });
+
+  test("{ count } creates that many rows with RANDOM ids", () => {
+    // `|bulk:50|` is 50 random-id records, NOT the record `bulk:50` — hence the `{ count }` key
+    // rather than a bare `.ids(50)`, which would read like an id.
+    expect(create(Bulk).ids({ count: 50 }).toSQL().sql).toBe(
+      "CREATE |bulk:50| RETURN AFTER",
+    );
+    expect(create(Bulk).ids({ count: 0 }).toSQL().sql).toBe(
+      "CREATE |bulk:0| RETURN AFTER",
+    );
+  });
+
+  test(".content() gives every created record the same body", () => {
+    const { sql, vars } = create(Bulk)
+      .ids(range({ from: 1, to: 3 }))
+      .content({ tier: "pro" })
+      .toSQL();
+    expect(sql).toBe("CREATE |bulk:1..=3| CONTENT $__content RETURN AFTER");
+    expect(vars.__content).toEqual({ tier: "pro" });
+  });
+
+  test("an OPEN-ended id range is refused — the DB would never return", () => {
+    // `CREATE |bulk:1..|` asks for records without end: on 3.1.4 the bounded form answers in
+    // milliseconds while the open one hangs. Catch it here, not by wedging the query.
+    expect(() => create(Bulk).ids(range({ from: 1 }) as never)).toThrow(
+      /needs BOTH bounds/,
+    );
+    expect(() => create(Bulk).ids(range({ to: 10 }) as never)).toThrow(
+      /needs BOTH bounds/,
+    );
+  });
+
+  test("bounds must be literal integers (the |…| parser takes nothing else)", () => {
+    expect(() => create(Bulk).ids(range({ from: 1, to: 2.5 }))).toThrow(
+      /end bound must be a literal integer/,
+    );
+    expect(() =>
+      create(Bulk).ids(range({ from: "a", to: "z" }) as never),
+    ).toThrow(/start bound must be a literal integer/);
+    expect(() => create(Bulk).ids({ count: 1.5 })).toThrow(
+      /count must be a literal integer/,
+    );
+    expect(() => create(Bulk).ids({ count: -1 })).toThrow(
+      /count can't be negative/,
+    );
+  });
+
+  test("a pinned id and a range are mutually exclusive", () => {
+    expect(() => create(Bulk, "b1").ids({ count: 2 })).toThrow(
+      /targets one record AND a range/,
+    );
+  });
+
+  test("a required-field table stays a PendingCreate until .content()", () => {
+    // Post has a required `title`: `.ids()` must not unlock a runnable create on its own.
+    // @ts-expect-error — still pending; no `.toSQL()` until `.content()`
+    const _pending = () => create(Post).ids({ count: 2 }).toSQL();
+    expect(
+      create(Post).ids({ count: 2 }).content({ title: "x" }).toSQL().sql,
+    ).toBe("CREATE |post:2| CONTENT $__content RETURN AFTER");
+    expect(typeof _pending).toBe("function");
   });
 });
 

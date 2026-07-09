@@ -26,12 +26,13 @@ import type {
   Create,
   ParamDef,
   ParamRef,
+  Range,
   RelationDef,
   TableDef,
   Update,
   Wire,
 } from "../pure";
-import { isParamRef } from "../pure";
+import { isParamRef, isRange } from "../pure";
 import { type Expr, lowerExpr, type Predicate, toExpr } from "./expr";
 import {
   type AnySelect,
@@ -195,6 +196,45 @@ abstract class WriteQuery<
 
 // --- CREATE --------------------------------------------------------------------------------------
 
+/** How a BULK create names the records it makes: a literal id RANGE (`|t:1..=10|`) or a COUNT of
+ *  records with random ids (`|t:5|`). Both are the `|…|` "record-id range" target. */
+type IdSpan =
+  | { readonly kind: "range"; readonly sql: string }
+  | { readonly kind: "count"; readonly n: number };
+
+/** The `|…|` parser takes a literal SIGNED INTEGER and nothing else (a `$param` or a string bound
+ *  there is a parse error), so reject anything else here rather than shipping unparseable SQL. */
+function idBound(v: unknown, what: string): number {
+  if (typeof v !== "number" || !Number.isInteger(v))
+    throw new Error(
+      `create().ids(): the ${what} must be a literal integer (SurrealDB's \`|table:a..=b|\` target takes signed integers only — a $param or a string bound is a parse error); got ${JSON.stringify(v)}.`,
+    );
+  return v;
+}
+
+/** Lower a `range()` to the `|table:<span>|` id-range span. BOTH bounds are required: an open-ended
+ *  id range (`|t:1..|`) makes the DB try to create records forever — the query never returns
+ *  (verified on 3.1.4: the bounded form answers in milliseconds, `|t:1..|` hangs). */
+function idSpanOf(spec: Range<number> | { count: number }): IdSpan {
+  if (isRange(spec)) {
+    if (!spec.start || !spec.end)
+      throw new Error(
+        "create().ids(range): an id range needs BOTH bounds — an open-ended `|table:1..|` asks the DB to create records without end and the query never returns. Pass a start (`from`/`after`) AND an end (`to`/`until`).",
+      );
+    const a = idBound(spec.start.value, "start bound");
+    const b = idBound(spec.end.value, "end bound");
+    const gt = spec.start.exclusive ? ">" : "";
+    const eq = spec.end.exclusive ? "" : "=";
+    return { kind: "range", sql: `${a}${gt}..${eq}${b}` };
+  }
+  const n = idBound(spec.count, "count");
+  if (n < 0)
+    throw new Error(
+      `create().ids({ count }): the count can't be negative; got ${n}.`,
+    );
+  return { kind: "count", n };
+}
+
 export class CreateQuery<
   TD extends AnyTableDef,
   Res = App<TD>,
@@ -209,10 +249,40 @@ export class CreateQuery<
     /** A fixed CREATE target — a SINGLETON table creates ITS record (`CREATE config:default`). */
     private readonly target?: RecordId,
     only = false,
+    /** A BULK `|table:…|` target — set by `.ids()`, mutually exclusive with `target`. */
+    private readonly span?: IdSpan,
   ) {
     super(table, ret, decode, conn, only);
   }
   readonly kind = "create" as const;
+
+  /**
+   * Create MANY records in one statement, via SurrealDB's `|table:…|` record-id target:
+   *
+   *  - `.ids(range({ from: 1, to: 50 }))` -> `CREATE |user:1..=50|` — 50 rows with the ids `user:1`
+   *    … `user:50`. Bounds are literal integers (the `|…|` parser takes nothing else) and BOTH ends
+   *    are required — an open-ended range never returns.
+   *  - `.ids({ count: 50 })` -> `CREATE |user:50|` — 50 rows with RANDOM ids. (Spelled `{ count }`
+   *    on purpose: bare `.ids(50)` reads like the id `user:50`, which is not what `|user:50|` means.)
+   *
+   * Chain `.content(row)` to give every created record the same body.
+   */
+  ids(spec: Range<number> | { count: number }): CreateQuery<TD, Res, Single> {
+    if (this.target)
+      throw new Error(
+        `create(${this.table.name}, id).ids(…) targets one record AND a range — drop the id to create many, or drop .ids() to create that one.`,
+      );
+    return new CreateQuery<TD, Res, Single>(
+      this.table,
+      this.payload,
+      this.ret,
+      this.decode,
+      this.conn,
+      this.target,
+      this.onlyMode,
+      idSpanOf(spec),
+    );
+  }
 
   /** Output mode — emit `CREATE ONLY …`, returning the single created row (not an array). */
   only(): CreateQuery<TD, Res, true> {
@@ -224,6 +294,7 @@ export class CreateQuery<
       this.conn,
       this.target,
       true,
+      this.span,
     );
   }
 
@@ -238,6 +309,7 @@ export class CreateQuery<
       this.conn,
       this.target,
       this.onlyMode,
+      this.span,
     );
   }
 
@@ -263,6 +335,7 @@ export class CreateQuery<
       this.conn,
       this.target,
       this.onlyMode,
+      this.span,
     );
   }
 
@@ -276,13 +349,20 @@ export class CreateQuery<
       this.conn,
       this.target,
       this.onlyMode,
+      this.span,
     );
   }
 
   toSQL(): Lowered {
     // `.content()` is OPTIONAL — a contentless `CREATE t:id` makes an empty record (the schema's
     // defaults fill in; the DB still enforces any required-no-default field).
-    const tgt = this.target ? "$__thing" : escapeIdent(this.table.name);
+    // The `|table:…|` bulk target inlines LITERAL integers — the parser rejects a `$param` there.
+    const span = this.span;
+    const tgt = span
+      ? `|${escapeIdent(this.table.name)}:${span.kind === "range" ? span.sql : span.n}|`
+      : this.target
+        ? "$__thing"
+        : escapeIdent(this.table.name);
     const vars: Record<string, unknown> = {};
     if (this.target) vars.__thing = this.target;
     let content = "";
@@ -309,6 +389,9 @@ type RequiredKeys<T> = {
 export interface PendingCreate<TD extends AnyTableDef> {
   readonly kind: "create";
   content(data: Create<TD>): CreateQuery<TD, App<TD>>;
+  /** Bulk-create many records ({@link CreateQuery.ids}) — still pending until `.content()` supplies
+   *  the body every created record shares. */
+  ids(spec: Range<number> | { count: number }): PendingCreate<TD>;
 }
 
 /** What `create(T)` returns: a ready {@link CreateQuery} when every field is optional/defaulted (a
