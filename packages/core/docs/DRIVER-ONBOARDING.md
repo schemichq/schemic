@@ -133,6 +133,18 @@ source layout is the clean template: `authoring.ts -> lower.ts -> emit.ts -> dri
   (`describeCoverageReconcile` from `@schemic/core/testing` + a `coverage-manifest.ts`) so the
   done-vs-todo list can't silently drift from the registered kinds — see the template's reconcile
   section.
+- **DB-backed tests must raise bun's default timeout.** `bun test`'s per-test timeout is **5s**, which a
+  real database round-trip (PGlite, an ephemeral SurrealDB, a live handshake) blows past under load —
+  the whole workspace's suites run sequentially in the land gate, so "under load" is the normal case.
+  Prefer your package's `test` **script** (`bun test --timeout=30000`): one line, and a new test file
+  can't forget it. Explicit `setDefaultTimeout(30_000)` at the top of *every* DB-backed file also works,
+  but drifts — the next file added silently reverts to 5s. What does NOT work is a shared harness calling
+  `setDefaultTimeout()`: it only takes effect for the FIRST file that imports the harness. A test that
+  times out only under load produces spurious gate failures, rolls `main` back, and blames an innocent PR.
+- **But investigate a load-only timeout before you raise it.** It may be masking a real slow path, not a
+  slow test. The `three-state` e2e "flake" turned out to be a **5s connect ceiling in `sc` itself**,
+  aborting against a healthy-but-slow server — a bug every remote/cloud user would have hit. Raise the
+  TEST timeout to stop spurious failures; never raise a PRODUCT timeout to make a test pass.
 
 ## 7. Process
 
