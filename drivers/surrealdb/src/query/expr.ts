@@ -12,7 +12,7 @@
 import { brandRef, type FieldRefBase } from "@schemic/core/query";
 import { BoundQuery, escapeIdent, type RecordId } from "surrealdb";
 import { type RefMethodSpec, refMethods } from "../fn";
-import type { App, ParamDef, ParamRef, TableDef } from "../pure";
+import type { App, ParamDef, ParamRef, Range, TableDef } from "../pure";
 import {
   argRenderer,
   type Ctx,
@@ -149,10 +149,11 @@ export interface FieldRefOps<T> extends FieldRefBase<T> {
   lte(v: Operand<T>): Expr;
   gt(v: Operand<T>): Expr;
   gte(v: Operand<T>): Expr;
-  /** `col IN [...]` — the value is one of. */
-  in(values: Operand<readonly T[]>): Expr;
-  /** `col NOT IN [...]`. */
-  notIn(values: Operand<readonly T[]>): Expr;
+  /** `col IN [...]` — the value is one of a list, or falls inside a {@link Range}
+   *  (`age.in(range({ from: 18, to: 65 }))` -> `age IN 18..=65`). */
+  in(values: Operand<readonly T[]> | Range<NonNullable<T>>): Expr;
+  /** `col NOT IN [...]` — likewise, list or {@link Range}. */
+  notIn(values: Operand<readonly T[]> | Range<NonNullable<T>>): Expr;
   /** `col = NONE` — the field is absent (optional fields). */
   isNone(): Expr;
   /** `col != NONE` — the field is present. */

@@ -19,7 +19,7 @@
 
 import type { FieldRefBase } from "@schemic/core/query";
 import { BoundQuery } from "surrealdb";
-import type { ParamDef, ParamRef } from "../pure";
+import { isRange, type ParamDef, type ParamRef, type Range } from "../pure";
 import {
   type Expr,
   type FieldRef,
@@ -94,24 +94,27 @@ export type ValueOf<X> = X extends Expr
 
 /** The element type a `FOR` iterates. */
 type ElemOf<X> =
-  // biome-ignore lint/suspicious/noExplicitAny: matching any table's builder.
-  X extends Select<any, infer R>
-    ? R
-    : X extends BoundQuery<[infer T]>
-      ? T extends readonly (infer E)[]
-        ? E
-        : unknown
-      : X extends ParamRef<infer T>
+  // A RANGE iterates its bound type — `FOR $y IN 2020..=2022` binds `$y: number`.
+  X extends Range<infer B>
+    ? B
+    : // biome-ignore lint/suspicious/noExplicitAny: matching any table's builder.
+      X extends Select<any, infer R>
+      ? R
+      : X extends BoundQuery<[infer T]>
         ? T extends readonly (infer E)[]
           ? E
           : unknown
-        : X extends FieldRefBase<infer T>
+        : X extends ParamRef<infer T>
           ? T extends readonly (infer E)[]
             ? E
             : unknown
-          : X extends readonly (infer E)[]
-            ? E
-            : unknown;
+          : X extends FieldRefBase<infer T>
+            ? T extends readonly (infer E)[]
+              ? E
+              : unknown
+            : X extends readonly (infer E)[]
+              ? E
+              : unknown;
 
 /** The typed refs a block callback receives: every `LET` var (and `FOR` loop var) as a
  *  `FieldRef` splicing `$name`. */
@@ -131,6 +134,12 @@ type VarMeta = { name: string; kind: RefKind; elem?: RefKind };
 function kindOfValue(v: unknown): { kind: RefKind; elem?: RefKind } {
   const rs = refState(v);
   if (rs) return { kind: rs.kind, elem: rs.elem };
+  // A range ITERATES like an array of its bound type, so the loop var gets that type's stdlib.
+  if (isRange(v))
+    return {
+      kind: "array",
+      elem: kindOfValue((v.start ?? v.end)?.value).kind,
+    };
   if (v instanceof CountQuery) return { kind: "number" };
   if (v instanceof Select) return { kind: "array" };
   if (v instanceof Block) return v.out ?? { kind: "other" };

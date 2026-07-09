@@ -3893,6 +3893,131 @@ export function isParamRef(v: unknown): v is ParamRef {
     (v as Record<symbol, unknown>)[PARAM_REF_BRAND] === true
   );
 }
+
+// --- ranges (a SurrealQL VALUE, not a query clause) -----------------------------------------------
+
+const RANGE_BRAND: unique symbol = Symbol.for(
+  "schemic.surrealdb.range",
+) as never;
+
+/** One end of a {@link Range}: the bound value, and whether it is EXCLUDED from the range. */
+export interface RangeBound<T> {
+  readonly value: T;
+  readonly exclusive: boolean;
+}
+
+/**
+ * A SurrealQL RANGE — a first-class VALUE (`type::is_range(1..=5)` is true), not a clause. Spans
+ * `int`, `string`, `datetime`, and `array` bounds, and either end may be OPEN.
+ *
+ * SurrealQL spells the four bound combinations `a..b` / `a..=b` / `a>..b` / `a>..=b`: `>` after the
+ * start EXCLUDES it, `=` before the end INCLUDES it. Build one with {@link range}, whose key names
+ * carry the inclusivity so a call site can't be read the wrong way round.
+ *
+ * Usable wherever the DB takes a range: `WHERE age IN 18..=65`, `FOR $y IN 2020..=2022`,
+ * `<array>(1..=5)`. Bounds BIND as params in expression position (verified on 3.1.4).
+ */
+export class Range<T = unknown> {
+  /** Cross-realm brand: `Symbol.for("schemic.surrealdb.range")`. */
+  readonly [RANGE_BRAND] = true;
+  constructor(
+    /** The start bound; `undefined` = open (`..b`). */
+    readonly start: RangeBound<T> | undefined,
+    /** The end bound; `undefined` = open (`a..`). */
+    readonly end: RangeBound<T> | undefined,
+  ) {}
+}
+
+/** Cross-realm {@link Range} check (instanceof breaks across dual package instances). */
+export function isRange(v: unknown): v is Range {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    (v as Record<symbol, unknown>)[RANGE_BRAND] === true
+  );
+}
+
+/** The START of a range: `from` INCLUDES the bound, `after` EXCLUDES it; omit both for an open start. */
+type RangeStart<T> =
+  | { from: T; after?: never }
+  | { after: T; from?: never }
+  | { from?: never; after?: never };
+
+/** The END of a range: `to` INCLUDES the bound, `until` EXCLUDES it; omit both for an open end. */
+type RangeEnd<T> =
+  | { to: T; until?: never }
+  | { until: T; to?: never }
+  | { to?: never; until?: never };
+
+/** What {@link range} accepts — one start form and one end form (mixing `from`+`after`, or
+ *  `to`+`until`, is a compile error). */
+export type RangeSpec<T> = RangeStart<T> & RangeEnd<T>;
+
+/**
+ * Build a SurrealQL {@link Range}. Each key names its own inclusivity, so the bound is unambiguous
+ * at the call site (an off-by-one here is the classic range bug):
+ *
+ * | call                              | SurrealQL   | includes        |
+ * |-----------------------------------|-------------|-----------------|
+ * | `range({ from: 1, to: 10 })`      | `1..=10`    | 1 … 10          |
+ * | `range({ from: 1, until: 10 })`   | `1..10`     | 1 … 9           |
+ * | `range({ after: 0, to: 10 })`     | `0>..=10`   | 1 … 10          |
+ * | `range({ after: 0, until: 11 })`  | `0>..11`    | 1 … 10          |
+ * | `range({ from: 1 })`              | `1..`       | 1 … open        |
+ * | `range({ to: 10 })`               | `..=10`     | open … 10       |
+ *
+ * `range({ from: 18, to: 65 })` reads as "from 18 to 65", and is `18..=65`.
+ *
+ * NOTE: `T` is deliberately NOT inferred `const` — a range DENOTES every value between its bounds,
+ * so `range({ from: 2020, to: 2022 })` is a `Range<number>`, not `Range<2020 | 2022>`. Otherwise a
+ * `FOR $y IN 2020..=2022` loop var would type as `2020 | 2022` and silently omit 2021.
+ */
+export function range<T>(spec: RangeSpec<T>): Range<T> {
+  const { from, after, to, until } = spec as {
+    from?: T;
+    after?: T;
+    to?: T;
+    until?: T;
+  };
+  // The XOR is type-enforced; re-check at runtime for untyped callers (a JS schema module).
+  if (from !== undefined && after !== undefined)
+    throw new Error(
+      "range(): pass `from` (start included) OR `after` (start excluded), not both.",
+    );
+  if (to !== undefined && until !== undefined)
+    throw new Error(
+      "range(): pass `to` (end included) OR `until` (end excluded), not both.",
+    );
+  const start =
+    from !== undefined
+      ? { value: from, exclusive: false }
+      : after !== undefined
+        ? { value: after, exclusive: true }
+        : undefined;
+  const end =
+    to !== undefined
+      ? { value: to, exclusive: false }
+      : until !== undefined
+        ? { value: until, exclusive: true }
+        : undefined;
+  if (!start && !end)
+    throw new Error(
+      "range(): needs at least one bound — `from`/`after` (start) and/or `to`/`until` (end).",
+    );
+  return new Range<T>(start, end);
+}
+
+/** Render a range in a lowering pass — `a..b` / `a..=b` / `a>..b` / `a>..=b`, either end open. The
+ *  BOUNDS lower as operands, so a literal binds as a `$param` and a ref/`$param` splices as text. */
+export function renderRange(r: Range, ctx: Ctx): string {
+  const start = r.start
+    ? `${operandText(r.start.value, ctx)}${r.start.exclusive ? ">" : ""}`
+    : "";
+  const end = r.end
+    ? `${r.end.exclusive ? "" : "="}${operandText(r.end.value, ctx)}`
+    : "";
+  return `${start}..${end}`;
+}
 /** One argument to `Def.call(...)`: the app-typed literal (encoded + bound), a fragment
  *  (`BoundQuery` — spliced with its bindings merged), a `surql.$` param ref (spliced as text),
  *  a typed FIELD/BLOCK-VAR ref (`sv.code` from a `block()` chain — spliced), or any
@@ -4819,6 +4944,8 @@ export function mergeRaw(q: BoundQuery, vars: Record<string, unknown>): string {
  *  `BoundQuery` gets parens), anything else BINDS as a fresh `$b<n>` param. */
 export function operandText(v: unknown, ctx: Ctx): string {
   if (isParamRef(v)) return v.toText();
+  // A RANGE is a value, but renders as `a..=b` rather than binding whole — its BOUNDS bind.
+  if (isRange(v)) return renderRange(v, ctx);
   const param = paramDefName(v);
   if (param !== undefined) return `$${param}`;
   const rs = refState(v);
