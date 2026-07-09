@@ -19,8 +19,10 @@ tagged by package (**core** / **cli** / **surrealdb** / **postgres** / **setup**
   `parent ?? owner` (so a kind that only sets `owner` still addresses dotted, unchanged).
 - **cli:** READ-ONLY inspection commands — `sc <kind> ls` lists a kind's entities, `sc <kind> info
   <name>` dumps one entity's resolved DDL, and `sc ls` is a cross-kind overview (kinds + counts).
-  Noun-first `sc <kind> <verb>` (so `access` is no longer special — it just also carries
-  `rotate`/etc.), AUTO-GENERATED from the neutral kind registry so every driver gets them free. Source
+  BOTH grammars work: noun-first `sc <kind> ls`/`info` (so `access` is no longer special — it just
+  also carries `rotate`/etc.) AND verb-first `sc ls <kind>` / `sc info <kind> <name>` (an unknown kind
+  gives a teaching error). AUTO-GENERATED from the neutral kind registry so every driver gets them
+  free. Source
   is what you DECLARED by default (the authored `define*` — always available even pre-`gen`, never
   stale, fully offline); `--snapshot` reads the metaDir baseline, `--live` introspects the DB (matching
   `diff --live`). Drift stays diff/check's lane. Table-scoped kinds address dotted (`sc index info

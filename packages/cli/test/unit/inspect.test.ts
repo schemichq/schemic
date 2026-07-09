@@ -2,8 +2,16 @@
 // --snapshot/--live mutually exclusive), table-scoped addressing (parent hook, owner fallback), and
 // per-kind address listing.
 import { describe, expect, test } from "bun:test";
-import type { KindEngine, PortableObject } from "@schemic/core";
-import { addressesOfKind, addressOf, pickSource } from "../../src/cli/inspect";
+import type { KindEngine, KindRegistry, PortableObject } from "@schemic/core";
+import {
+  addressesOfKind,
+  addressOf,
+  pickSource,
+  requireKind,
+} from "../../src/cli/inspect";
+
+const fakeRegistry = (names: string[]) =>
+  ({ names: () => names }) as unknown as KindRegistry;
 
 // biome-ignore lint/suspicious/noExplicitAny: the registry erases each engine's A/P at this seam.
 type FakeEngine = KindEngine<any, any>;
@@ -80,6 +88,20 @@ describe("addressOf", () => {
         obj("index", "email", { table: "clusterTbl", parent: "addrTbl" }),
       ),
     ).toBe("addrTbl.email");
+  });
+});
+
+describe("requireKind (verb-first `sc ls <kind>` / `sc info <kind>`)", () => {
+  const engines = new Map([["table", fakeEngine()]]);
+  test("returns the engine for a known kind", () => {
+    expect(
+      requireKind(fakeRegistry(["table"]), engines, "table"),
+    ).toBeDefined();
+  });
+  test("teaching error listing valid kinds for an unknown kind", () => {
+    expect(() =>
+      requireKind(fakeRegistry(["table", "index"]), engines, "bogus"),
+    ).toThrow(/unknown kind "bogus".*table, index/);
   });
 });
 

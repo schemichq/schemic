@@ -2,9 +2,9 @@
 // for EVERY kind in the neutral kind registry (so every driver gets them for free; no per-driver
 // wiring). A read command shows what you DECLARED by default; drift stays diff/check's lane.
 //
-// Grammar is noun-first `sc <kind> <verb>` (matching the driver-command grammar), so `access` stops
-// being special — it's just the kind that also carries rotate/push/etc. on top of the universal
-// ls/info. `sc ls` (no kind) is the ONE deliberate top-level verb: a cross-kind overview.
+// BOTH grammars work: noun-first `sc <kind> ls`/`info` (matching the driver-command grammar, so
+// `access` stops being special — it also carries rotate/push/etc.) AND verb-first `sc ls <kind>` /
+// `sc info <kind> <name>`. `sc ls` with no kind is the cross-kind overview.
 //
 // Source (boolean flags, mutually exclusive): DEFAULT the DECLARED schema (the authored `define*` — the
 // diff's "desired" side; always available even pre-`gen`, never stale, fully offline); `--snapshot` the
@@ -47,6 +47,20 @@ type AnyEngine = KindEngine<any, any>;
 /** kind -> engine, built once from the neutral registry (the public `entries()` enumeration). */
 function engineMap(registry: KindRegistry): Map<string, AnyEngine> {
   return new Map(registry.entries());
+}
+
+/** The engine for `kind` (verb-first `sc ls <kind>` / `sc info <kind>`), or a teaching error. */
+export function requireKind(
+  registry: KindRegistry,
+  engines: Map<string, AnyEngine>,
+  kind: string,
+): AnyEngine {
+  const engine = engines.get(kind);
+  if (!engine)
+    throw new Error(
+      `unknown kind "${kind}" — expected one of: ${registry.names().join(", ")}`,
+    );
+  return engine;
 }
 
 /**
@@ -253,17 +267,52 @@ export function registerInspectVerbs(
     );
   }
 
+  // Verb-first forms, alongside the noun-first `sc <kind> ls`/`info`: `sc ls [kind]` (a cross-kind
+  // overview when omitted, else that kind's entities) and `sc info <kind> <name>`. Same actions, so both
+  // grammars behave identically; an unknown kind gets a teaching error.
   srcOpts(
     program
-      .command("ls")
-      .summary("overview: every kind and its entity count")
+      .command("ls [kind]")
+      .summary("overview of all kinds, or list one kind's entities")
       .description(
-        "Cross-kind overview (kinds + counts) of the declared schema. Drill in with `sc <kind> ls`; inspect one with `sc <kind> info <name>`. `--snapshot`/`--live` switch the source.",
+        "With no KIND: a cross-kind overview (kinds + counts). With a KIND: that kind's entities — the verb-first form of `sc <kind> ls`. `--snapshot`/`--live` switch the source (default: declared).",
       ),
-  ).action((opts: Opts) =>
+  ).action((kind: string | undefined, opts: Opts) =>
     runAction(async () => {
       const config = await resolveOne(resolveOpts());
-      await overview(registry, driver, config, pickSource(opts), !!opts.json);
+      if (kind)
+        await lsKind(
+          kind,
+          requireKind(registry, engines, kind),
+          registry,
+          driver,
+          config,
+          pickSource(opts),
+          !!opts.json,
+        );
+      else
+        await overview(registry, driver, config, pickSource(opts), !!opts.json);
+    }),
+  );
+
+  srcOpts(
+    program
+      .command("info <kind> <name>")
+      .summary(
+        "show one entity's resolved definition (verb-first form of `sc <kind> info`)",
+      ),
+  ).action((kind: string, name: string, opts: Opts) =>
+    runAction(async () => {
+      const config = await resolveOne(resolveOpts());
+      await infoKind(
+        kind,
+        name,
+        requireKind(registry, engines, kind),
+        driver,
+        config,
+        pickSource(opts),
+        !!opts.json,
+      );
     }),
   );
 }
