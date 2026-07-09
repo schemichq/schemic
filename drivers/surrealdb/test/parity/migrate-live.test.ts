@@ -7,12 +7,18 @@
  * Auto-skips when no DB is reachable. Imports `defineTable`/`s` by PACKAGE name so the table
  * types line up with the `@schemic/core`-typed diff-engine signatures.
  */
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { defineTable, s } from "@schemic/surrealdb";
 import { emitTable } from "@schemic/surrealdb/driver";
 import { Surreal } from "surrealdb";
 import { z } from "zod";
 import { buildSnapshot, diffSnapshots } from "../../src/cli/surreal-diff";
+
+// The workspace gate runs every package's suite IN PARALLEL — PGlite's CPU burst can slow a live
+// connect/DDL past bun's 5s DEFAULT hook timeout, failing the `beforeEach`/`afterAll` below as an
+// "(unnamed)" test. `beforeAll`s that say `120_000` explicitly are already covered; the default
+// applies to every hook that doesn't. Isolated runs are unaffected.
+setDefaultTimeout(120_000);
 
 const NS = "__sz_migrate";
 const DB = "ml";

@@ -15,7 +15,7 @@
  * the function-body case is irreducible without a SurrealQL parser (SurrealDB reformats the verbatim
  * expression's quotes) and is the designed-residual that shadow-verify, not the offline path, owns.
  */
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { Surreal, surql } from "surrealdb";
 import { z } from "zod";
 import { introspect } from "../../src/cli/introspect";
@@ -28,6 +28,12 @@ import {
   defineTable,
   s,
 } from "../../src/pure";
+
+// The workspace gate runs every package's suite IN PARALLEL — PGlite's CPU burst can slow a live
+// connect/DDL past bun's 5s DEFAULT hook timeout, failing the `beforeEach`/`afterAll` below as an
+// "(unnamed)" test. `beforeAll`s that say `120_000` explicitly are already covered; the default
+// applies to every hook that doesn't. Isolated runs are unaffected.
+setDefaultTimeout(120_000);
 
 const NS = "__sz_canon";
 const DB = "canon";

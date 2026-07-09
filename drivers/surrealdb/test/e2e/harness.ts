@@ -7,8 +7,15 @@
 import { setDefaultTimeout } from "bun:test";
 
 // The workspace gate runs every package's suite IN PARALLEL — PGlite's CPU burst can slow live
-// connects/DDL far past bun's 30s default, timing out beforeAll/afterAll hooks (reported as
-// "(unnamed)" tests). Live work gets a generous ceiling; isolated runs are unaffected.
+// connects/DDL far past bun's default, timing out hooks (reported as "(unnamed)" tests). Live work
+// gets a generous ceiling; isolated runs are unaffected.
+//
+// CAVEAT — this call only reaches the FIRST test file that imports this module. bun resets the
+// default timeout per test FILE, but the module is evaluated ONCE (import cache), so every later
+// e2e file silently falls back to bun's 5s hook default. That is what made `three-state`'s
+// `afterAll` fail as "(unnamed) [5000.01ms] a beforeEach/afterEach hook timed out" in full-suite
+// runs while passing when run alone. Hooks therefore pass their timeout EXPLICITLY; keep it that
+// way, and don't trust this line to cover a hook you add.
 setDefaultTimeout(120_000);
 
 import {
@@ -49,6 +56,27 @@ export interface CliResult {
   stderr: string;
   /** stdout + stderr, ANSI-stripped — what the user effectively sees. */
   out: string;
+  /** The argv this result came from — named in {@link ok}'s failure message. */
+  argv: readonly string[];
+}
+
+/**
+ * Assert the CLI call SUCCEEDED, and on failure report what it actually said.
+ *
+ * `expect(r.code).toBe(0)` prints only "Expected: 0 / Received: 1" and throws the subprocess's
+ * output away — which is precisely the information needed when a run fails on CI and not locally.
+ * Every e2e assertion of success goes through here so an intermittent failure is self-diagnosing
+ * from the log alone.
+ */
+export function ok(r: CliResult): CliResult {
+  if (r.code !== 0) {
+    const say = (label: string, text: string) =>
+      text.trim() ? `\n--- ${label} ---\n${text.trim()}` : "";
+    throw new Error(
+      `sc ${r.argv.join(" ")} exited ${r.code} (expected 0)${say("stdout", r.stdout)}${say("stderr", r.stderr)}`,
+    );
+  }
+  return r;
 }
 
 /**
@@ -125,6 +153,7 @@ export async function startHarness(): Promise<Harness> {
       stdout: strip(stdout),
       stderr: strip(stderr),
       out: strip(`${stdout}${stderr}`),
+      argv: args,
     };
   };
 

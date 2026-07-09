@@ -4,7 +4,7 @@
  * INFO lowering converge on one normal form. Applies a broad corpus to a scratch SurrealDB and
  * compares the two per object. Skips when no DB is reachable.
  */
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { Surreal, surql } from "surrealdb";
 import { z } from "zod";
 import { fromStandalone, fromTableDef } from "../../src/cli/lower";
@@ -22,6 +22,12 @@ import {
 } from "../../src/cli/structure";
 import { emitDefStatement, emitStatements } from "../../src/ddl";
 import { defineFunction, defineRelation, defineTable, s } from "../../src/pure";
+
+// The workspace gate runs every package's suite IN PARALLEL — PGlite's CPU burst can slow a live
+// connect/DDL past bun's 5s DEFAULT hook timeout, failing the `beforeEach`/`afterAll` below as an
+// "(unnamed)" test. `beforeAll`s that say `120_000` explicitly are already covered; the default
+// applies to every hook that doesn't. Isolated runs are unaffected.
+setDefaultTimeout(120_000);
 
 const NS = "__sz_structparity";
 const DB = "sp";

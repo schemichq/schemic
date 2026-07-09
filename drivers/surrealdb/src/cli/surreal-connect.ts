@@ -8,7 +8,61 @@ import type { AuthLevel, SurrealParams } from "../config";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-const CONNECT_TIMEOUT_MS = 5_000;
+const envMs = (name: string, fallback: number): number => {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
+
+/**
+ * Ceiling on the SDK's websocket connect. Generous ON PURPOSE: a busy machine can take many
+ * seconds to complete the handshake against a perfectly healthy server, and a tight ceiling turns
+ * that into a spurious "is the server running?" — under a loaded parallel test gate `sc migrate`
+ * aborted at the old 5s while the server was up and answering.
+ *
+ * A DOWN server is not what this bounds; {@link assertReachable} catches that in ~a second. (The
+ * SDK does not reject promptly on a refused port even with `reconnect: false` — measured: a closed
+ * port burned the whole ceiling — so this alone cannot distinguish "down" from "slow".)
+ */
+const CONNECT_TIMEOUT_MS = envMs("SCHEMIC_CONNECT_TIMEOUT_MS", 30_000);
+
+/** How long the pre-flight TCP probe waits before declaring the host unreachable. */
+const PROBE_TIMEOUT_MS = envMs("SCHEMIC_PROBE_TIMEOUT_MS", 2_000);
+
+/**
+ * Pre-flight: can we even open a TCP socket to the endpoint? This is what makes a DOWN server fail
+ * fast (~instantly on a refused port) while leaving the slow-but-alive case a generous
+ * {@link CONNECT_TIMEOUT_MS} to finish its handshake. Non-TCP endpoints (`mem://`, `indxdb://`, a
+ * URL we can't parse) are not probed — they simply skip to the SDK connect.
+ */
+async function assertReachable(url: string): Promise<void> {
+  let host: string;
+  let port: number;
+  try {
+    const u = new URL(url);
+    if (!/^(wss?|https?):$/.test(u.protocol)) return; // not a TCP endpoint — nothing to probe
+    host = u.hostname;
+    port = Number(u.port) || (/^(wss|https):$/.test(u.protocol) ? 443 : 80);
+  } catch {
+    return; // unparseable — let the SDK produce the error
+  }
+  const { Socket } = await import("node:net");
+  await new Promise<void>((resolve, reject) => {
+    const sock = new Socket();
+    const done = (err?: Error) => {
+      sock.destroy();
+      err ? reject(err) : resolve();
+    };
+    sock.setTimeout(PROBE_TIMEOUT_MS, () =>
+      done(
+        new Error(
+          `no response from ${host}:${port} within ${PROBE_TIMEOUT_MS}ms`,
+        ),
+      ),
+    );
+    sock.once("error", (e) => done(e));
+    sock.connect(port, host, () => done());
+  });
+}
 
 /** Reject if `promise` doesn't settle within `ms` — guards against a hung connect. */
 function withTimeout<T>(
@@ -51,12 +105,16 @@ export async function connect(
   // keeps the event loop alive and the command hangs instead of exiting.
   try {
     try {
-      // `reconnect: false` so a dead server rejects immediately instead of entering a retry
-      // loop; `withTimeout` is a fallback for an unreachable host that never rejects.
+      // A DOWN host fails here, fast — the SDK's connect does NOT reject promptly on a refused
+      // port (even with `reconnect: false`), so without this probe "server is down" and "server is
+      // slow" are indistinguishable and both cost the full ceiling.
+      await assertReachable(url);
+      // `reconnect: false` so a failed connect doesn't enter a retry loop; `withTimeout` bounds a
+      // host that accepts the socket but never finishes the handshake.
       await withTimeout(
         db.connect(url, { reconnect: false }),
         CONNECT_TIMEOUT_MS,
-        "connection timed out",
+        `connection timed out after ${CONNECT_TIMEOUT_MS}ms`,
       );
     } catch (e) {
       throw new Error(

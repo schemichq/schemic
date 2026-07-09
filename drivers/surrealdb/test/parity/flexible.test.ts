@@ -10,7 +10,14 @@
  *
  * Skipped automatically when no SurrealDB is reachable (CI), isolated in a scratch namespace/db.
  */
-import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  beforeEach,
+  describe,
+  expect,
+  setDefaultTimeout,
+  test,
+} from "bun:test";
 import { planKinds } from "@schemic/core";
 import { Surreal } from "surrealdb";
 import { renderPerFile } from "../../src/cli/pull";
@@ -19,6 +26,12 @@ import { emitTable } from "../../src/ddl";
 import { introspectAll } from "../../src/kinds/explode";
 import { lowerAll, surrealKinds } from "../../src/kinds/registry";
 import { defineTable, s, type TableDef } from "../../src/pure";
+
+// The workspace gate runs every package's suite IN PARALLEL — PGlite's CPU burst can slow a live
+// connect/DDL past bun's 5s DEFAULT hook timeout, failing the `beforeEach`/`afterAll` below as an
+// "(unnamed)" test. `beforeAll`s that say `120_000` explicitly are already covered; the default
+// applies to every hook that doesn't. Isolated runs are unaffected.
+setDefaultTimeout(120_000);
 
 const NS = "__sz_flexible";
 const DB = "flexible";

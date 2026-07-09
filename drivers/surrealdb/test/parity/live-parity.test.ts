@@ -10,7 +10,7 @@
  * namespaces. We drive the SDK directly with explicit `.use({ namespace, database })`
  * rather than the shared `tryConnect` helper (whose default db must not be written to).
  */
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { planKinds } from "@schemic/core";
 import { Surreal, surql } from "surrealdb";
 import { z } from "zod";
@@ -24,6 +24,12 @@ import {
   defineTable,
   s,
 } from "../../src/pure";
+
+// The workspace gate runs every package's suite IN PARALLEL — PGlite's CPU burst can slow a live
+// connect/DDL past bun's 5s DEFAULT hook timeout, failing the `beforeEach`/`afterAll` below as an
+// "(unnamed)" test. `beforeAll`s that say `120_000` explicitly are already covered; the default
+// applies to every hook that doesn't. Isolated runs are unaffected.
+setDefaultTimeout(120_000);
 
 const NS = "__sz_parity";
 const DB = "parity_live";

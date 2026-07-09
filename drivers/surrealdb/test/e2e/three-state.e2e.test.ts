@@ -3,7 +3,13 @@
 // the real CLI, and asserts on what a user would see.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { E2E_ENABLED, type Harness, startHarness, userSchema } from "./harness";
+import {
+  E2E_ENABLED,
+  type Harness,
+  ok,
+  startHarness,
+  userSchema,
+} from "./harness";
 
 const e2e = describe.skipIf(!E2E_ENABLED);
 if (!E2E_ENABLED)
@@ -15,7 +21,7 @@ beforeAll(async () => {
 }, 120_000); // gate parallelism: PGlite CPU contention slows the ephemeral server boot
 afterAll(async () => {
   await H?.cleanup();
-});
+}, 120_000); // EXPLICIT: the harness's setDefaultTimeout only reaches the FIRST file (see harness.ts)
 
 const T = 180_000; // headroom for gate parallelism (PGlite CPU contention)
 const POST = `import { s, defineTable } from "@schemic/surrealdb";
@@ -41,7 +47,7 @@ e2e("3-state divergence matrix", () => {
     async () => {
       const { run } = await setup();
       const diff = await run(["diff", "--live"]);
-      expect(diff.code).toBe(0);
+      ok(diff);
       expect(diff.out).toContain("DEFINE TABLE user");
       expect(diff.out).toContain("vs the live database");
     },
@@ -226,7 +232,7 @@ e2e("3-state divergence matrix", () => {
       await run(["push"]); // DB populated directly; nothing recorded as applied
 
       const migrate = await run(["migrate"]);
-      expect(migrate.code).toBe(0);
+      ok(migrate);
       expect(migrate.out).not.toContain("already exists");
       expect(migrate.out).toContain("Applied 1 migration");
 
@@ -257,7 +263,7 @@ export const Doc = defineTable("doc", {
 `,
       );
       const push = await run(["push"]);
-      expect(push.code).toBe(0);
+      ok(push);
       expect(push.out).toMatch(/synced/);
       expect(push.out).not.toContain("failed transaction");
 

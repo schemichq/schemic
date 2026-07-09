@@ -4,7 +4,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { E2E_ENABLED, type Harness, startHarness } from "./harness";
+import { E2E_ENABLED, type Harness, ok, startHarness } from "./harness";
 
 const e2e = describe.skipIf(!E2E_ENABLED);
 if (!E2E_ENABLED)
@@ -16,7 +16,7 @@ beforeAll(async () => {
 }, 120_000); // gate parallelism: PGlite CPU contention slows the ephemeral server boot
 afterAll(async () => {
   await H?.cleanup();
-});
+}, 120_000); // EXPLICIT: the harness's setDefaultTimeout only reaches the FIRST file (see harness.ts)
 
 const T = 180_000; // headroom for gate parallelism (PGlite CPU contention)
 
@@ -52,7 +52,7 @@ export const Flag = defineTable("flag", {
       await run(["push"]); // db now has `flag`
 
       const written = await run(["pull", "--write"]);
-      expect(written.code).toBe(0);
+      ok(written);
 
       const flag = H.read(root, "database/schema/tables/flag.ts");
       // Literal defaults render bare (not wrapped in surql).
@@ -121,7 +121,7 @@ export const Flag = defineTable("flag", {
 
       // --discard mirrors the db exactly, dropping the local-only field.
       const discard = await run(["pull", "--write", "--discard"]);
-      expect(discard.code).toBe(0);
+      ok(discard);
       expect(discard.out).toMatch(/Pulled/);
       expect(H.read(root, "database/schema/tables/flag.ts")).not.toContain(
         "note",
@@ -160,7 +160,7 @@ export const Flag = defineTable("flag", {
       );
 
       const merge = await run(["pull", "--write", "--merge"]);
-      expect(merge.code).toBe(0);
+      ok(merge);
       // The local-only field survives (no change to mirror → already in sync).
       expect(H.read(root, "database/schema/tables/flag.ts")).toContain("note");
     },
@@ -233,12 +233,12 @@ export const Draft = defineTable("draft", {
 
       // --merge keeps the file.
       const merged = await run(["pull", "--write", "--merge"]);
-      expect(merged.code).toBe(0);
+      ok(merged);
       expect(existsSync(draftPath)).toBe(true);
 
       // --discard deletes the whole file (it was purely the local-only entity).
       const discard = await run(["pull", "--write", "--discard"]);
-      expect(discard.code).toBe(0);
+      ok(discard);
       expect(discard.out).toMatch(/removed/);
       expect(existsSync(draftPath)).toBe(false);
     },
@@ -272,7 +272,7 @@ export const Mix = defineTable("mix", {
 
       // --discard surfaces it but leaves the file (helper would be lost) with a note.
       const discard = await run(["pull", "--write", "--discard"]);
-      expect(discard.code).toBe(0);
+      ok(discard);
       expect(existsSync(mixPath)).toBe(true);
       expect(discard.out).toMatch(/left in place|by hand/);
     },
@@ -324,7 +324,7 @@ export const Post = defineTable("post", {
       await run(["migrate"]);
 
       const squash = await run(["gen", "--baseline", "--force"]);
-      expect(squash.code).toBe(0);
+      ok(squash);
       expect(squash.out).toContain("replaced 2 migrations");
       // DB already matched → baseline recorded applied (DDL not re-run).
       expect(squash.out).toContain("recorded as applied");
@@ -357,7 +357,7 @@ export const Post = defineTable("post", {
       await run(["migrate"]);
 
       const back = await run(["rollback"]);
-      expect(back.code).toBe(0);
+      ok(back);
       expect(back.out).toMatch(/Rolled back 1 migration/);
 
       // The migration is pending again.

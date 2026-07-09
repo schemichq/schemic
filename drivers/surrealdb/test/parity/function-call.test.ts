@@ -6,10 +6,16 @@
  * `.returns(s.datetime())` yields a real `Date`. Type-level assertions pin that args + result are typed
  * from the schema. Skipped when no SurrealDB is reachable.
  */
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { Surreal } from "surrealdb";
 import { emitDefStatement } from "../../src/driver";
 import { defineFunction, s, surql } from "../../src/index";
+
+// The workspace gate runs every package's suite IN PARALLEL — PGlite's CPU burst can slow a live
+// connect/DDL past bun's 5s DEFAULT hook timeout, failing the `beforeEach`/`afterAll` below as an
+// "(unnamed)" test. `beforeAll`s that say `120_000` explicitly are already covered; the default
+// applies to every hook that doesn't. Isolated runs are unaffected.
+setDefaultTimeout(120_000);
 
 const Add = defineFunction("t_add", { a: s.int(), b: s.int() })
   .returns(s.int())

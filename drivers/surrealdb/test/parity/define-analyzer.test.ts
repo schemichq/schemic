@@ -6,7 +6,14 @@
  * asserts each PUSHes with an EMPTY plan (author == DB) and PULLs back to faithful authoring. Skipped
  * when no SurrealDB is reachable (CI).
  */
-import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  beforeEach,
+  describe,
+  expect,
+  setDefaultTimeout,
+  test,
+} from "bun:test";
 import { planKinds } from "@schemic/core";
 import { Surreal, surql } from "surrealdb";
 import { renderPerFile } from "../../src/cli/pull";
@@ -20,6 +27,12 @@ import {
   defineFunction,
   s,
 } from "../../src/pure";
+
+// The workspace gate runs every package's suite IN PARALLEL — PGlite's CPU burst can slow a live
+// connect/DDL past bun's 5s DEFAULT hook timeout, failing the `beforeEach`/`afterAll` below as an
+// "(unnamed)" test. `beforeAll`s that say `120_000` explicitly are already covered; the default
+// applies to every hook that doesn't. Isolated runs are unaffected.
+setDefaultTimeout(120_000);
 
 const NS = "__sz_defanalyzer";
 const DB = "defanalyzer";

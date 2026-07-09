@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Glob } from "bun";
-import { E2E_ENABLED, type Harness, startHarness } from "./harness";
+import { E2E_ENABLED, type Harness, ok, startHarness } from "./harness";
 
 const e2e = describe.skipIf(!E2E_ENABLED);
 if (!E2E_ENABLED)
@@ -17,7 +17,7 @@ beforeAll(async () => {
 }, 120_000); // gate parallelism: PGlite CPU contention slows the ephemeral server boot
 afterAll(async () => {
   await H?.cleanup();
-});
+}, 120_000); // EXPLICIT: the harness's setDefaultTimeout only reaches the FIRST file (see harness.ts)
 
 const T = 180_000; // headroom for gate parallelism (PGlite CPU contention) // subprocess + jiti + (for check) a nested ephemeral server
 
@@ -31,7 +31,7 @@ e2e("lifecycle: init -> gen -> migrate -> status -> diff -> check", () => {
 
       // init scaffolds the project.
       const init = await run(["init"]);
-      expect(init.code).toBe(0);
+      ok(init);
       expect(init.out).toContain("schemic.config.ts");
       expect(init.out).toContain("database/schema/tables/user.ts");
       expect(init.out).toContain("Initialized");
@@ -43,7 +43,7 @@ e2e("lifecycle: init -> gen -> migrate -> status -> diff -> check", () => {
 
       // gen writes the baseline migration from the empty snapshot.
       const gen = await run(["gen", "init_schema", "-y"]);
-      expect(gen.code).toBe(0);
+      ok(gen);
       expect(gen.out).toContain("change");
       // gen prints the rendered migration it wrote — idempotent DEFINE … OVERWRITE, not a diff.
       expect(gen.out).toContain("DEFINE TABLE OVERWRITE user");
@@ -62,7 +62,7 @@ e2e("lifecycle: init -> gen -> migrate -> status -> diff -> check", () => {
 
       // migrate applies it.
       const migrate = await run(["migrate"]);
-      expect(migrate.code).toBe(0);
+      ok(migrate);
       expect(migrate.out).toContain("init_schema");
       expect(migrate.out).toContain("Applied 1 migration");
 
@@ -73,7 +73,7 @@ e2e("lifecycle: init -> gen -> migrate -> status -> diff -> check", () => {
 
       // diff --live: schema now matches the database.
       const diffLive = await run(["diff", "--live"]);
-      expect(diffLive.code).toBe(0);
+      ok(diffLive);
       expect(diffLive.out).toContain("No changes.");
 
       // gen again: nothing to generate (snapshot caught up).
@@ -86,7 +86,7 @@ e2e("lifecycle: init -> gen -> migrate -> status -> diff -> check", () => {
 
       // check: replay the migrations on a throwaway engine and confirm they reproduce the schema.
       const check = await run(["check"]);
-      expect(check.code).toBe(0);
+      ok(check);
       expect(check.out).toContain("Migrations reproduce the schema.");
     },
     T,
@@ -101,15 +101,15 @@ e2e("seed: the scaffolded default seed runs against the migrated DB", () => {
       const db = H.freshDb();
       const run = (args: string[]) => H.run(args, { cwd: root, db });
 
-      expect((await run(["init"])).code).toBe(0);
-      expect((await run(["gen", "init_schema", "-y"])).code).toBe(0);
-      expect((await run(["migrate"])).code).toBe(0);
+      ok(await run(["init"]));
+      ok(await run(["gen", "init_schema", "-y"]));
+      ok(await run(["migrate"]));
 
       // The scaffolded seed imports `../schema/tables/user` and runs
       // `db.create(User.record().for("ada")).content({ … })`. A broken import or a write that the
       // 2.x SDK / 3.x server combo rejects would exit non-zero — so a clean exit proves the row landed.
       const seed = await run(["seed"]);
-      expect(seed.code).toBe(0);
+      ok(seed);
       expect(seed.out.toLowerCase()).not.toContain("error");
     },
     T,
