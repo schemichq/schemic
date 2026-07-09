@@ -28,6 +28,27 @@ const projQ = select(Post).return((p) => ({ t: p.title, when: p.createdAt }));
 type ProjRes = Awaited<ReturnType<(typeof projQ)["run"]>>;
 type _proj = Expect<Equal<ProjRes[number], { t: string; when: Date }>>; // projection -> decoded shape
 
+// `.value()` FLATTENS: the result is the bare value, not a `{ alias: value }` record.
+const valueQ = select(Post).value((p) => p.title);
+type ValueRes = Awaited<ReturnType<(typeof valueQ)["run"]>>;
+type _value = Expect<Equal<ValueRes, string[]>>; // SELECT VALUE -> flat array of the value
+
+const valueOneQ = select(Post)
+  .value((p) => p.title)
+  .one();
+type ValueOneRes = Awaited<ReturnType<(typeof valueOneQ)["run"]>>;
+type _valueOne = Expect<Equal<ValueOneRes, string | undefined>>; // .one() -> the bare value
+
+const valueDateQ = select(Post).value((p) => p.createdAt);
+type ValueDateRes = Awaited<ReturnType<(typeof valueDateQ)["run"]>>;
+type _valueDate = Expect<Equal<ValueDateRes, Date[]>>; // decoded through the field codec
+
+const valueNestedQ = select(Post).return(() => ({
+  titles: select(Post).value((p) => p.title),
+}));
+type ValueNestedRes = Awaited<ReturnType<(typeof valueNestedQ)["run"]>>;
+type _valueNested = Expect<Equal<ValueNestedRes[number], { titles: string[] }>>;
+
 // --- SurrealQL lowering --------------------------------------------------------------------------
 describe("@schemic/surrealdb/query — lowering", () => {
   test("where + orderBy + limit -> SurrealQL + named binds", () => {
@@ -67,6 +88,73 @@ describe("@schemic/surrealdb/query — lowering", () => {
     expect(sql).toBe(
       `SELECT ${escapeIdent("title")} AS ${escapeIdent("t")}, ${escapeIdent("createdAt")} AS ${escapeIdent("when")} FROM ${escapeIdent("post")}`,
     );
+  });
+
+  // `SELECT VALUE <expr>` takes ONE unnamed expression and no `AS` (verified on 3.1.4).
+  describe("value() -> SELECT VALUE", () => {
+    test("a column ref lowers to SELECT VALUE <col> (no alias)", () => {
+      expect(
+        select(Post)
+          .value((p) => p.title)
+          .toSQL().sql,
+      ).toBe(`SELECT VALUE ${escapeIdent("title")} FROM ${escapeIdent("post")}`);
+    });
+
+    test("a derived expression lowers as the rendered expression", () => {
+      expect(
+        select(Post)
+          .value((p) => p.title.length())
+          .toSQL().sql,
+      ).toBe(`SELECT VALUE string::len(title) FROM ${escapeIdent("post")}`);
+    });
+
+    test("composes with where / orderBy / one()", () => {
+      const { sql, vars } = select(Post)
+        .where((p) => p.title.eq("hi"))
+        .value((p) => p.title)
+        .orderBy((p) => p.title)
+        .toSQL();
+      expect(sql).toBe(
+        `SELECT VALUE ${escapeIdent("title")} FROM ${escapeIdent("post")} WHERE ${escapeIdent("title")} = $b0 ORDER BY ${escapeIdent("title")} ASC`,
+      );
+      expect(vars).toEqual({ b0: "hi" });
+      // `.one()` -> FROM ONLY … LIMIT 1, which the DB answers with the bare value.
+      expect(
+        select(Post)
+          .value((p) => p.title)
+          .one()
+          .toSQL().sql,
+      ).toBe(
+        `SELECT VALUE ${escapeIdent("title")} FROM ONLY ${escapeIdent("post")} LIMIT 1`,
+      );
+    });
+
+    test("each row IS the value — decoded through the field codec, not read out of a record", () => {
+      const rows = select(Post)
+        .value((p) => p.createdAt)
+        .decodeRows([new DateTime("2020-01-01T00:00:00Z")]);
+      expect(rows[0]).toBeInstanceOf(Date);
+      expect((rows[0] as Date).toISOString()).toBe("2020-01-01T00:00:00.000Z");
+    });
+
+    test("value() and return() are mutually exclusive (SELECT VALUE takes no column list)", () => {
+      expect(() =>
+        select(Post)
+          .value((p) => p.title)
+          .return((p) => ({ t: p.title })),
+      ).toThrow(/already projects a single VALUE/);
+      expect(() =>
+        select(Post)
+          .return((p) => ({ t: p.title }))
+          .value((p) => p.title),
+      ).toThrow(/already projects a column list/);
+    });
+
+    test("a non-projectable value names .value() in the error", () => {
+      expect(() =>
+        select(Post).value(() => 42 as unknown as ReturnType<() => never>),
+      ).toThrow(/^\.value\(\) is not a projectable value/);
+    });
   });
 });
 

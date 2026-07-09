@@ -139,7 +139,8 @@ export type ProjectionValue =
  *  `select` to its rows, `.one()` to row-or-undefined, `.count()` to a number, a typed fragment
  *  to its `[T]`. */
 export type Projected<P> = { [K in keyof P]: ProjectedValue<P[K]> };
-type ProjectedValue<E> = E extends CountQuery
+/** The decoded result of ONE projected value — the element type `.value()` resolves to. */
+export type ProjectedValue<E> = E extends CountQuery
   ? number
   : // biome-ignore lint/suspicious/noExplicitAny: matching any table's builder + its output mode.
     E extends Select<any, infer R, infer S extends boolean>
@@ -170,7 +171,9 @@ type ProjEntry =
       readonly decode?: (v: unknown) => unknown;
     };
 
-function projEntry(as: string, v: unknown): ProjEntry {
+/** Lower one projected value. `label` names the failing slot for the error — `.return()` keys its
+ *  entries by name, `.value()` has exactly one unnamed value. */
+function projEntry(as: string, v: unknown, label = `.return(): "${as}"`): ProjEntry {
   const rs = refState(v);
   if (rs) {
     if (!rs.wrap && "col" in rs.root)
@@ -202,7 +205,7 @@ function projEntry(as: string, v: unknown): ProjEntry {
           : mergeRaw(frag, ctx.vars),
     };
   throw new Error(
-    `.return(): "${as}" is not a projectable value — pass a column ref, a derived expression, a nested builder, or a surql fragment.`,
+    `${label} is not a projectable value — pass a column ref, a derived expression, a nested builder, or a surql fragment.`,
   );
 }
 
@@ -225,6 +228,9 @@ interface State {
   limit?: number;
   start?: number;
   proj?: ProjEntry[]; // projection (undefined => SELECT *)
+  /** `SELECT VALUE <expr>` — ONE unnamed value per row, flattening the result to plain scalars.
+   *  Mutually exclusive with `proj` (SurrealQL takes a single VALUE, never a column list). */
+  value?: ProjEntry;
   decode: boolean;
   /** The `ONLY` output mode: `"one"` = `FROM ONLY … LIMIT 1` (lenient, first-or-NONE); `"only"` =
    *  `FROM ONLY …` (strict — the DB errors unless exactly one). Absent => array (the faithful default). */
@@ -324,9 +330,32 @@ class Select<TD extends AnyTableDef, Res, Single extends boolean = false> {
   return<P extends Record<string, ProjectionValue>>(
     fn: (row: RowFor<TD>) => P,
   ): Select<TD, Projected<P>, Single> {
+    if (this.state.value)
+      throw new Error(
+        "select().value() already projects a single VALUE — `.return(shape)` would add a column list, which SurrealQL's `SELECT VALUE` doesn't take. Use one or the other.",
+      );
     const shape = fn(this.row as RowFor<TD>);
     const proj = Object.entries(shape).map(([as, v]) => projEntry(as, v));
     return this.next<Projected<P>>({ proj });
+  }
+
+  /** Project to ONE unnamed value per row (`SELECT VALUE <expr>`), flattening the result to a plain
+   *  array of that value instead of `{ col: value }` objects — `select(User).value((u) => u.name)`
+   *  resolves to `string[]`. Takes anything `.return()` takes (a column ref, a derived expression, a
+   *  nested builder, a fragment), but exactly one of them: SurrealQL's `SELECT VALUE` admits a single
+   *  expression and no `AS`. Composes with `.where`/`.orderBy`/`.limit` and with `.one()`/`.only()`
+   *  (which then resolve to the bare value, not a one-element array). */
+  value<V extends ProjectionValue>(
+    fn: (row: RowFor<TD>) => V,
+  ): Select<TD, ProjectedValue<V>, Single> {
+    if (this.state.proj)
+      throw new Error(
+        "select().return(shape) already projects a column list — `.value(expr)` selects a single unnamed value instead. Use one or the other.",
+      );
+    const v = fn(this.row as RowFor<TD>);
+    return this.next<ProjectedValue<V>>({
+      value: projEntry("value", v, ".value()"),
+    });
   }
 
   /** Output mode — skip decode, return raw wire rows. Composes with `.one()`/`.only()`. */
@@ -371,17 +400,21 @@ class Select<TD extends AnyTableDef, Res, Single extends boolean = false> {
     const vars: Record<string, unknown> = {};
     const ctx: Ctx = { vars, row: this.token };
     const s = this.state;
-    const cols = s.proj
-      ? s.proj
-          .map((e) =>
-            e.kind === "col"
-              ? e.as === e.col
-                ? escapeIdent(e.col)
-                : `${escapeIdent(e.col)} AS ${escapeIdent(e.as)}`
-              : `${e.render(ctx)} AS ${escapeIdent(e.as)}`,
-          )
-          .join(", ")
-      : "*";
+    // `SELECT VALUE <expr>` takes ONE unnamed expression (no `AS`); otherwise a column list, or `*`.
+    const v = s.value;
+    const cols = v
+      ? `VALUE ${v.kind === "col" ? escapeIdent(v.col) : v.render(ctx)}`
+      : s.proj
+        ? s.proj
+            .map((e) =>
+              e.kind === "col"
+                ? e.as === e.col
+                  ? escapeIdent(e.col)
+                  : `${escapeIdent(e.col)} AS ${escapeIdent(e.as)}`
+                : `${e.render(ctx)} AS ${escapeIdent(e.as)}`,
+            )
+            .join(", ")
+        : "*";
     const only = s.only ? "ONLY " : "";
     let from: string;
     if (s.target) {
@@ -407,6 +440,18 @@ class Select<TD extends AnyTableDef, Res, Single extends boolean = false> {
    *  live server. */
   decodeRows(rows: readonly unknown[]): Res[] {
     if (!this.state.decode) return rows as Res[];
+    // `SELECT VALUE` yields the bare values — each ROW *is* the projected value, so decode it
+    // directly rather than reading it out of a `{ as: value }` record.
+    const val = this.state.value;
+    if (val) {
+      if (val.kind === "col") {
+        const schema = this.colSchema(val.col);
+        return rows.map((r) =>
+          schema ? z.decode(schema, r as never) : r,
+        ) as Res[];
+      }
+      return rows.map((r) => (val.decode ? val.decode(r) : r)) as Res[];
+    }
     const proj = this.state.proj;
     if (proj) {
       return rows.map((r) => {
