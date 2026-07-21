@@ -874,9 +874,11 @@ function emit(
 ): void {
   validateField(path, info, surreal, schemafull);
   let type = info.type;
-  // A DB-side DEFAULT/VALUE/COMPUTED means the column is always populated -> drop a leading option<>.
+  // A DB-side DEFAULT/COMPUTED means the column is always populated -> drop a leading option<>.
+  // $value is excluded because VALUE expressions can legitimately return NONE
+  // (e.g. `IF cond THEN NONE ELSE $value END`).
   if (
-    (surreal?.default || surreal?.value || surreal?.computed) &&
+    (surreal?.default || surreal?.computed) &&
     type.startsWith("option<")
   ) {
     type = type.slice("option<".length, -1);

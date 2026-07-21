@@ -170,10 +170,31 @@ describe("DB-side metadata clauses", () => {
     );
   });
 
-  test("$value -> VALUE and strips option<>", () => {
+  test("$value -> VALUE keeps option<> when field is optional", () => {
     expect(
       ddl(s.string().optional().$value(surql`string::lowercase($value)`)),
     ).toBe(
+      "DEFINE FIELD x ON TABLE t TYPE option<string> VALUE string::lowercase($value);",
+    );
+  });
+
+  test("$value with conditional NONE keeps option<>", () => {
+    expect(
+      ddl(
+        s
+          .number()
+          .optional()
+          .$value(
+            surql`IF $before.manageStock = false THEN NONE ELSE $value END`,
+          ),
+      ),
+    ).toBe(
+      "DEFINE FIELD x ON TABLE t TYPE option<number> VALUE IF $before.manageStock = false THEN NONE ELSE $value END;",
+    );
+  });
+
+  test("$value without optional() keeps bare type", () => {
+    expect(ddl(s.string().$value(surql`string::lowercase($value)`))).toBe(
       "DEFINE FIELD x ON TABLE t TYPE string VALUE string::lowercase($value);",
     );
   });
